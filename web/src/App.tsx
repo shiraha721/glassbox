@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowRight,
   Check,
-  ChevronRight,
   Code2,
   Eye,
-  FileText,
   LockKeyhole,
   MessageSquare,
+  PanelLeft,
   Play,
   Plus,
   ShieldCheck,
@@ -77,99 +75,43 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
   const [busy, setBusy] = useState(false);
   return (
     <main className="unlock-page">
-      <div className="unlock-brand">
-        <span className="brand-icon">
-          <Code2 size={22} />
-        </span>
-        SECURITY AGENT STUDIO<span className="badge">LOCAL</span>
-      </div>
-      <div className="unlock-layout">
-        <section className="unlock-story">
-          <div className="eyebrow">THE WORKSPACE FOR INSPECTABLE AGENTS</div>
-          <h1>
-            Compose with intent.
-            <br />
-            <span>Inspect every step.</span>
-          </h1>
-          <p>
-            Build the prompt. Set the boundaries. Follow the evidence from the first instruction to
-            the final tool result.
+      <form
+        className="unlock-card"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setBusy(true);
+          setError('');
+          void authenticate(token)
+            .then(onUnlock)
+            .catch((caught: unknown) => setError(errorMessage(caught)))
+            .finally(() => setBusy(false));
+        }}
+      >
+        <h1>Security Agent Studio</h1>
+        <label htmlFor="access-token">Local access token</label>
+        <input
+          id="access-token"
+          type="password"
+          autoComplete="off"
+          required
+          autoFocus
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+          placeholder="Paste your token"
+        />
+        <div className="token-help">
+          <code>Get-Content var/access-token</code>
+          <small>Or use STUDIO_ACCESS_TOKEN if configured.</small>
+        </div>
+        {error && (
+          <p role="alert" className="error-text">
+            {error}
           </p>
-          <div className="unlock-features">
-            <span>
-              <Check size={15} />
-              Composable messages
-            </span>
-            <span>
-              <Check size={15} />
-              Explicit tool approval
-            </span>
-            <span>
-              <Check size={15} />
-              Local execution records
-            </span>
-          </div>
-          <div className="schematic">
-            <span>prompt</span>
-            <ChevronRight size={16} />
-            <span>model</span>
-            <ChevronRight size={16} />
-            <span>tool</span>
-            <ChevronRight size={16} />
-            <span className="active">evidence</span>
-          </div>
-        </section>
-        <form
-          className="unlock-card"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setBusy(true);
-            setError('');
-            void authenticate(token)
-              .then(onUnlock)
-              .catch((caught: unknown) => setError(errorMessage(caught)))
-              .finally(() => setBusy(false));
-          }}
-        >
-          <div className="lock-symbol">
-            <LockKeyhole size={25} />
-          </div>
-          <h2>Open your workspace</h2>
-          <p>Use the access token created by your local server.</p>
-          <label htmlFor="access-token">Local access token</label>
-          <input
-            id="access-token"
-            type="password"
-            autoComplete="off"
-            required
-            autoFocus
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-            placeholder="Paste your token"
-          />
-          <div className="token-help">
-            <span>Find it in the repository:</span>
-            <code>Get-Content var/access-token</code>
-            <small>Or use your configured STUDIO_ACCESS_TOKEN.</small>
-          </div>
-          {error && (
-            <p role="alert" className="error-text">
-              {error}
-            </p>
-          )}
-          <button className="button primary wide" disabled={busy}>
-            {busy ? 'Opening…' : 'Open workspace'}
-            <ArrowRight size={16} />
-          </button>
-          <p className="subtle">
-            <ShieldCheck size={13} />
-            Your token stays on this device.
-          </p>
-        </form>
-      </div>
-      <footer>
-        Security Agent Studio <span>v0.1 · Single-agent workspace</span>
-      </footer>
+        )}
+        <button className="button primary wide" disabled={busy}>
+          {busy ? 'Opening…' : 'Open workspace'}
+        </button>
+      </form>
     </main>
   );
 }
@@ -208,6 +150,10 @@ function Workspace({ data }: { data: Bootstrap }) {
     localStorage.getItem('studio.session') ? 'trace' : 'preview',
   );
   const [settings, setSettings] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => window.matchMedia('(min-width: 761px)').matches,
+  );
+  const [panel, setPanel] = useState<'prompt' | 'inspector' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const session = data.sessions.find((item) => item.id === sessionId) || data.sessions[0];
@@ -243,7 +189,9 @@ function Workspace({ data }: { data: Bootstrap }) {
   const chooseSession = (id: string) => {
     localStorage.setItem('studio.session', id);
     setSessionId(id);
+    if (window.matchMedia('(max-width: 760px)').matches) setSidebarOpen(false);
     setSelectedRun('');
+    setPanel(null);
     setPreview(null);
     setInput('');
     setError('');
@@ -281,6 +229,7 @@ function Workspace({ data }: { data: Bootstrap }) {
     setPreviewRevision(current.revision);
     setPreview(compiled);
     setTab('preview');
+    setPanel('inspector');
   };
   const start = async () => {
     if (!preview) return;
@@ -299,6 +248,7 @@ function Workspace({ data }: { data: Bootstrap }) {
     setInput('');
     setPreview(null);
     setTab('trace');
+    setPanel(null);
     await refresh();
   };
   const changeInput = (text: string) => {
@@ -307,30 +257,59 @@ function Workspace({ data }: { data: Bootstrap }) {
   };
   return (
     <div className="studio">
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="Security Agent Studio home">
-          <span className="brand-icon">
-            <Code2 size={20} />
-          </span>
-          <span>
-            Security Agent<span className="brand-light"> Studio</span>
-          </span>
-        </a>
-        <span className="topbar-divider" />
-        <span className="workspace-label">Local workspace</span>
-        <div className="topbar-actions">
-          <span className="connection">
-            <span className="dot" />
-            Connected
-          </span>
-          <button className="button small" disabled={busy} onClick={() => setSettings(true)}>
-            <SlidersHorizontal size={14} />
-            Settings
-          </button>
+      <aside
+        className="sidebar"
+        id="conversation-sidebar"
+        aria-label="Conversations"
+        hidden={!sidebarOpen}
+      >
+        <div className="sidebar-heading">
+          <Code2 size={18} />
+          <strong>Agent Studio</strong>
           <button
             className="icon-button"
-            title="Lock workspace"
-            aria-label="Lock workspace"
+            aria-label="Close sidebar"
+            onClick={() => setSidebarOpen(false)}
+          >
+            <PanelLeft size={16} />
+          </button>
+        </div>
+        <button
+          className="nav-button new-conversation"
+          disabled={busy}
+          onClick={() =>
+            void perform(async () => {
+              await newSession();
+            })
+          }
+        >
+          <Plus size={16} /> New conversation
+        </button>
+        <div className="sidebar-label">Conversations</div>
+        <nav className="session-list" aria-label="Conversation history">
+          {data.sessions.map((item) => (
+            <button
+              key={item.id}
+              className="session-item"
+              aria-current={session?.id === item.id ? 'page' : undefined}
+              disabled={busy}
+              title={item.title}
+              onClick={() => chooseSession(item.id)}
+            >
+              <MessageSquare size={14} />
+              <span>{item.title}</span>
+              {item.active_run_id && <span className="activity-dot" aria-label="Active run" />}
+            </button>
+          ))}
+          {!data.sessions.length && <p className="subtle sidebar-empty">No conversations</p>}
+        </nav>
+        <div className="sidebar-footer">
+          <button className="nav-button" disabled={busy} onClick={() => setSettings(true)}>
+            <SlidersHorizontal size={16} /> Settings
+          </button>
+          <button
+            className="nav-button"
+            disabled={busy}
             onClick={() =>
               void perform(async () => {
                 await request('/auth/session', 'DELETE');
@@ -338,380 +317,348 @@ function Workspace({ data }: { data: Bootstrap }) {
               })
             }
           >
-            <LockKeyhole size={15} />
+            <LockKeyhole size={16} /> Lock workspace
           </button>
         </div>
-      </header>
-      <div className="workspace-bar">
-        <div className="row">
-          <span className="eyebrow">WORKBENCH</span>
-          <ChevronRight size={13} />
-          <MessageSquare size={14} />
-          <select
-            aria-label="Conversation"
-            disabled={busy}
-            value={session?.id || ''}
-            onChange={(event) => chooseSession(event.target.value)}
-          >
-            {!data.sessions.length && <option value="">New investigation</option>}
-            {data.sessions.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-          </select>
+      </aside>
+      {sidebarOpen && (
+        <button
+          className="sidebar-backdrop"
+          aria-label="Dismiss sidebar"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <div className="workspace">
+        <header className="topbar">
           <button
             className="icon-button"
-            aria-label="New conversation"
-            title="New conversation"
-            disabled={busy}
-            onClick={() =>
-              void perform(async () => {
-                await newSession();
-              })
-            }
+            aria-label="Toggle sidebar"
+            aria-expanded={sidebarOpen}
+            aria-controls="conversation-sidebar"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
           >
-            <Plus size={15} />
+            <PanelLeft size={18} />
           </button>
-          {session && (
-            <button
-              className="icon-button"
-              aria-label="Delete conversation"
-              title="Delete conversation"
-              disabled={!!session.active_run_id || busy}
-              onClick={() => {
-                if (
-                  window.confirm(
-                    'Delete this conversation, its runs, and all local execution records?',
-                  )
-                )
-                  void perform(async () => {
-                    await request(`/sessions/${session.id}`, 'DELETE');
-                    chooseSession('');
-                    await refresh();
-                  });
-              }}
-            >
-              <Trash2 size={14} />
-            </button>
+          <h1 title={session?.title}>{session?.title || 'New conversation'}</h1>
+          {run && (
+            <span className={`status status-${run.status}`} data-testid="run-status">
+              {run.status.replaceAll('_', ' ')}
+            </span>
           )}
-        </div>
-        <span
-          className={`provider-pill ${data.config.provider.adapter === 'fake' ? 'simulated' : ''}`}
-        >
-          <span className="dot" />
-          {data.config.provider.adapter === 'fake' ? 'Simulated model' : data.config.provider.model}
-        </span>
-      </div>
-      {error && (
-        <div className="error-banner" role="alert">
-          <span>{error}</span>
-          <button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}>
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      <main className="workbench">
-        <Composer
-          preset={preset}
-          presets={data.presets}
-          dirty={dirty}
-          busy={busy}
-          onChange={(value) => {
-            setPreset(value);
-            setDirty(true);
-            setPreview(null);
-          }}
-          onSelect={(value) => {
-            setPreset(value);
-            setDirty(false);
-            setPreview(null);
-          }}
-          onSave={() =>
-            void perform(async () => {
-              await savePreset();
-            })
-          }
-        />
-        <section className="conversation" aria-label="Conversation workspace">
-          <div className="conversation-heading">
-            <div>
-              <span className="section-label">INVESTIGATION</span>
-              <h1>
-                {session && session.revision > 0 ? session.title : 'From instruction to evidence.'}
-              </h1>
-            </div>
-            {run && (
-              <span className={`status status-${run.status}`} data-testid="run-status">
-                {run.status.replaceAll('_', ' ')}
-              </span>
-            )}
-          </div>
-          {runs.length > 0 && (
-            <div className="run-switcher">
-              <label htmlFor="run-selector">Run history</label>
-              <select
-                id="run-selector"
-                value={run?.id || ''}
-                onChange={(event) => {
-                  setSelectedRun(event.target.value);
-                  setTab('trace');
+          <div className="topbar-actions">
+            <button
+              className="button quiet"
+              disabled={busy}
+              aria-pressed={panel === 'prompt'}
+              onClick={() => setPanel(panel === 'prompt' ? null : 'prompt')}
+            >
+              <SlidersHorizontal size={15} /> Prompt{dirty ? ' *' : ''}
+            </button>
+            <button
+              className="button quiet"
+              disabled={busy}
+              aria-pressed={panel === 'inspector'}
+              onClick={() => setPanel(panel === 'inspector' ? null : 'inspector')}
+            >
+              <Eye size={15} /> Inspector
+            </button>
+            {session && (
+              <button
+                className="icon-button"
+                aria-label="Delete conversation"
+                title="Delete conversation"
+                disabled={!!session.active_run_id || busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Delete this conversation, its runs, and all local execution records?',
+                    )
+                  )
+                    void perform(async () => {
+                      await request(`/sessions/${session.id}`, 'DELETE');
+                      chooseSession('');
+                      await refresh();
+                    });
                 }}
               >
-                {runs.map((item, index) => (
-                  <option key={item.id} value={item.id}>
-                    #{index + 1} · {item.input.slice(0, 45)} · {item.status}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className="conversation-scroll" aria-live="polite">
-            {runQuery.isError && (
-              <p role="alert" className="error-text">
-                {runQuery.error.message}
-              </p>
+                <Trash2 size={15} />
+              </button>
             )}
-            {run ? (
-              <>
-                <div className="task-message">
-                  <span className="message-caption">YOUR TASK</span>
-                  <p>{run.input}</p>
+          </div>
+        </header>
+        {error && (
+          <div className="error-banner" role="alert">
+            <span>{error}</span>
+            <button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}>
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        <main className="workbench">
+          <section className="conversation" aria-label="Conversation workspace">
+            <div className="conversation-scroll" aria-live="polite">
+              {runs.length > 0 && (
+                <div className="run-switcher">
+                  <label htmlFor="run-selector">Run history</label>
+                  <select
+                    id="run-selector"
+                    value={run?.id || ''}
+                    onChange={(event) => {
+                      setSelectedRun(event.target.value);
+                      setTab('trace');
+                    }}
+                  >
+                    {runs.map((item, index) => (
+                      <option key={item.id} value={item.id}>
+                        #{index + 1} · {item.input.slice(0, 45)} · {item.status}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                {run.messages.map((message, index) => (
-                  <article key={index} className={`chat-message chat-${message.role}`}>
-                    {message.role === 'tool' ? (
-                      <details className="tool-result">
-                        <summary>
-                          <Terminal size={14} />
-                          Tool result
-                          <span className="subtle">{message.tool_call_id?.slice(-10)}</span>
-                        </summary>
-                        <pre>{message.content}</pre>
-                      </details>
-                    ) : (
-                      <>
-                        <span className="message-caption">
-                          {message.role === 'assistant' ? 'AGENT' : message.role.toUpperCase()}
-                        </span>
-                        {message.content && (
-                          <div className="markdown">
-                            <Markdown skipHtml components={markdownComponents}>
-                              {message.content}
-                            </Markdown>
-                          </div>
-                        )}
-                        {message.tool_calls.map((call) => (
-                          <div className="tool-request" key={call.id}>
+              )}
+              {runQuery.isError && (
+                <p role="alert" className="error-text">
+                  {runQuery.error.message}
+                </p>
+              )}
+              {run ? (
+                <>
+                  <div className="task-message">
+                    <span className="message-caption">You</span>
+                    <p>{run.input}</p>
+                  </div>
+                  {run.messages.map((message, index) => (
+                    <article key={index} className={`chat-message chat-${message.role}`}>
+                      {message.role === 'tool' ? (
+                        <details className="tool-result">
+                          <summary>
                             <Terminal size={14} />
-                            <strong>{call.name}</strong>
-                            <code>{JSON.stringify(call.args)}</code>
-                          </div>
-                        ))}
-                      </>
-                    )}
-                  </article>
-                ))}
-                {run.partial_output && (
-                  <article className="chat-message streaming">
-                    <span className="message-caption">AGENT · STREAMING</span>
-                    <div className="markdown">
-                      <Markdown skipHtml components={markdownComponents}>
-                        {run.partial_output}
-                      </Markdown>
-                    </div>
-                  </article>
-                )}
-                {run.error && (
-                  <p role="alert" className="notice warning">
-                    {run.error}
-                  </p>
-                )}
-                {run.status === 'waiting_approval' && run.approval && (
-                  <div className="approval-card">
-                    <div className="row">
-                      <ShieldCheck size={19} />
-                      <h3>Permission to run a tool</h3>
-                    </div>
-                    <p>
-                      <strong>{String(run.approval.name)}</strong> is waiting for your decision.
+                            Tool result
+                            <span className="subtle">{message.tool_call_id?.slice(-10)}</span>
+                          </summary>
+                          <pre>{message.content}</pre>
+                        </details>
+                      ) : (
+                        <>
+                          <span className="message-caption">
+                            {message.role === 'assistant' ? 'Agent' : message.role}
+                          </span>
+                          {message.content && (
+                            <div className="markdown">
+                              <Markdown skipHtml components={markdownComponents}>
+                                {message.content}
+                              </Markdown>
+                            </div>
+                          )}
+                          {message.tool_calls.map((call) => (
+                            <div className="tool-request" key={call.id}>
+                              <Terminal size={14} />
+                              <strong>{call.name}</strong>
+                              <code>{JSON.stringify(call.args)}</code>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </article>
+                  ))}
+                  {run.partial_output && (
+                    <article className="chat-message streaming">
+                      <span className="message-caption">Agent · streaming</span>
+                      <div className="markdown">
+                        <Markdown skipHtml components={markdownComponents}>
+                          {run.partial_output}
+                        </Markdown>
+                      </div>
+                    </article>
+                  )}
+                  {run.error && (
+                    <p role="alert" className="notice warning">
+                      {run.error}
                     </p>
-                    <Json value={run.approval.args} />
-                    <div className="row">
-                      <button
-                        className="button primary"
-                        disabled={busy}
-                        onClick={() =>
-                          void perform(async () => {
-                            await request(
-                              `/runs/${run.id}/approvals/${String(run.approval!.id)}`,
-                              'POST',
-                              { decision: 'approve' },
-                            );
-                            await refresh();
-                          })
-                        }
-                      >
-                        <Check size={14} />
-                        Approve once
-                      </button>
+                  )}
+                  {run.status === 'waiting_approval' && run.approval && (
+                    <div className="approval-card">
+                      <div className="row">
+                        <ShieldCheck size={19} />
+                        <h3>Permission to run a tool</h3>
+                      </div>
+                      <p>
+                        <strong>{String(run.approval.name)}</strong> is waiting for your decision.
+                      </p>
+                      <Json value={run.approval.args} />
+                      <div className="row">
+                        <button
+                          className="button primary"
+                          disabled={busy}
+                          onClick={() =>
+                            void perform(async () => {
+                              await request(
+                                `/runs/${run.id}/approvals/${String(run.approval!.id)}`,
+                                'POST',
+                                { decision: 'approve' },
+                              );
+                              await refresh();
+                            })
+                          }
+                        >
+                          <Check size={14} />
+                          Approve once
+                        </button>
+                        <button
+                          className="button"
+                          disabled={busy}
+                          onClick={() =>
+                            void perform(async () => {
+                              await request(
+                                `/runs/${run.id}/approvals/${String(run.approval!.id)}`,
+                                'POST',
+                                { decision: 'reject' },
+                              );
+                              await refresh();
+                            })
+                          }
+                        >
+                          Reject
+                        </button>
+                      </div>
+                      <p className="subtle">
+                        This decision applies only to the arguments shown above.
+                      </p>
+                    </div>
+                  )}
+                  {run.status === 'interrupted' && (
+                    <Recovery
+                      key={run.id}
+                      run={run}
+                      busy={busy}
+                      onResume={(resolutions) =>
+                        void perform(async () => {
+                          await request(`/runs/${run.id}/resume`, 'POST', { resolutions });
+                          await refresh();
+                        })
+                      }
+                    />
+                  )}
+                </>
+              ) : (
+                <div className="conversation-empty">No messages yet.</div>
+              )}
+            </div>
+            <div className="task-composer">
+              <label className="sr-only" htmlFor="task-input">
+                Task
+              </label>
+              <textarea
+                id="task-input"
+                value={input}
+                onChange={(event) => changeInput(event.target.value)}
+                placeholder="Message the agent…"
+                rows={3}
+                disabled={!!active || busy}
+              />
+              <details className="task-variables">
+                <summary>
+                  Input variables <span className="subtle">JSON</span>
+                </summary>
+                <textarea
+                  aria-label="Input variables JSON"
+                  disabled={!!active || busy}
+                  className="code-input"
+                  rows={3}
+                  value={variables}
+                  onChange={(event) => {
+                    setVariables(event.target.value);
+                    setPreview(null);
+                  }}
+                />
+              </details>
+              <div className="composer-actions">
+                <button
+                  className="model-button"
+                  disabled={busy}
+                  onClick={() => setSettings(true)}
+                  title="Model settings"
+                >
+                  {data.config.provider.adapter === 'fake'
+                    ? 'Simulated model'
+                    : data.config.provider.model}
+                </button>
+                <div className="row">
+                  {active ? (
+                    <button
+                      className="button danger"
+                      disabled={busy}
+                      onClick={() =>
+                        void perform(async () => {
+                          await request(`/runs/${active.id}/cancel`, 'POST');
+                          await refresh();
+                        })
+                      }
+                    >
+                      <Square size={13} />
+                      Stop run
+                    </button>
+                  ) : (
+                    <>
                       <button
                         className="button"
-                        disabled={busy}
-                        onClick={() =>
-                          void perform(async () => {
-                            await request(
-                              `/runs/${run.id}/approvals/${String(run.approval!.id)}`,
-                              'POST',
-                              { decision: 'reject' },
-                            );
-                            await refresh();
-                          })
-                        }
+                        disabled={busy || !input.trim()}
+                        onClick={() => void perform(buildPreview)}
                       >
-                        Reject
+                        <Eye size={14} />
+                        {dirty ? 'Save & preview' : 'Preview'}
                       </button>
-                    </div>
-                    <p className="subtle">
-                      This decision applies only to the arguments shown above.
-                    </p>
-                  </div>
-                )}
-                {run.status === 'interrupted' && (
-                  <Recovery
-                    key={run.id}
-                    run={run}
-                    busy={busy}
-                    onResume={(resolutions) =>
-                      void perform(async () => {
-                        await request(`/runs/${run.id}/resume`, 'POST', { resolutions });
-                        await refresh();
-                      })
-                    }
-                  />
-                )}
-              </>
-            ) : (
-              <div className="conversation-empty">
-                <div className="empty-orbit">
-                  <Code2 size={30} strokeWidth={1.4} />
+                      <button
+                        className="button primary"
+                        disabled={busy || !preview}
+                        onClick={() => void perform(start)}
+                      >
+                        <Play size={13} />
+                        Run
+                      </button>
+                    </>
+                  )}
                 </div>
-                <span className="eyebrow">YOUR NEXT INVESTIGATION STARTS HERE</span>
-                <h2>
-                  A clear prompt.
-                  <br />A traceable result.
-                </h2>
-                <p>
-                  Arrange your instructions on the left.
-                  <br />
-                  Preview the request, then put your agent to work.
-                </p>
-                <div className="starter-cards">
-                  <button onClick={() => changeInput('/read README.md')}>
-                    <FileText size={18} />
-                    <span>
-                      Explore a local file<small>Read README.md with a real tool</small>
-                    </span>
-                    <ArrowRight size={14} />
-                  </button>
-                  <button onClick={() => changeInput('/echo hello')}>
-                    <ShieldCheck size={18} />
-                    <span>
-                      Try tool approval<small>Inspect, approve, and continue</small>
-                    </span>
-                    <ArrowRight size={14} />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="task-composer">
-            <label className="sr-only" htmlFor="task-input">
-              Task
-            </label>
-            <textarea
-              id="task-input"
-              value={input}
-              onChange={(event) => changeInput(event.target.value)}
-              placeholder="Describe your task, or try /read README.md"
-              rows={3}
-              disabled={!!active || busy}
-            />
-            <details className="task-variables">
-              <summary>
-                Input variables <span className="subtle">JSON</span>
-              </summary>
-              <textarea
-                aria-label="Input variables JSON"
-                className="code-input"
-                rows={3}
-                value={variables}
-                onChange={(event) => {
-                  setVariables(event.target.value);
-                  setPreview(null);
-                }}
-              />
-            </details>
-            <div className="composer-actions">
-              <span className="subtle">
-                {preview
-                  ? 'Preview ready · input frozen'
-                  : `${session?.messages.length || 0} history messages`}
-              </span>
-              <div className="row">
-                {active ? (
-                  <button
-                    className="button danger"
-                    disabled={busy}
-                    onClick={() =>
-                      void perform(async () => {
-                        await request(`/runs/${active.id}/cancel`, 'POST');
-                        await refresh();
-                      })
-                    }
-                  >
-                    <Square size={13} />
-                    Stop run
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      className="button"
-                      disabled={busy || !input.trim()}
-                      onClick={() => void perform(buildPreview)}
-                    >
-                      <Eye size={14} />
-                      {dirty ? 'Save & preview' : 'Preview'}
-                    </button>
-                    <button
-                      className="button primary"
-                      disabled={busy || !preview}
-                      onClick={() => void perform(start)}
-                    >
-                      <Play size={13} />
-                      Run
-                    </button>
-                  </>
-                )}
               </div>
             </div>
+          </section>
+          {/* Keep editors mounted so toggling a panel does not discard unapplied rule drafts. */}
+          <div className="utility-pane" hidden={panel !== 'prompt'}>
+            <Composer
+              preset={preset}
+              presets={data.presets}
+              dirty={dirty}
+              busy={busy}
+              onClose={() => setPanel(null)}
+              onChange={(value) => {
+                setPreset(value);
+                setDirty(true);
+                setPreview(null);
+              }}
+              onSelect={(value) => {
+                setPreset(value);
+                setDirty(false);
+                setPreview(null);
+              }}
+              onSave={() =>
+                void perform(async () => {
+                  await savePreset();
+                })
+              }
+            />
           </div>
-        </section>
-        <Inspector key={run?.id || 'empty'} preview={preview} run={run} tab={tab} onTab={setTab} />
-      </main>
-      <footer className="statusbar">
-        <span>
-          <span className="dot" />
-          Workspace ready
-        </span>
-        <span className="workspace-path" title={data.workspace_root}>
-          {data.workspace_root}
-        </span>
-        <span>
-          Single agent<span className="footer-dot">·</span>Local SQLite
-          <span className="footer-dot">·</span>v0.1.0
-        </span>
-      </footer>
+          <div className="utility-pane" hidden={panel !== 'inspector'}>
+            <Inspector
+              key={run?.id || 'empty'}
+              preview={preview}
+              run={run}
+              tab={tab}
+              onTab={setTab}
+              onClose={() => setPanel(null)}
+            />
+          </div>
+        </main>
+      </div>
       {settings && (
         <Settings
           data={data}

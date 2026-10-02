@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, Fingerprint, ScanLine } from 'lucide-react';
+import { Download, X } from 'lucide-react';
 import { request, type Preview, type Run, type Trace } from './api/client';
 
 /** Render structured evidence as text; provider and tool payloads never become executable HTML. */
@@ -14,11 +14,13 @@ export function Inspector({
   run,
   tab,
   onTab,
+  onClose,
 }: {
   preview: Preview | null;
   run?: Run;
   tab: 'preview' | 'trace';
   onTab: (tab: 'preview' | 'trace') => void;
+  onClose: () => void;
 }) {
   const [raw, setRaw] = useState(false);
   const trace = useQuery({
@@ -29,9 +31,10 @@ export function Inspector({
   return (
     <aside className="inspector panel" aria-label="Request inspector">
       <div className="panel-heading">
-        <ScanLine size={16} />
         <h2>Inspector</h2>
-        <span className="eyebrow">EVIDENCE</span>
+        <button className="icon-button" aria-label="Close inspector" onClick={onClose}>
+          <X size={16} />
+        </button>
       </div>
       <div className="tabs" role="tablist" aria-label="Inspector view">
         <button role="tab" aria-selected={tab === 'preview'} onClick={() => onTab('preview')}>
@@ -64,9 +67,8 @@ export function Inspector({
                 provider tokenizer.
               </p>
               <div className="hash">
-                <Fingerprint size={13} />
                 <span>{preview.input_hash.slice(0, 20)}</span>
-                <span className="badge">FROZEN</span>
+                <span className="badge">Frozen</span>
               </div>
               <h3>Final message sequence</h3>
               {preview.compiled.messages.map((message, index) => (
@@ -100,20 +102,13 @@ export function Inspector({
               </details>
             </>
           ) : (
-            <div className="empty-inspector">
-              <ScanLine size={30} strokeWidth={1} />
-              <h3>See what the model sees.</h3>
-              <p>
-                Compose your instructions, enter a task, then preview the exact message sequence and
-                prepared request.
-              </p>
-            </div>
+            <div className="empty-inspector">Enter a message and select Preview.</div>
           ))}
         {tab === 'trace' &&
           (run ? (
             <>
               <div className="row-between">
-                <span className="badge">{raw ? 'ORIGINAL LOCAL VIEW' : 'REDACTED VIEW'}</span>
+                <span className="badge">{raw ? 'Original local view' : 'Redacted view'}</span>
                 <a className="text-button" href={`/api/v1/runs/${run.id}/export`} download>
                   <Download size={13} />
                   Export JSON
@@ -223,16 +218,8 @@ export function Inspector({
               ))}
             </>
           ) : (
-            <div className="empty-inspector">
-              <Fingerprint size={30} strokeWidth={1} />
-              <h3>Every step leaves a record.</h3>
-              <p>Start a run to inspect model inputs, tool decisions, results, and actual usage.</p>
-            </div>
+            <div className="empty-inspector">No run selected.</div>
           ))}
-      </div>
-      <div className="inspector-footnote">
-        <span className="dot" />
-        Local records · explicit execution
       </div>
     </aside>
   );

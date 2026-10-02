@@ -538,18 +538,19 @@ An SSE endpoint never creates or resumes a Run or executes a tool, preventing re
 | `/settings` | Providers, MCP, and tool profiles | Test connections, refresh tools, and configure credential references and permissions |
 | `/runs/:runId` | Historical Runs and traces | Switch calls, recover interrupted Runs, and export records |
 
-The main workspace uses three columns, switching to tabs on narrow screens:
+The workspace opens directly into a conversation. A collapsible sidebar lists sessions; Prompt Composer and Inspector share an optional right panel. Avoid introductory sections, feature cards, or persistent panels that compete with the conversation.
 
 ```text
-Top bar: Session / Preset revision / Provider + Model / Tool Profile / Connection
-+-------------------------+----------------------------+------------------------------+
-| Prompt Composer         | Conversation / Run         | Inspector                    |
-| Enable blocks, roles    | Streaming, tool status     | Messages / actual request    |
-| Order, placement        | Approve/reject stop/resume | Sources / usage / tools      |
-| Conditions, variables   | Current task input         | Trace for each call          |
-+-------------------------+----------------------------+------------------------------+
-Actions: Save preset → Preview → Run; compilation errors link to the relevant block
++----------------------+------------------------------+------------------------------+
+| New conversation     | Session / Prompt / Inspector | Optional work panel          |
+| Conversation history | Conversation and tool calls  | Prompt Composer OR Inspector |
+|                      | Approve / reject / resume    |                              |
+| Settings / Lock      | Message / Preview / Run      |                              |
++----------------------+------------------------------+------------------------------+
+Preview opens Inspector; Run returns focus to the conversation.
 ```
+
+On narrow screens, the sidebar overlays the workspace. The selected work panel replaces the message area while the input and execution controls remain accessible below. Closing a panel preserves local preset drafts.
 
 Support buttons and keyboard controls for ordering blocks. Dragging is an optional enhancement, never the only method.
 The first release may use a reliable text input component. Syntax highlighting, rich text, or a large IDE editor is not an acceptance requirement.
@@ -565,7 +566,7 @@ Responses support code blocks and controlled Markdown with raw HTML disabled. Re
 - Inspector distinguishes the pre-send preview from actual call N. Label redaction, truncation, estimates, and unknown values explicitly.
 - On refresh, load the Session and active Run first, restore the event cursor, and replay missing events without resubmitting the task.
 - Provide actionable feedback for empty lists, missing credentials, unavailable MCP servers, compilation errors, 409 conflicts, and reconnection waits.
-- Label FakeProvider mode Simulated model in the top bar so demonstration results are not mistaken for real model output.
+- Label FakeProvider mode Simulated model beside the input so demonstration results are not mistaken for real model output.
 
 ## 12. Target Layout and Configuration
 

@@ -6,7 +6,9 @@ async function openWorkspace(page: Page) {
   await page.goto('/');
   await page.getByLabel('Local access token').fill('playwright-local-test-token');
   await page.getByRole('button', { name: 'Open workspace' }).click();
-  await expect(page.getByLabel('Prompt composer')).toBeVisible();
+  await expect(page.getByLabel('Conversation workspace')).toBeAttached();
+  if (!(await page.getByRole('button', { name: 'New conversation', exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
   await page.getByRole('button', { name: 'New conversation', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeDisabled();
 }
@@ -15,7 +17,7 @@ async function openWorkspace(page: Page) {
 async function startTask(page: Page, input: string) {
   await page.getByLabel('Task', { exact: true }).fill(input);
   await page.getByRole('button', { name: /^(Save & preview|Preview)$/ }).click();
-  await expect(page.getByText('FROZEN', { exact: true })).toBeVisible();
+  await expect(page.getByText('Frozen', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Run', exact: true }).click();
 }
 
@@ -23,12 +25,14 @@ test('edit, preview, real file tool, inspect trace, and refresh without another 
   page,
 }) => {
   await openWorkspace(page);
+  await page.getByRole('button', { name: 'Prompt', exact: true }).click();
   await page
     .getByLabel('Base identity template')
     .fill('Analyze only with recorded evidence. Browser contract marker.');
   await startTask(page, '/read README.md');
   await expect(page.getByTestId('run-status')).toHaveText('succeeded');
   await expect(page.locator('.markdown')).toContainText('Local MCP and browser test workspace.');
+  await page.getByRole('button', { name: 'Inspector', exact: true }).click();
   await page.getByText('Prepared request', { exact: true }).first().click();
   await expect(page.getByLabel('Request inspector')).toContainText('Browser contract marker');
   await expect(page.getByRole('link', { name: 'Export JSON' })).toBeVisible();
@@ -118,12 +122,14 @@ test('the workbench remains usable on a narrow viewport', async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel('Task', { exact: true }).fill('Check narrow layout');
   await page.getByRole('button', { name: 'Preview', exact: true }).click();
-  await expect(page.getByText('FROZEN', { exact: true })).toBeVisible();
+  await expect(page.getByText('Frozen', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
   const width = await page.evaluate(() => ({
     content: document.documentElement.scrollWidth,
     viewport: window.innerWidth,
   }));
   expect(width.content).toBeLessThanOrEqual(width.viewport);
+  await page.getByRole('button', { name: 'Prompt', exact: true }).click();
   const composer = await page.getByLabel('Prompt composer').boundingBox();
   const save = await page.getByRole('button', { name: 'Save preset', exact: true }).boundingBox();
   expect(save!.y + save!.height).toBeLessThanOrEqual(composer!.y + composer!.height);

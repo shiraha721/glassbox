@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Layers3, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Plus, Save, Trash2, X } from 'lucide-react';
 import { errorMessage, type Block, type Preset } from './api/client';
 
 type Props = {
@@ -10,6 +10,7 @@ type Props = {
   onChange: (preset: Preset) => void;
   onSelect: (preset: Preset) => void;
   onSave: () => void;
+  onClose?: () => void;
 };
 
 /** Keep visual ordering aligned with the compiler's two insertion slots. */
@@ -20,7 +21,16 @@ function ordered(blocks: Block[]): Block[] {
 }
 
 /** Edit an embedded preset; every edit invalidates the parent workspace's preview. */
-export function Composer({ preset, presets, dirty, busy, onChange, onSelect, onSave }: Props) {
+export function Composer({
+  preset,
+  presets,
+  dirty,
+  busy,
+  onChange,
+  onSelect,
+  onSave,
+  onClose,
+}: Props) {
   const update = (blocks: Block[]) => onChange({ ...preset, blocks: ordered(blocks) });
   const move = (index: number, direction: number) => {
     const blocks = [...preset.blocks];
@@ -49,13 +59,17 @@ export function Composer({ preset, presets, dirty, busy, onChange, onSelect, onS
   return (
     <aside className="composer panel" aria-label="Prompt composer">
       <div className="panel-heading">
-        <Layers3 size={16} />
         <h2>Prompt composer</h2>
         <span className="count">{preset.blocks.length}</span>
+        {onClose && (
+          <button className="icon-button" aria-label="Close prompt" onClick={onClose}>
+            <X size={16} />
+          </button>
+        )}
       </div>
       <div className="composer-controls">
         <div className="preset-picker">
-          <label htmlFor="preset">PRESET</label>
+          <label htmlFor="preset">Preset</label>
           <div className="row">
             <select
               id="preset"
@@ -133,11 +147,6 @@ export function Composer({ preset, presets, dirty, busy, onChange, onSelect, onS
             <Save size={14} />
             Save preset
           </button>
-          <p className="subtle">
-            Blocks → history → task → tool results.
-            <br />
-            Every message keeps its original role.
-          </p>
         </div>
       </div>
     </aside>

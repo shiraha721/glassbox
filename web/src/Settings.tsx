@@ -62,8 +62,7 @@ export function Settings({
         <div className="settings-content">
           <fieldset disabled={busy}>
             <section>
-              <div className="section-label">01 / MODEL</div>
-              <h3>Choose your endpoint</h3>
+              <h3>Model</h3>
               <label>
                 Provider
                 <select
@@ -155,8 +154,7 @@ export function Settings({
               </div>
             </section>
             <section>
-              <div className="section-label">02 / TOOLS</div>
-              <h3>Set the execution boundaries</h3>
+              <h3>Tool permissions</h3>
               <p className="subtle">
                 Permissions are enforced by the server. New MCP tools remain disabled until you
                 select Ask or Allow.
@@ -208,8 +206,7 @@ export function Settings({
                 ))}
             </section>
             <section>
-              <div className="section-label">03 / MCP</div>
-              <h3>Connect your tools</h3>
+              <h3>MCP servers</h3>
               <p className="subtle">
                 Each operation opens a fresh connection. This release supports stateless servers. A
                 stdio command runs on this computer.
@@ -374,8 +371,7 @@ export function Settings({
               </div>
             </section>
             <section>
-              <div className="section-label">04 / LIMITS</div>
-              <h3>Keep runs bounded</h3>
+              <h3>Run limits</h3>
               <div className="form-grid">
                 {(
                   [

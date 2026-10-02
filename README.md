@@ -31,10 +31,10 @@ Paste that token into the Web UI. It is exchanged for an HttpOnly browser cookie
 
 Try the complete offline workflow:
 
-1. Edit a message block and enter `/read README.md` in **Task**.
+1. Open **Prompt** to edit a message block, then enter `/read README.md` in **Task**. Conversations are listed in the left sidebar; the editor and inspector open only when needed.
 2. Select **Save & preview** or **Preview**. Inspect roles, ordering, source mappings, activation decisions, and the prepared request.
 3. Select **Run**. The simulated model calls the real, bounded file tool and incorporates its result.
-4. Open **Run trace** to inspect both model calls and the tool receipt. **Show original trace** is an explicit local view; **Export JSON** always produces a labeled, redacted copy.
+4. Open **Inspector → Run trace** to inspect both model calls and the tool receipt. **Show original trace** is an explicit local view; **Export JSON** always produces a labeled, redacted copy.
 5. Try `/echo hello` to approve or reject a tool. `/slow` exercises cancellation. Refreshing the browser reloads existing state without submitting another Run.
 
 ### Connect a model or MCP server
