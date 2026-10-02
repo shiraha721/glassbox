@@ -1,0 +1,5 @@
+src/api/generated.ts
+src/api/schema.json
+package-lock.json
+dist
+node_modules

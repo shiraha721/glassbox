@@ -19,3 +19,4 @@ web/playwright-report/
 web/src/api/schema.json
 .coverage
 htmlcov/
+*.tsbuildinfo

@@ -7,7 +7,7 @@ This file applies to the entire repository and defines project constraints and w
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-02, implementation has started. Consult the README and actual source files for current delivery status; the architecture document describes the target product.
+As of 2026-10-03, a local MVP and Web UI are implemented. Consult the README and actual source files for current delivery status; the architecture document distinguishes this baseline from the target product.
 Inspect the actual files before starting work. Do not report the target directories, commands, or APIs below as implemented capabilities.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
@@ -20,6 +20,8 @@ Read in this order:
 3. The relevant modules, tests, and project configuration. Use commands supported by the configuration that actually exists.
 
 ## Target Structure and Dependency Direction
+
+The baseline uses single modules (`api.py`, `application.py`, `runtime.py`, and so on) for these responsibilities. Split a module only when its size or a concrete extension warrants it. Presets own embedded blocks; one versioned settings aggregate owns provider, MCP, permission, and limit configuration. Preserve immutable Run snapshots without adding a generic persistence or plugin framework.
 
 ```text
 src/rtagent/
@@ -42,7 +44,7 @@ docs/              Architecture and necessary decision records
 
 - `api` calls `application` use cases. Keep business decisions out of HTTP routes.
 - `domain`, `prompts`, and `policies` must not depend on FastAPI, databases, MCP clients, or specific model SDKs.
-- `application` defines the required interfaces. Modules such as `runtime`, `providers`, `tools`, and `storage` implement them; the entry point wires them together.
+- `application` coordinates the concrete runtime, tool registry, and repository. The entry point owns their lifecycle. Introduce dependency interfaces only when a second implementation actually needs them.
 - LangGraph controls execution; LangChain provides model/tool adapters. Do not nest another implicit tool loop inside a prebuilt agent.
 - The frontend obtains data, submits actions, and subscribes to events through the API. It must not connect directly to model providers, MCP, or the database.
 - Keep a modular monolith. Do not introduce microservices, message queues, vector databases, or a generic plugin marketplace for hypothetical needs.
@@ -101,19 +103,18 @@ docs/              Architecture and necessary decision records
 
 ## Development and Verification Commands
 
-The following commands should be available after project initialization; they are not executable yet. Initialization must establish the corresponding dependencies, scripts, and configuration.
-If the actual configuration differs, update this file and the README. Never invent execution results to make the documentation appear complete.
+These commands are supported by the current project. Keep them synchronized with the actual configuration and README. Never invent verification results.
 
 Backend commands, from the repository root:
 
 ```powershell
-uv sync --dev
+uv sync --dev --locked
 uv run alembic upgrade head
-uv run uvicorn rtagent.main:create_app --factory --reload --host 127.0.0.1
+uv run uvicorn rtagent.main:create_app --factory --reload --host 127.0.0.1 --port 8001
 uv run pytest
-uv run ruff check .
-uv run black --check .
-uv run isort --check-only .
+uv run ruff check src tests scripts migrations
+uv run black --check src tests scripts migrations
+uv run isort --check-only src tests scripts migrations
 ```
 
 Frontend commands, from `web/`:
@@ -124,12 +125,15 @@ npm run dev
 npm run lint
 npm run typecheck
 npm run test -- --run
+npm run format:check
 npm run build
+npx playwright install chromium
 npm run test:e2e
 ```
 
 During initial setup, use `uv lock` and `npm install` to create lockfiles, then install from those lockfiles on subsequent runs.
 Before running browser tests for the first time, install the browsers required by the Playwright configuration.
+Build the frontend before browser tests; their isolated backend serves `web/dist`. Regenerate API types with `uv run python scripts/export_api.py`, then `npm --prefix web run generate:api`. Commit `web/src/api/generated.ts`; the intermediate schema is ignored.
 
 Tests should cover the actual behavior affected by a change:
 

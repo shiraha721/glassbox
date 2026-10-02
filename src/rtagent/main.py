@@ -115,3 +115,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     return app
+
+
+def serve() -> None:
+    """Start the local studio on its dedicated default port."""
+    import uvicorn
+
+    uvicorn.run("rtagent.main:create_app", factory=True, host="127.0.0.1", port=8001)
+
+
+if __name__ == "__main__":
+    serve()

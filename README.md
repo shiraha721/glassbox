@@ -2,13 +2,105 @@
 
 ## Project Status
 
-As of 2026-10-02, implementation is in progress. The project foundation, deterministic prompt compiler, and SQLite persistence are implemented and covered by offline tests.
-The Features section describes the target product. The complete Web and execution workflows are still being assembled; a verified quickstart will accompany the runnable application.
+As of 2026-10-03, a local MVP is implemented: **a working Web UI, deterministic Prompt Compiler, single-agent tool loop, approval and recovery controls, and execution tracing**.
+The offline model exercises the complete workflow without credentials. The OpenAI-compatible Chat Completions adapter is verified against a mocked HTTP boundary; a live account or self-hosted model has not been tested in this environment.
 
-The first release will include a **working Web UI, a Prompt Compiler, a single-agent tool loop, and execution tracing**.
+The Features section describes the broader product direction. Current capabilities and limits are listed below; specialized security tools and evaluation workflows remain future work.
 
 - [Architecture and Detailed Design](docs/architecture.md): module boundaries, data models, APIs, UI design, and the implementation plan.
 - [Development Guidelines](AGENTS.md): implementation and verification rules for developers and coding agents.
+
+## Quickstart
+
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), and Node.js 22.12+ with npm. Run commands from the repository root. The lockfiles were validated on Windows with Python 3.12.11 and Node.js 26.4.0.
+
+```powershell
+uv sync --dev --locked
+npm --prefix web ci
+npm --prefix web run build
+uv run rtagent
+```
+
+Open **http://127.0.0.1:8001**. Startup applies Alembic migrations, seeds an example preset, and creates a workspace token. In a second terminal:
+
+```powershell
+Get-Content var/access-token
+```
+
+Paste that token into the Web UI. It is exchanged for an HttpOnly browser cookie; the browser does not persist the workspace token. Run one server worker. Keep the service bound to loopback.
+
+Try the complete offline workflow:
+
+1. Edit a message block and enter `/read README.md` in **Task**.
+2. Select **Save & preview** or **Preview**. Inspect roles, ordering, source mappings, activation decisions, and the prepared request.
+3. Select **Run**. The simulated model calls the real, bounded file tool and incorporates its result.
+4. Open **Run trace** to inspect both model calls and the tool receipt. **Show original trace** is an explicit local view; **Export JSON** always produces a labeled, redacted copy.
+5. Try `/echo hello` to approve or reject a tool. `/slow` exercises cancellation. Refreshing the browser reloads existing state without submitting another Run.
+
+### Connect a model or MCP server
+
+Optionally copy `.env.example` to `.env`. Set credentials in that file or the server environment; enter only their variable names in **Settings**.
+
+For a real model, select **OpenAI-compatible**, set the base URL and model ID served by your endpoint, and save. Use `OPENAI_API_KEY` as the credential reference, or leave the reference blank for a keyless local server. The adapter uses streaming Chat Completions with tool calls and usage reporting; endpoints must support the prepared fields shown in the preview. Unsupported role rewrites are rejected rather than silently changing the prompt. No SDK retries or provider fallbacks run automatically.
+
+For MCP, add a **stdio** executable and argument list, or a **Streamable HTTP** URL. Use **Save & discover**, choose each tool's permission, then **Save settings**. New tools default to **Disabled**. Child environment entries map `NAME=SERVER_VARIABLE`; they do not contain secret values. HTTP bearer authentication uses a separate environment reference. With the simulated model, `/tool NAME {"argument":"value"}` invokes an enabled tool by its namespaced catalog name, visible in the preview's tool schemas.
+
+The file reader is limited to UTF-8 files of at most 64 KiB under `STUDIO_WORKSPACE_ROOT`. It excludes linked paths, common credential/runtime files, and dependency directories. It is a local convenience boundary, not an OS sandbox.
+
+### Local data and recovery
+
+- `var/app.db`: presets, settings, sessions, immutable Run snapshots, events, and call receipts.
+- `var/checkpoints.db`: LangGraph checkpoints, keyed by Run ID.
+- `var/access-token`: generated local access token. These files and `.env` are ignored by Git.
+
+Changing settings affects new Runs. Existing Runs retain their snapshot. A pending approval survives a restart. Interrupted calls with uncertain outcomes require an explicit retry or a verified tool result in the Web UI; retries may repeat an external effect or model charge. Cancellation stops local work and retains uncertainty; it cannot roll back external effects. Only successful turns enter conversation history.
+
+Use **Delete conversation** for an idle session to remove its Runs, traces, events, previews, and checkpoints. Raw data is stored locally without application-level encryption. Redaction masks common patterns and fields; review exports before sharing.
+
+## Current Implementation and Limits
+
+| Area | Implemented baseline | Deliberately deferred |
+| --- | --- | --- |
+| Composer | Embedded blocks, aggregate preset revisions, conditions/variables as JSON, ordering, duplication, deterministic preview | Shared block library, historical revision editor, drag-and-drop |
+| Runtime | One LangGraph worker, bounded model/tool attempts, streaming, approval, cancellation, durable receipts, explicit recovery | Multiple workers, multi-agent orchestration, automatic retries |
+| Providers | Offline simulation and OpenAI-compatible text/tool streaming with request capture | Other provider protocols, images, automatic capability negotiation |
+| Tools | Controlled file reads, echo, stateless stdio/HTTP MCP with schema checks | Stateful MCP sessions, built-in shell/Python sandbox, IDA/Ghidra acceptance |
+| Inspection | Per-call canonical/prepared/captured requests, results, actual usage when returned, export, session deletion | Replay imports, automatic retention jobs, side-by-side comparisons, cost catalog |
+
+Presets own their blocks; settings own provider options, permissions, and MCP connections. Versions protect edits and immutable snapshots preserve execution evidence. Each backend responsibility is a small module, without generic repository or plugin abstractions. MCP opens a fresh session for each discovery/call, so a server that requires a long-lived analysis session needs a future adapter. The sidebar lists the 100 most recent sessions. Context estimates use a byte heuristic; unknown usage remains `null` and no automatic trimming occurs. Approvals remain pending until explicitly resolved or cancelled.
+
+## Development and Verification
+
+For live frontend development, run the backend command above and `npm --prefix web run dev` in another terminal. Open http://127.0.0.1:5173; Vite proxies `/api` to the backend. After changing API contracts, regenerate the committed TypeScript types:
+
+```powershell
+uv run python scripts/export_api.py
+npm --prefix web run generate:api
+```
+
+Checks from the repository root:
+
+```powershell
+uv run pytest
+uv run ruff check src tests scripts migrations
+uv run black --check src tests scripts migrations
+uv run isort --check-only src tests scripts migrations
+npm --prefix web run lint
+npm --prefix web run typecheck
+npm --prefix web run test -- --run
+npm --prefix web run format:check
+npm --prefix web run build
+```
+
+Browser tests start their own loopback backend with temporary data under `var/`. Build the frontend first, then:
+
+```powershell
+Set-Location web
+npx playwright install chromium
+npm run test:e2e
+```
+
+Default Python tests use temporary SQLite databases, HTTP mocks, and local stdio/HTTP MCP fixtures. Browser tests cover editing, request inspection, tool approval/rejection, cancellation, refresh, settings, MCP execution, and narrow layouts. These checks do not call paid or external model services.
 
 ## Description
 A prompt-orchestrated AI agent platform built with LangChain, LangGraph, FastAPI, and MCP.
@@ -280,7 +372,7 @@ See the [architecture design](docs/architecture.md) for data flows, error handli
 
 ## Implementation Roadmap
 
-All milestones are planned and remain incomplete. M0–M4 together form the first usable release.
+The local baseline covers the core workflows in M0–M4. The detailed design also contains deferred capabilities listed above; this is not a claim that every design proposal has shipped. Live model acceptance remains pending user endpoint configuration.
 
 | Milestone | Deliverables | Completion criteria |
 | --- | --- | --- |
@@ -291,4 +383,4 @@ All milestones are planned and remain incomplete. M0–M4 together form the firs
 | M4 Usability and recovery | Cancellation, reconnection, checkpoint recovery, trace export, and end-to-end tests | State remains reliable after refreshes and process restarts; side effects are not blindly retried |
 | M5 Evaluation and extensions | A/B tests, ablation, specialized tools, PostgreSQL, and more | Each capability is delivered against its own requirements and acceptance evidence |
 
-Implementation starts with M0. The design and development guidelines above define the target layout, proposed development commands, and acceptance criteria for each milestone.
+M5 remains future work. Extend the current vertical workflow only when a concrete use case requires it.

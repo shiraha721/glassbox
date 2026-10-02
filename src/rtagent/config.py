@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     workspace_root: Path = Path(".")
     access_token: str = ""
     allowed_origins: list[str] = [
+        "http://127.0.0.1:8001",
+        "http://localhost:8001",
         "http://127.0.0.1:8000",
         "http://localhost:8000",
         "http://127.0.0.1:5173",

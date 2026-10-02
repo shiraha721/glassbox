@@ -21,6 +21,9 @@ dependencies = [
   "anyio>=4,<5",
 ]
 
+[project.scripts]
+rtagent = "rtagent.main:serve"
+
 [dependency-groups]
 dev = [
   "pytest>=8.3,<10",

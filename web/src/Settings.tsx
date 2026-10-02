@@ -1,0 +1,423 @@
+import { useState } from 'react';
+import { Plus, RefreshCw, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { request, errorMessage, type Bootstrap, type Config } from './api/client';
+
+/** Edit one versioned settings aggregate and explicitly discover configured MCP servers. */
+export function Settings({
+  data,
+  onClose,
+  onSaved,
+}: {
+  data: Bootstrap;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(data.config);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const provider = draft.provider;
+  const setProvider = (patch: Partial<Config['provider']>) =>
+    setDraft({ ...draft, provider: { ...provider, ...patch } });
+  const save = async (discover = false) => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const saved = await request<Config>('/config', 'PUT', draft);
+      setDraft(saved);
+      if (discover) await request('/tools/refresh', 'POST');
+      await onSaved();
+      setNotice(
+        discover
+          ? 'Settings saved. Discovery complete; review server errors and tool permissions below.'
+          : 'Settings saved. Create a new preview to use them.',
+      );
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+      >
+        <header className="modal-heading">
+          <SlidersHorizontal size={18} />
+          <h2 id="settings-title">Workspace settings</h2>
+          <button className="icon-button" onClick={onClose} aria-label="Close settings">
+            <X size={19} />
+          </button>
+        </header>
+        <div className="settings-content">
+          <fieldset disabled={busy}>
+            <section>
+              <div className="section-label">01 / MODEL</div>
+              <h3>Choose your endpoint</h3>
+              <label>
+                Provider
+                <select
+                  value={provider.adapter}
+                  onChange={(event) =>
+                    setProvider({ adapter: event.target.value as 'fake' | 'openai' })
+                  }
+                >
+                  <option value="fake">Simulated model · offline</option>
+                  <option value="openai">OpenAI-compatible · Chat Completions</option>
+                </select>
+              </label>
+              {provider.adapter === 'fake' ? (
+                <p className="notice">
+                  No key or network needed. Model responses are simulated; local and MCP tools
+                  execute normally.
+                </p>
+              ) : (
+                <>
+                  <div className="form-grid">
+                    <label>
+                      Base URL
+                      <input
+                        value={provider.base_url}
+                        onChange={(event) => setProvider({ base_url: event.target.value })}
+                        placeholder="https://api.openai.com/v1"
+                      />
+                    </label>
+                    <label>
+                      Model
+                      <input
+                        value={provider.model}
+                        onChange={(event) => setProvider({ model: event.target.value })}
+                        placeholder="Model ID served by your endpoint"
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    Credential environment variable
+                    <input
+                      value={provider.credential_ref}
+                      onChange={(event) => setProvider({ credential_ref: event.target.value })}
+                      placeholder="OPENAI_API_KEY"
+                    />
+                  </label>
+                  <p className="subtle">
+                    Set the key in the server environment or .env file. Enter only the variable name
+                    here. Leave blank for a keyless local endpoint.
+                  </p>
+                </>
+              )}
+              <div className="form-grid thirds">
+                <label>
+                  Temperature
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    value={provider.temperature}
+                    onChange={(event) => setProvider({ temperature: Number(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  Max output tokens
+                  <input
+                    type="number"
+                    min="1"
+                    value={provider.max_output_tokens}
+                    onChange={(event) =>
+                      setProvider({ max_output_tokens: Number(event.target.value) })
+                    }
+                  />
+                </label>
+                <label>
+                  Context window
+                  <input
+                    type="number"
+                    min="256"
+                    placeholder="Unknown"
+                    value={provider.context_window ?? ''}
+                    onChange={(event) =>
+                      setProvider({
+                        context_window: event.target.value ? Number(event.target.value) : null,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </section>
+            <section>
+              <div className="section-label">02 / TOOLS</div>
+              <h3>Set the execution boundaries</h3>
+              <p className="subtle">
+                Permissions are enforced by the server. New MCP tools remain disabled until you
+                select Ask or Allow.
+              </p>
+              {data.tools.map((tool) => (
+                <div className="tool-setting" key={tool.name}>
+                  <div>
+                    <strong title={tool.name}>{tool.original_name || tool.name}</strong>
+                    <p>{tool.description}</p>
+                  </div>
+                  <select
+                    aria-label={`${tool.name} permission`}
+                    value={draft.tools[tool.name] || 'deny'}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        tools: {
+                          ...draft.tools,
+                          [tool.name]: event.target.value as 'allow' | 'ask' | 'deny',
+                        },
+                      })
+                    }
+                  >
+                    <option value="deny">Disabled</option>
+                    <option value="ask">Ask each time</option>
+                    <option value="allow">Allow</option>
+                  </select>
+                </div>
+              ))}
+              {Object.keys(draft.tools)
+                .filter((name) => !data.tools.some((tool) => tool.name === name))
+                .map((name) => (
+                  <div className="tool-setting" key={name}>
+                    <p>{name} · unavailable until discovery</p>
+                    <button
+                      className="text-button"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          tools: Object.fromEntries(
+                            Object.entries(draft.tools).filter(([key]) => key !== name),
+                          ),
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+            </section>
+            <section>
+              <div className="section-label">03 / MCP</div>
+              <h3>Connect your tools</h3>
+              <p className="subtle">
+                Each operation opens a fresh connection. This release supports stateless servers. A
+                stdio command runs on this computer.
+              </p>
+              {draft.mcp_servers.map((server, index) => {
+                const change = (patch: Partial<typeof server>) =>
+                  setDraft({
+                    ...draft,
+                    mcp_servers: draft.mcp_servers.map((item, i) =>
+                      i === index ? { ...item, ...patch } : item,
+                    ),
+                  });
+                return (
+                  <div className="server-card" key={server.id}>
+                    <div className="row">
+                      <label>
+                        Server name
+                        <input
+                          value={server.name}
+                          onChange={(event) => change({ name: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        Transport
+                        <select
+                          value={server.transport}
+                          onChange={(event) =>
+                            change({ transport: event.target.value as typeof server.transport })
+                          }
+                        >
+                          <option value="stdio">stdio</option>
+                          <option value="streamable_http">Streamable HTTP</option>
+                        </select>
+                      </label>
+                      <button
+                        className="icon-button"
+                        aria-label={`Remove ${server.name}`}
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            mcp_servers: draft.mcp_servers.filter((item) => item.id !== server.id),
+                          })
+                        }
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    {server.transport === 'stdio' ? (
+                      <>
+                        <label>
+                          Executable
+                          <input
+                            value={server.command}
+                            onChange={(event) => change({ command: event.target.value })}
+                            placeholder="Absolute path or executable on PATH"
+                          />
+                        </label>
+                        <label>
+                          Arguments · one per line
+                          <textarea
+                            rows={3}
+                            value={server.args.join('\n')}
+                            onChange={(event) =>
+                              change({
+                                args: event.target.value ? event.target.value.split('\n') : [],
+                              })
+                            }
+                            className="code-input"
+                            spellCheck={false}
+                          />
+                        </label>
+                        <label>
+                          Working directory
+                          <input
+                            value={server.cwd || ''}
+                            onChange={(event) => change({ cwd: event.target.value || null })}
+                            placeholder="Optional"
+                          />
+                        </label>
+                        <label>
+                          Environment references · NAME=SERVER_VARIABLE
+                          <textarea
+                            rows={2}
+                            spellCheck={false}
+                            className="code-input"
+                            defaultValue={Object.entries(server.env)
+                              .map(([key, value]) => `${key}=${value}`)
+                              .join('\n')}
+                            onBlur={(event) => {
+                              const entries = event.target.value
+                                .split('\n')
+                                .filter(Boolean)
+                                .map((line) => {
+                                  const separator = line.indexOf('=');
+                                  return separator < 0
+                                    ? [line, '']
+                                    : [line.slice(0, separator), line.slice(separator + 1)];
+                                });
+                              change({ env: Object.fromEntries(entries) });
+                            }}
+                          />
+                        </label>
+                      </>
+                    ) : (
+                      <>
+                        <label>
+                          MCP URL
+                          <input
+                            value={server.url}
+                            onChange={(event) => change({ url: event.target.value })}
+                            placeholder="http://127.0.0.1:9000/mcp"
+                          />
+                        </label>
+                        <label>
+                          Bearer credential environment variable
+                          <input
+                            value={server.credential_ref}
+                            onChange={(event) => change({ credential_ref: event.target.value })}
+                            placeholder="Optional server-side variable name"
+                          />
+                        </label>
+                      </>
+                    )}
+                    {data.tool_errors[server.id] && (
+                      <p className="error-text" role="alert">
+                        {data.tool_errors[server.id]}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="row">
+                <button
+                  className="button small"
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      mcp_servers: [
+                        ...draft.mcp_servers,
+                        {
+                          id: crypto.randomUUID(),
+                          name: 'MCP server',
+                          transport: 'stdio',
+                          command: '',
+                          args: [],
+                          cwd: null,
+                          url: '',
+                          env: {},
+                          credential_ref: '',
+                        },
+                      ],
+                    })
+                  }
+                >
+                  <Plus size={14} />
+                  Add server
+                </button>
+                <button className="button small" disabled={busy} onClick={() => void save(true)}>
+                  <RefreshCw size={14} />
+                  Save & discover
+                </button>
+              </div>
+            </section>
+            <section>
+              <div className="section-label">04 / LIMITS</div>
+              <h3>Keep runs bounded</h3>
+              <div className="form-grid">
+                {(
+                  [
+                    ['max_steps', 'Model attempts'],
+                    ['max_tool_calls', 'Tool attempts'],
+                    ['tool_timeout', 'Tool timeout (seconds)'],
+                    ['run_timeout', 'Active run budget (seconds)'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <input
+                      type="number"
+                      min="1"
+                      value={draft[key]}
+                      onChange={(event) =>
+                        setDraft({ ...draft, [key]: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+              <p className="subtle">
+                Workspace: <code>{data.workspace_root}</code>
+              </p>
+            </section>
+          </fieldset>
+        </div>
+        <footer className="modal-footer">
+          <div aria-live="polite">
+            {error && (
+              <p className="error-text" role="alert">
+                {error}
+              </p>
+            )}
+            {notice && <p className="success-text">{notice}</p>}
+          </div>
+          <button className="button primary" disabled={busy} onClick={() => void save()}>
+            {busy ? 'Saving…' : 'Save settings'}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}

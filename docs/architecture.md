@@ -1,10 +1,26 @@
 # Security Agent Studio: Architecture and Detailed Design
 
-Status: design proposal; not implemented. Last updated: 2026-10-02.
+Status: local MVP implemented; broader target design retained below. Last updated: 2026-10-03.
 
 This document expands the product goals in the [README](../README.md) into implementable modules, data flows, interfaces, and acceptance criteria.
-The first release must include a working Web UI, as confirmed by the user. Other additions are design recommendations; dependency versions will be verified and pinned during project initialization.
-At the time of writing, the repository contains only documentation. All directories, tables, interfaces, and commands below describe the target design.
+The baseline includes a working Web UI. Dependency versions are recorded in `uv.lock` and `web/package-lock.json`. The README is the source of truth for runnable commands and current limitations.
+
+## Implemented Baseline
+
+The implementation intentionally keeps the first usable workflow small. The following choices take precedence over the more extensive target models and endpoints later in this document:
+
+- Each backend responsibility is one module under `src/rtagent/`. FastAPI routes call `Studio`; the entry point owns the repository, tool registry, Runner, and checkpoint lifecycle. There are no generic service interfaces or empty extension packages.
+- A `Preset` owns its blocks and revision. `StudioConfig` owns provider options, MCP servers, permissions, and limits. There is no independently versioned block library or historical configuration editor. Runs retain immutable copies of these aggregates, the session revision, tool schemas, workspace path, and prepared input.
+- The pure compiler implements two placements, restricted JSON conditions, typed literal variables, source mapping, and explicit budget errors. Preview persists that compilation; Run creation verifies its hash, expiry, and revisions atomically. The first model request must match the preview.
+- The explicit LangGraph has model and tool nodes; policy checks run before each tool. One process executes one graph invocation at a time. Approval interrupts release the worker. `thread_id = run_id`. Receipts let reentered nodes reuse known results; uncertain effects require explicit reconciliation. Retried calls retain previous attempt evidence.
+- SQLite application tables are `settings`, `presets`, `sessions`, `previews`, `runs`, `events`, `calls`, and `browser_sessions`. Alembic owns their schema. LangGraph owns a separate checkpoint database. Events and Run projections change in the same transaction; successful completion commits conversation history and releases the session together.
+- The OpenAI-compatible adapter uses LangChain Chat Completions and verifies the serialized body at an HTTP request hook before dispatch. It records canonical messages, prepared and captured bodies, transformations, response metadata, and usage. HTTP mocks verify this boundary; no live endpoint was available for acceptance. The fake adapter clearly records that it sent no network request.
+- MCP uses the official SDK with fresh stdio or Streamable HTTP sessions for each operation. It supports stateless servers, namespaced discovery, explicit local permissions, schema pinning, bounded output, and lifecycle cleanup. Stateful analysis sessions and approval expiry timers are deferred.
+- The React interface has composer, conversation, inspector, and settings panels. It uses generated API contracts and TanStack Query. SSE events invalidate saved-state queries; sequence checks remove duplicates and reconnecting never submits execution commands. A periodic state read is a fallback while a Run is active. Raw trace inspection is explicit; exports are always labeled as redacted.
+
+Actual API groups under `/api/v1` are `/auth/session`, `/bootstrap`, `/config`, `/presets/{id}`, `/tools/refresh`, `/sessions`, `/prompts/preview`, and `/runs`. Run subresources provide approval, cancellation, recovery, events, trace, and export. The generated `/openapi.json` describes the exact methods and payloads. There is no separate CRUD service for every proposed version entity.
+
+The remaining sections are the longer-term design reference. Shared block libraries, stateful MCP connections, comparison/evaluation views, automatic retention, replay imports, broader provider capabilities, and separate worker services are not part of this baseline.
 
 ## 1. Product Scope and First Release Experience
 
@@ -500,7 +516,7 @@ Every event uses a common envelope. Define discriminated Pydantic payload types 
 ```text
 id: 17
 event: tool.completed
-data: {"schema_version":1,"run_id":"run_example","seq":17,"timestamp":"2026-10-02T08:00:00Z","payload":{"tool_call_id":"call_1","status":"succeeded","result_ref":"artifact_example"}}
+data: {"schema_version":1,"run_id":"run_example","seq":17,"timestamp":"2026-10-03T08:00:00Z","payload":{"tool_call_id":"call_1","status":"succeeded","result_ref":"artifact_example"}}
 ```
 
 Persist state and events before waking SSE subscribers. Read with `seq > cursor`; the database is the event source, and in-process notifications only reduce waiting time.
@@ -605,7 +621,7 @@ Separate application settings, provider references, MCP connections, tool profil
 
 During development, run the frontend and backend separately with Vite proxying `/api`. For releases, build `web/dist` and serve it through FastAPI; SPA route fallback must not swallow `/api` 404 responses.
 Default to one local worker. Before extracting a separate Runner or adding processes, design task-claim leases and idempotency protocols.
-See [AGENTS.md](../AGENTS.md) for proposed commands. They are not verified runnable commands until project initialization is complete.
+See [AGENTS.md](../AGENTS.md) and the [README quickstart](../README.md#quickstart) for current commands.
 
 ## 13. Implementation Plan and Completion Criteria
 
@@ -649,7 +665,7 @@ Complete first-release acceptance scenarios:
 Default tests use FakeProvider, temporary SQLite databases, temporary workspaces, and controlled MCP test servers. They do not depend on network access, paid models, or installed IDA/Ghidra instances.
 Real integration tests use explicit markers and separate configuration. Model output is not fixed; do not require verbatim equality for success.
 Frontend builds, type checks, and browser workflows are part of release acceptance. Passing API tests alone is insufficient.
-During the documentation phase, verify document consistency and examples only. There is no executable project yet, so do not report application test pass rates or performance measurements.
+Verification of the baseline includes compiler and provider contracts, SQLite/API tests, injected execution interruptions, local MCP transport fixtures, and browser workflows. Live model behavior remains a separate acceptance step; do not present mocked HTTP results as live service verification.
 
 ## 15. Evaluation Extensions and Design Risks
 
