@@ -91,7 +91,7 @@ docs/              Architecture and necessary decision records
 - Use React + TypeScript + Vite for the frontend, manage dependencies with npm, and commit `package-lock.json`. Pin exact versions during initialization.
 - Use Ruff for linting, Black for formatting, and isort for import sorting. Set a shared line length of 100 and the isort Black profile; do not duplicate import sorting in Ruff.
 - Enable TypeScript strict mode, ESLint, and Prettier. Generate API types from backend schemas.
-- Write code identifiers and repository documentation in English. Task updates follow the user's language. Comments explain reasons, constraints, and boundaries instead of restating code.
+- Write code identifiers, docstrings, comments, and repository documentation in English. Task updates follow the user's language. Public classes, functions, and methods need meaningful docstrings. Add comments at important invariants and non-obvious boundaries; explain reasons instead of restating code.
 - Store timestamps in UTC and display them in the user's timezone. Use stable IDs and explicit schema versions.
 - Use `pathlib` and argument arrays for child processes. Support Windows development without relying on implicit Bash behavior or concatenated shell commands.
 - Apply database changes through Alembic. Manage application tables and LangGraph checkpoints through their respective mechanisms; do not directly modify third-party internal tables.

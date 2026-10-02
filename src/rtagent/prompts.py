@@ -11,6 +11,7 @@ VARIABLE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z_0-9]*)\s*\}\}")
 
 
 def condition_value(condition: dict[str, Any], context: dict[str, Any], depth: int = 0) -> bool:
+    """Evaluate the restricted condition grammar; reject malformed or missing fields."""
     if depth > 12:
         raise AppError("invalid_condition", "Conditions may nest at most 12 levels.")
     keys = set(condition)
@@ -58,6 +59,10 @@ def compile_prompt(
     tools: list[dict[str, Any]],
     delta: list[Message] | None = None,
 ) -> CompiledPrompt:
+    """Compile a frozen configuration without I/O or implicit message transformations.
+
+    History, the current input, and runtime results each enter exactly once.
+    Invalid ordering, variables, conditions, or context budgets raise AppError."""
     positions, block_ids = set(), set()
     slots: dict[str, list[Message]] = {"before_history": [], "before_input": []}
     report = []

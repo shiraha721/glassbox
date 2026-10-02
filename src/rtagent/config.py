@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def resolve_secret(reference: str) -> str:
+    """Resolve an environment reference at execution time, with a local .env fallback."""
     if not reference:
         return ""
     if not reference.isidentifier() or not reference.isascii():
@@ -17,6 +18,8 @@ def resolve_secret(reference: str) -> str:
 
 
 class Settings(BaseSettings):
+    """Local process configuration kept outside versioned Run settings."""
+
     model_config = SettingsConfigDict(env_prefix="STUDIO_", env_file=".env", extra="ignore")
 
     data_dir: Path = Path("var")
@@ -30,6 +33,7 @@ class Settings(BaseSettings):
     ]
 
     def initialize(self) -> None:
+        """Resolve local paths and persist one private workspace access token."""
         self.data_dir = self.data_dir.resolve()
         self.workspace_root = self.workspace_root.resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -46,4 +50,5 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        """Build an absolute SQLite URL compatible with Windows paths."""
         return "sqlite+aiosqlite:///" + (self.data_dir.resolve() / "app.db").as_posix()

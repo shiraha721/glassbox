@@ -10,35 +10,47 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def uid() -> str:
+    """Create a stable, URL-safe identifier without coordination between callers."""
     return uuid4().hex
 
 
 def now() -> str:
+    """Return an ISO timestamp in UTC for storage and event ordering."""
     return datetime.now(UTC).isoformat()
 
 
 def digest(value: Any) -> str:
+    """Hash canonical JSON so equivalent mapping orders share one fingerprint."""
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
 class AppError(Exception):
+    """An expected application failure with a safe message and HTTP mapping."""
+
     def __init__(self, code: str, message: str, status: int = 422, details: Any = None):
+        """Keep public error details separate from internal exception diagnostics."""
         super().__init__(message)
         self.code, self.message, self.status, self.details = code, message, status, details
 
 
 class Contract(BaseModel):
+    """Reject unknown fields at configuration and API boundaries."""
+
     model_config = ConfigDict(extra="forbid")
 
 
 class Variable(Contract):
+    """Declare the type and fallback used by literal template substitution."""
+
     type: Literal["string", "number", "boolean"] = "string"
     required: bool = True
     default: Any = None
 
 
 class Block(Contract):
+    """One configurable message, activated and ordered by the pure compiler."""
+
     id: str = Field(default_factory=uid)
     name: str = Field(min_length=1, max_length=120)
     role: Literal["system", "user", "assistant"] = "system"
@@ -53,6 +65,8 @@ class Block(Contract):
 
 
 class Preset(Contract):
+    """Version a collection of embedded blocks as a single editable aggregate."""
+
     id: str = Field(default_factory=uid)
     name: str = Field(min_length=1, max_length=120)
     revision: int = Field(default=0, ge=0)
@@ -60,6 +74,8 @@ class Preset(Contract):
 
 
 class ProviderConfig(Contract):
+    """Serializable provider options containing references, never API key values."""
+
     adapter: Literal["fake", "openai"] = "fake"
     model: str = "studio-demo"
     base_url: str = "http://127.0.0.1:11434/v1"
@@ -71,12 +87,15 @@ class ProviderConfig(Contract):
     @field_validator("credential_ref")
     @classmethod
     def credential_name(cls, value: str) -> str:
+        """Accept environment variable names and reject literal credential values."""
         if value and (not value.isidentifier() or not value.isascii()):
             raise ValueError("Use an environment variable name, not a secret value.")
         return value
 
 
 class MCPServer(Contract):
+    """Connection settings for an explicitly configured MCP server."""
+
     id: str = Field(default_factory=uid)
     name: str = Field(min_length=1, max_length=60)
     transport: Literal["stdio", "streamable_http"] = "stdio"
@@ -89,6 +108,8 @@ class MCPServer(Contract):
 
 
 class ToolDefinition(Contract):
+    """A namespaced tool schema pinned into each execution snapshot."""
+
     name: str
     description: str
     input_schema: dict[str, Any]
@@ -98,6 +119,8 @@ class ToolDefinition(Contract):
 
 
 class StudioConfig(Contract):
+    """Version provider, tool permissions, connections, and execution limits together."""
+
     revision: int = Field(default=0, ge=0)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
     tools: dict[str, Literal["allow", "ask", "deny"]] = Field(
@@ -111,12 +134,16 @@ class StudioConfig(Contract):
 
 
 class ToolCall(Contract):
+    """Preserve a model-generated call ID with its decoded arguments."""
+
     id: str
     name: str
     args: dict[str, Any]
 
 
 class Message(Contract):
+    """Canonical message with provenance and explicit tool-call pairing."""
+
     role: Literal["system", "user", "assistant", "tool"]
     content: str = ""
     source: str = "runtime"
@@ -125,6 +152,8 @@ class Message(Contract):
 
 
 class CompiledPrompt(Contract):
+    """Deterministic messages, activation decisions, provenance, and budget estimate."""
+
     messages: list[Message]
     activation_report: list[dict[str, Any]]
     source_map: list[dict[str, Any]]
@@ -134,6 +163,8 @@ class CompiledPrompt(Contract):
 
 
 class PreviewRequest(Contract):
+    """Bind a preview to the configuration and session revisions the user edited."""
+
     session_id: str
     expected_session_revision: int
     preset_id: str
@@ -144,6 +175,8 @@ class PreviewRequest(Contract):
 
 
 class Preview(Contract):
+    """An expiring compiled input and the exact prepared provider payload."""
+
     id: str
     input_hash: str
     compiled: CompiledPrompt
@@ -153,25 +186,35 @@ class Preview(Contract):
 
 
 class StartRun(Contract):
+    """Consume a saved preview without accepting replacement execution settings."""
+
     preview_id: str
     input_hash: str
     expected_session_revision: int
 
 
 class ApprovalDecision(Contract):
+    """A human decision for one pending tool invocation."""
+
     decision: Literal["approve", "reject"]
 
 
 class RecoveryDecision(Contract):
+    """Explicitly retry an uncertain call or supply an externally verified result."""
+
     action: Literal["retry", "record"]
     result: str = ""
 
 
 class ResumeRequest(Contract):
+    """Require a decision for every call whose external outcome is unknown."""
+
     resolutions: dict[str, RecoveryDecision] = Field(default_factory=dict)
 
 
 class RunEvent(Contract):
+    """Versioned, persistent SSE envelope with a per-Run sequence number."""
+
     schema_version: int = 1
     run_id: str
     seq: int
@@ -181,6 +224,8 @@ class RunEvent(Contract):
 
 
 class SessionView(Contract):
+    """Conversation history containing only committed successful turns."""
+
     id: str
     title: str
     revision: int
@@ -190,6 +235,8 @@ class SessionView(Contract):
 
 
 class RunView(Contract):
+    """Browser projection of execution state, approvals, usage, and recovery needs."""
+
     id: str
     session_id: str
     status: str

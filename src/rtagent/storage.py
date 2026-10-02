@@ -105,7 +105,10 @@ TERMINAL = {"succeeded", "failed", "cancelled"}
 
 
 class Repository:
+    """Persist business data with short SQLite transactions and serialized writers."""
+
     def __init__(self, database_url: str):
+        """Configure the async engine and SQLite integrity settings."""
         self.url = database_url
         self.engine = create_async_engine(database_url)
         self.lock = asyncio.Lock()
@@ -119,6 +122,8 @@ class Repository:
             cursor.close()
 
     async def initialize(self) -> None:
+        """Apply Alembic migrations and seed the initial preset and settings once."""
+
         def migrate() -> None:
             root = Path(__file__).resolve().parents[2]
             config = Config(str(root / "alembic.ini"))
@@ -169,9 +174,11 @@ class Repository:
                 )
 
     async def close(self) -> None:
+        """Release the database connection pool during application shutdown."""
         await self.engine.dispose()
 
     async def _one(self, table: Table, identifier: str) -> dict[str, Any]:
+        """Fetch one row or raise a stable application-level not-found error."""
         async with self.engine.connect() as connection:
             row = (
                 (await connection.execute(select(table).where(table.c.id == identifier)))
@@ -183,9 +190,11 @@ class Repository:
         return dict(row)
 
     async def config(self) -> StudioConfig:
+        """Read the current versioned settings aggregate."""
         return StudioConfig.model_validate((await self._one(settings_table, "default"))["data"])
 
     async def save_config(self, value: StudioConfig) -> StudioConfig:
+        """Replace settings only when the submitted revision is current."""
         async with self.lock, self.engine.begin() as connection:
             current = (await connection.execute(select(settings_table.c.data))).scalar_one()
             if current["revision"] != value.revision:
@@ -197,14 +206,17 @@ class Repository:
         return saved
 
     async def list_presets(self) -> list[Preset]:
+        """Load editable preset aggregates from the local database."""
         async with self.engine.connect() as connection:
             values = (await connection.execute(select(presets.c.data))).scalars().all()
         return [Preset.model_validate(value) for value in values]
 
     async def preset(self, identifier: str) -> Preset:
+        """Read one preset including its embedded blocks and revision."""
         return Preset.model_validate((await self._one(presets, identifier))["data"])
 
     async def save_preset(self, value: Preset) -> Preset:
+        """Create or update a preset with optimistic concurrency protection."""
         async with self.lock, self.engine.begin() as connection:
             current = (
                 await connection.execute(select(presets.c.data).where(presets.c.id == value.id))
@@ -225,6 +237,7 @@ class Repository:
         return saved
 
     async def new_session(self, title: str = "New investigation") -> dict[str, Any]:
+        """Create an empty conversation with no active Run."""
         value = {
             "id": uid(),
             "title": title[:120],
@@ -238,9 +251,11 @@ class Repository:
         return value
 
     async def session(self, identifier: str) -> dict[str, Any]:
+        """Load the authoritative history and active-Run reference."""
         return await self._one(sessions, identifier)
 
     async def list_sessions(self) -> list[dict[str, Any]]:
+        """Return the most recent local conversations for the sidebar."""
         async with self.engine.connect() as connection:
             return [
                 dict(row)
@@ -252,15 +267,18 @@ class Repository:
             ]
 
     async def put_preview(self, identifier: str, data: dict[str, Any]) -> None:
+        """Persist the compiled preview and its immutable execution snapshot."""
         async with self.lock, self.engine.begin() as connection:
             await connection.execute(insert(previews).values(id=identifier, data=data))
 
     async def preview(self, identifier: str) -> dict[str, Any]:
+        """Load a previously prepared input by its stable identifier."""
         return (await self._one(previews, identifier))["data"]
 
     async def create_run(
         self, preview_id: str, request: dict[str, Any], key: str
     ) -> dict[str, Any]:
+        """Atomically claim a fresh preview and session, or return an idempotent retry."""
         async with self.lock, self.engine.begin() as connection:
             existing = (
                 (await connection.execute(select(runs).where(runs.c.idempotency_key == key)))
@@ -346,9 +364,11 @@ class Repository:
         return value
 
     async def run(self, identifier: str) -> dict[str, Any]:
+        """Read a Run including its private frozen snapshot and current projection."""
         return await self._one(runs, identifier)
 
     async def list_runs(self, session_id: str) -> list[dict[str, Any]]:
+        """Read conversation Runs in creation order."""
         async with self.engine.connect() as connection:
             return [
                 dict(row)
@@ -364,6 +384,7 @@ class Repository:
     async def _event(
         self, connection, run_id: str, event_type: str, payload: dict[str, Any], **changes
     ) -> None:
+        """Append a sequence-numbered event and update its projection in one transaction."""
         row = (await connection.execute(select(runs).where(runs.c.id == run_id))).mappings().one()
         seq, stamp = row["latest_event_seq"] + 1, now()
         await connection.execute(
@@ -378,10 +399,12 @@ class Repository:
         )
 
     async def emit(self, run_id: str, event_type: str, payload: dict[str, Any], **changes) -> None:
+        """Commit an event and associated state changes under the writer lock."""
         async with self.lock, self.engine.begin() as connection:
             await self._event(connection, run_id, event_type, payload, **changes)
 
     async def delta(self, run_id: str, call_id: str, text: str) -> None:
+        """Append streamed text and persist its replay event atomically."""
         async with self.lock, self.engine.begin() as connection:
             previous = (
                 await connection.execute(select(runs.c.partial_output).where(runs.c.id == run_id))
@@ -397,6 +420,7 @@ class Repository:
     async def finish(
         self, run_id: str, status: str, messages: list[dict], reason: str, error: str | None = None
     ) -> None:
+        """Finish once, release the session, and commit history only on success."""
         async with self.lock, self.engine.begin() as connection:
             run = (
                 (await connection.execute(select(runs).where(runs.c.id == run_id))).mappings().one()
@@ -446,6 +470,7 @@ class Repository:
             )
 
     async def read_events(self, run_id: str, after: int) -> list[dict[str, Any]]:
+        """Read a bounded page strictly after the supplied persistent cursor."""
         async with self.engine.connect() as connection:
             rows = (
                 await connection.execute(
@@ -458,6 +483,7 @@ class Repository:
             return [{"schema_version": 1, **dict(row)} for row in rows]
 
     async def call(self, identifier: str) -> dict[str, Any] | None:
+        """Look up a durable call receipt; missing calls return None."""
         try:
             return await self._one(calls, identifier)
         except AppError:
@@ -466,6 +492,7 @@ class Repository:
     async def save_call(
         self, identifier: str, run_id: str, kind: str, status: str, data: dict, result: Any = None
     ) -> None:
+        """Persist call intent or outcome at the model/tool side-effect boundary."""
         async with self.lock, self.engine.begin() as connection:
             exists = (
                 await connection.execute(select(calls.c.id).where(calls.c.id == identifier))
@@ -485,6 +512,7 @@ class Repository:
                 await connection.execute(insert(calls).values(id=identifier, **values))
 
     async def trace(self, run_id: str) -> list[dict[str, Any]]:
+        """Load stored model and tool evidence for inspection or recovery."""
         async with self.engine.connect() as connection:
             return [
                 dict(row)
@@ -496,6 +524,7 @@ class Repository:
             ]
 
     async def recover(self) -> list[str]:
+        """Mark abandoned effects uncertain and return work that was still queued."""
         async with self.lock, self.engine.begin() as connection:
             await connection.execute(
                 update(calls).where(calls.c.status == "executing").values(status="outcome_unknown")
@@ -524,6 +553,7 @@ class Repository:
             )
 
     async def create_browser_session(self, token: str, csrf: str) -> None:
+        """Store only the hash of a fresh browser session token."""
         async with self.lock, self.engine.begin() as connection:
             await connection.execute(
                 delete(browser_sessions).where(browser_sessions.c.expires_at < now())
@@ -537,18 +567,21 @@ class Repository:
             )
 
     async def browser_session(self, token: str) -> dict[str, Any]:
+        """Validate an opaque browser token against its stored expiry."""
         session = await self._one(browser_sessions, digest(token))
         if session["expires_at"] < now():
             raise AppError("unauthenticated", "Local session expired.", 401)
         return session
 
     async def logout(self, token: str) -> None:
+        """Revoke a browser session without exposing its token in database records."""
         async with self.lock, self.engine.begin() as connection:
             await connection.execute(
                 delete(browser_sessions).where(browser_sessions.c.id == digest(token))
             )
 
     async def delete_session(self, session_id: str) -> list[str]:
+        """Delete an idle session and cascade its owned business records."""
         async with self.lock, self.engine.begin() as connection:
             session = (
                 (await connection.execute(select(sessions).where(sessions.c.id == session_id)))
