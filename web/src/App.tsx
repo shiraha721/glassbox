@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
   Code2,
   Eye,
-  LockKeyhole,
   MessageSquare,
   PanelLeft,
   Play,
@@ -18,7 +17,6 @@ import {
 } from 'lucide-react';
 import Markdown, { type Components } from 'react-markdown';
 import {
-  authenticate,
   errorMessage,
   request,
   terminal,
@@ -39,85 +37,8 @@ const markdownComponents: Components = {
   img: ({ alt }) => <span className="subtle">[Image: {alt || 'external content'}]</span>,
 };
 
-/** Restore the local browser session before exposing saved workspace content. */
+/** Load the local workspace directly, without accounts or an unlock screen. */
 export default function App() {
-  const cache = useQueryClient();
-  const auth = useQuery({
-    queryKey: ['auth'],
-    queryFn: () => authenticate().catch(() => false),
-    staleTime: Infinity,
-  });
-  useEffect(() => {
-    const lock = () => {
-      cache.setQueryData(['auth'], false);
-      cache.removeQueries({ predicate: (query) => query.queryKey[0] !== 'auth' });
-    };
-    window.addEventListener('studio:locked', lock);
-    return () => window.removeEventListener('studio:locked', lock);
-  }, [cache]);
-  if (auth.isPending)
-    return (
-      <div className="loading-screen">
-        <span className="brand-icon">
-          <Code2 />
-        </span>
-        Opening local workspace…
-      </div>
-    );
-  if (!auth.data) return <Unlock onUnlock={() => cache.setQueryData(['auth'], true)} />;
-  return <WorkspaceLoader />;
-}
-
-/** Exchange the token once; the controlled password value is discarded on unmount. */
-function Unlock({ onUnlock }: { onUnlock: () => void }) {
-  const [token, setToken] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  return (
-    <main className="unlock-page">
-      <form
-        className="unlock-card"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setBusy(true);
-          setError('');
-          void authenticate(token)
-            .then(onUnlock)
-            .catch((caught: unknown) => setError(errorMessage(caught)))
-            .finally(() => setBusy(false));
-        }}
-      >
-        <h1>Security Agent Studio</h1>
-        <label htmlFor="access-token">Local access token</label>
-        <input
-          id="access-token"
-          type="password"
-          autoComplete="off"
-          required
-          autoFocus
-          value={token}
-          onChange={(event) => setToken(event.target.value)}
-          placeholder="Paste your token"
-        />
-        <div className="token-help">
-          <code>Get-Content var/access-token</code>
-          <small>Or use STUDIO_ACCESS_TOKEN if configured.</small>
-        </div>
-        {error && (
-          <p role="alert" className="error-text">
-            {error}
-          </p>
-        )}
-        <button className="button primary wide" disabled={busy}>
-          {busy ? 'Opening…' : 'Open workspace'}
-        </button>
-      </form>
-    </main>
-  );
-}
-
-/** Fetch initial data before mounting editable local state, so refetches cannot erase drafts. */
-function WorkspaceLoader() {
   const query = useQuery({
     queryKey: ['bootstrap'],
     queryFn: () => request<Bootstrap>('/bootstrap'),
@@ -306,18 +227,6 @@ function Workspace({ data }: { data: Bootstrap }) {
         <div className="sidebar-footer">
           <button className="nav-button" disabled={busy} onClick={() => setSettings(true)}>
             <SlidersHorizontal size={16} /> Settings
-          </button>
-          <button
-            className="nav-button"
-            disabled={busy}
-            onClick={() =>
-              void perform(async () => {
-                await request('/auth/session', 'DELETE');
-                cache.clear();
-              })
-            }
-          >
-            <LockKeyhole size={16} /> Lock workspace
           </button>
         </div>
       </aside>

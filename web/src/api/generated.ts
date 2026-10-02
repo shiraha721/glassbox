@@ -13,40 +13,12 @@ export interface paths {
         };
         /**
          * Health
-         * @description Expose process availability without requiring workspace access.
+         * @description Expose local process availability.
          */
         get: operations["health_api_v1_health_get"];
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/session": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Auth Session
-         * @description Restore the CSRF token for an already authenticated browser.
-         */
-        get: operations["auth_session_api_v1_auth_session_get"];
-        put?: never;
-        /**
-         * Unlock
-         * @description Exchange the workspace token for an HttpOnly browser cookie and CSRF token.
-         */
-        post: operations["unlock_api_v1_auth_session_post"];
-        /**
-         * Logout
-         * @description Revoke server-side authentication and clear the browser cookie.
-         */
-        delete: operations["logout_api_v1_auth_session_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1038,14 +1010,6 @@ export interface components {
             /** Calls */
             calls: components["schemas"]["CallView"][];
         };
-        /**
-         * Unlock
-         * @description Local access-token exchange payload; never persisted as configuration.
-         */
-        Unlock: {
-            /** Token */
-            token: string;
-        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1148,81 +1112,6 @@ export interface operations {
                         [key: string]: string;
                     };
                 };
-            };
-        };
-    };
-    auth_session_api_v1_auth_session_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-        };
-    };
-    unlock_api_v1_auth_session_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Unlock"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    logout_api_v1_auth_session_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

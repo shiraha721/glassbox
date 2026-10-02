@@ -1,7 +1,6 @@
 """Process settings. Model credentials are resolved only at the provider boundary."""
 
 import os
-import secrets
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -24,7 +23,6 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("var")
     workspace_root: Path = Path(".")
-    access_token: str = ""
     allowed_origins: list[str] = [
         "http://127.0.0.1:8001",
         "http://localhost:8001",
@@ -35,20 +33,10 @@ class Settings(BaseSettings):
     ]
 
     def initialize(self) -> None:
-        """Resolve local paths and persist one private workspace access token."""
+        """Resolve local paths and create the runtime data directory."""
         self.data_dir = self.data_dir.resolve()
         self.workspace_root = self.workspace_root.resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        if not self.access_token:
-            token_path = self.data_dir / "access-token"
-            if not token_path.exists():
-                try:
-                    descriptor = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                        handle.write(secrets.token_urlsafe(32))
-                except FileExistsError:
-                    pass
-            self.access_token = token_path.read_text(encoding="utf-8").strip()
 
     @property
     def database_url(self) -> str:

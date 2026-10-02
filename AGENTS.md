@@ -13,6 +13,8 @@ Inspect the actual files before starting work. Do not report the target director
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
 Multi-agent orchestration, batch evaluation, PostgreSQL, and team deployment belong to later phases.
 
+Keep the local single-user workflow simple: open the workspace directly, with no accounts, login screen, workspace access token, or lock feature. Prefer removing unnecessary code and steps over adding configuration switches or abstractions. Validate changes against the running service before expanding tests.
+
 Read in this order:
 
 1. [README.md](README.md): product goals, scope, and delivery status.

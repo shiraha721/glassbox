@@ -1,11 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
 
-/** Enter a fresh conversation through the same access boundary as a local user. */
+/** Open the local workspace directly and create a fresh conversation. */
 async function openWorkspace(page: Page) {
   await page.goto('/');
-  await page.getByLabel('Local access token').fill('playwright-local-test-token');
-  await page.getByRole('button', { name: 'Open workspace' }).click();
   await expect(page.getByLabel('Conversation workspace')).toBeAttached();
   if (!(await page.getByRole('button', { name: 'New conversation', exact: true }).isVisible()))
     await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();

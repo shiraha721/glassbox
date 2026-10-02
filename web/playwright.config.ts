@@ -22,7 +22,6 @@ export default defineConfig({
     env: {
       STUDIO_DATA_DIR: path.join(root, 'var', `e2e-${Date.now()}`),
       STUDIO_WORKSPACE_ROOT: path.join(root, 'tests', 'fixtures'),
-      STUDIO_ACCESS_TOKEN: 'playwright-local-test-token',
       STUDIO_ALLOWED_ORIGINS: '["http://127.0.0.1:8765"]',
     },
   },

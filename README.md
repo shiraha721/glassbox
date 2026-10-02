@@ -21,13 +21,7 @@ npm --prefix web run build
 uv run rtagent
 ```
 
-Open **http://127.0.0.1:8001**. Startup applies Alembic migrations, seeds an example preset, and creates a workspace token. In a second terminal:
-
-```powershell
-Get-Content var/access-token
-```
-
-Paste that token into the Web UI. It is exchanged for an HttpOnly browser cookie; the browser does not persist the workspace token. Run one server worker. Keep the service bound to loopback.
+Open **http://127.0.0.1:8001** to enter the workspace directly. No login or access token is needed. Startup applies Alembic migrations and seeds an example preset. Run one server worker, bound to loopback.
 
 Try the complete offline workflow:
 
@@ -51,7 +45,7 @@ The file reader is limited to UTF-8 files of at most 64 KiB under `STUDIO_WORKSP
 
 - `var/app.db`: presets, settings, sessions, immutable Run snapshots, events, and call receipts.
 - `var/checkpoints.db`: LangGraph checkpoints, keyed by Run ID.
-- `var/access-token`: generated local access token. These files and `.env` are ignored by Git.
+Runtime files and `.env` are ignored by Git.
 
 Changing settings affects new Runs. Existing Runs retain their snapshot. A pending approval survives a restart. Interrupted calls with uncertain outcomes require an explicit retry or a verified tool result in the Web UI; retries may repeat an external effect or model charge. Cancellation stops local work and retains uncertainty; it cannot roll back external effects. Only successful turns enter conversation history.
 

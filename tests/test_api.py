@@ -121,8 +121,10 @@ async def test_access_boundary_and_stale_preview(studio_client):
         await client.put("/api/v1/config", json={}, headers={"Origin": "https://untrusted.example"})
     ).status_code == 403
     assert (
-        await client.post("/api/v1/sessions", json={}, headers={"x-csrf-token": "wrong"})
+        await client.post("/api/v1/sessions", json={}, headers={"Sec-Fetch-Site": "cross-site"})
     ).status_code == 403
+    assert (await client.get("/api/v1/bootstrap")).status_code == 200
+    assert not client.cookies
     assert (
         await client.get("/api/v1/bootstrap", headers={"Host": "attacker.example"})
     ).status_code == 400

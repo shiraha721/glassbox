@@ -13,12 +13,12 @@ The implementation intentionally keeps the first usable workflow small. The foll
 - A `Preset` owns its blocks and revision. `StudioConfig` owns provider options, MCP servers, permissions, and limits. There is no independently versioned block library or historical configuration editor. Runs retain immutable copies of these aggregates, the session revision, tool schemas, workspace path, and prepared input.
 - The pure compiler implements two placements, restricted JSON conditions, typed literal variables, source mapping, and explicit budget errors. Preview persists that compilation; Run creation verifies its hash, expiry, and revisions atomically. The first model request must match the preview.
 - The explicit LangGraph has model and tool nodes; policy checks run before each tool. One process executes one graph invocation at a time. Approval interrupts release the worker. `thread_id = run_id`. Receipts let reentered nodes reuse known results; uncertain effects require explicit reconciliation. Retried calls retain previous attempt evidence.
-- SQLite application tables are `settings`, `presets`, `sessions`, `previews`, `runs`, `events`, `calls`, and `browser_sessions`. Alembic owns their schema. LangGraph owns a separate checkpoint database. Events and Run projections change in the same transaction; successful completion commits conversation history and releases the session together.
+- SQLite application tables are `settings`, `presets`, `sessions`, `previews`, `runs`, `events`, and `calls`. Alembic owns their schema. LangGraph owns a separate checkpoint database. Events and Run projections change in the same transaction; successful completion commits conversation history and releases the session together.
 - The OpenAI-compatible adapter uses LangChain Chat Completions and verifies the serialized body at an HTTP request hook before dispatch. It records canonical messages, prepared and captured bodies, transformations, response metadata, and usage. HTTP mocks verify this boundary; no live endpoint was available for acceptance. The fake adapter clearly records that it sent no network request.
 - MCP uses the official SDK with fresh stdio or Streamable HTTP sessions for each operation. It supports stateless servers, namespaced discovery, explicit local permissions, schema pinning, bounded output, and lifecycle cleanup. Stateful analysis sessions and approval expiry timers are deferred.
 - The React interface has composer, conversation, inspector, and settings panels. It uses generated API contracts and TanStack Query. SSE events invalidate saved-state queries; sequence checks remove duplicates and reconnecting never submits execution commands. A periodic state read is a fallback while a Run is active. Raw trace inspection is explicit; exports are always labeled as redacted.
 
-Actual API groups under `/api/v1` are `/auth/session`, `/bootstrap`, `/config`, `/presets/{id}`, `/tools/refresh`, `/sessions`, `/prompts/preview`, and `/runs`. Run subresources provide approval, cancellation, recovery, events, trace, and export. The generated `/openapi.json` describes the exact methods and payloads. There is no separate CRUD service for every proposed version entity.
+Actual API groups under `/api/v1` are `/bootstrap`, `/config`, `/presets/{id}`, `/tools/refresh`, `/sessions`, `/prompts/preview`, and `/runs`. Run subresources provide approval, cancellation, recovery, events, trace, and export. The generated `/openapi.json` describes the exact methods and payloads. There is no separate CRUD service for every proposed version entity.
 
 The remaining sections are the longer-term design reference. Shared block libraries, stateful MCP connections, comparison/evaluation views, automatic retention, replay imports, broader provider capabilities, and separate worker services are not part of this baseline.
 
@@ -403,7 +403,6 @@ Application table groups:
 - Configuration: `prompt_blocks / prompt_block_revisions / presets / preset_revisions / provider_configs / mcp_servers / tool_profiles / tool_profile_revisions`.
 - Conversations and execution: `sessions / conversation_turns / conversation_messages / preview_snapshots / run_snapshots / runs`.
 - Evidence and interaction: `model_calls / tool_calls / approvals / run_events / artifacts`.
-- Local access: `browser_sessions`, storing only session credential hashes and expiration information.
 
 Block and preset content may use versioned JSON to retain complete structures. Use explicit columns for Run foreign keys, state, timestamps, and query indexes.
 Enable foreign keys, WAL, and a bounded busy timeout. Do not hold database write transactions during model or tool network calls.
@@ -430,14 +429,13 @@ For oversized tool content, store a bounded artifact or explicitly reject it. Ma
 
 ### 9.3 Local Access and Sensitive Information
 
-Bind to `127.0.0.1` and validate Host/Origin in the first release. The Web UI exchanges a local access token for an HttpOnly, SameSite session cookie.
-The unlock endpoint validates Host/Origin; authenticated session writes validate both Origin and a CSRF token.
-Local configuration supplies the access token. Do not transmit it in URLs or store model API keys in browser localStorage.
+The single-user local app binds to `127.0.0.1` and opens directly into the workspace. There are no accounts, login tokens, browser authentication sessions, or lock controls.
+Validate Host and reject foreign Origin or cross-site browser requests. Native local HTTP clients can call the API directly without credentials. Model API keys remain server-side and must not be stored in browser localStorage.
 Vite proxies `/api` during development; releases serve frontend assets from the same origin. Remote deployment needs a separate design for authentication, HTTPS, user isolation, and execution environments; changing the bind address to `0.0.0.0` is insufficient.
 
 Provider/MCP authentication uses server-side `credential_ref` values resolved only at connection boundaries. Never write secret values into prompts, application snapshots, or trace authentication headers.
 User inputs and tool results may themselves contain sensitive samples. Keep exact traces in the runtime data directory protected by local access controls, outside ordinary logs and default telemetry.
-The UI offers redacted views and exports by default; locally authenticated users can inspect original messages. Redacted copies identify affected fields and policy versions without claiming verbatim fidelity.
+The UI offers redacted views and exports by default; users can explicitly inspect original messages in the local UI. Redacted copies identify affected fields and policy versions without claiming verbatim fidelity.
 Automatic redaction cannot find every secret. Let users inspect and exclude fields before export; retain originals separately from redacted copies to preserve execution evidence.
 Deleting a session also removes its Runs, checkpoints, events, and artifacts. If execution is active, cancel it and finish resource cleanup first. Archive configuration referenced by historical snapshots instead of hard-deleting it and breaking references.
 
@@ -449,8 +447,6 @@ Lists use cursor pagination. Errors share `error.code / message / details / requ
 | Method and path (prefix omitted) | Purpose | Key constraints |
 | --- | --- | --- |
 | `GET /health` | Process reachability | Do not return configuration or credentials |
-| `POST /auth/session` / `DELETE /auth/session` | Local unlock / logout | Never log tokens; use cookies and CSRF protection |
-| `GET /auth/session` | Current access state | Return a CSRF token and expiry, not the access token |
 | `GET/POST /prompt-blocks`, `GET/PUT/DELETE /prompt-blocks/{id}` | List, create, read, update, and archive blocks | Updates require expected_revision; retain history |
 | `GET /prompt-blocks/{id}/revisions/{revision}` | Read a fixed block revision | Supports preset history and diffs |
 | `GET/POST /presets`, `GET/PUT/DELETE /presets/{id}` | Preset management | Submit the complete entries list atomically to avoid intermediate ordering states |
@@ -468,8 +464,8 @@ Lists use cursor pagination. Errors share `error.code / message / details / requ
 | `POST /runs/{id}/cancel` | Request cancellation | Repeatable; never rewrite a completed Run as cancelled |
 | `POST /runs/{id}/approvals/{approval_id}` | Approve or reject a specific call | Arguments and versions must match the approval record |
 | `POST /runs/{id}/resume` | Resume an interrupted Run | Include the checkpoint version and decisions for calls with unknown outcomes |
-| `GET /runs/{id}/events` | SSE subscription and event replay | Use Last-Event-ID or after; authenticate like ordinary endpoints |
-| `GET /runs/{id}/trace` | Paginated model/tool call inspection | Redacted by default; original views require a current local authenticated session |
+| `GET /runs/{id}/events` | SSE subscription and event replay | Use Last-Event-ID or after; apply the same local-origin checks as ordinary endpoints |
+| `GET /runs/{id}/trace` | Paginated model/tool call inspection | Redacted by default; original views require an explicit local UI action |
 | `GET /runs/{id}/export` | Export redacted JSON | Explicit schema_version and explanations for fields that prevent replay |
 
 DELETE on configuration resources means archive. DELETE on a session means cleanup under the lifecycle rules in Section 9.
@@ -532,7 +528,6 @@ An SSE endpoint never creates or resumes a Run or executes a tool, preventing re
 
 | Page | Content | First-release behavior |
 | --- | --- | --- |
-| `/unlock` | Local access token | Unlock the session; do not accept model API keys |
 | `/studio`, `/studio/:sessionId` | Main workspace | Compose prompts, submit tasks, and observe Runs |
 | `/presets` | Preset and block library | Create, copy, save revisions, and archive |
 | `/settings` | Providers, MCP, and tool profiles | Test connections, refresh tools, and configure credential references and permissions |
@@ -545,7 +540,7 @@ The workspace opens directly into a conversation. A collapsible sidebar lists se
 | New conversation     | Session / Prompt / Inspector | Optional work panel          |
 | Conversation history | Conversation and tool calls  | Prompt Composer OR Inspector |
 |                      | Approve / reject / resume    |                              |
-| Settings / Lock      | Message / Preview / Run      |                              |
+| Settings            | Message / Preview / Run      |                              |
 +----------------------+------------------------------+------------------------------+
 Preview opens Inspector; Run returns focus to the conversation.
 ```
@@ -628,7 +623,7 @@ See [AGENTS.md](../AGENTS.md) and the [README quickstart](../README.md#quickstar
 
 | Milestone | Required deliverables | Acceptance criteria |
 | --- | --- | --- |
-| M0 Foundation | uv/React projects, lockfiles, migrations, lifecycle management, local access, API types, and FakeProvider interface | The Web UI can unlock and read health; an empty database migrates successfully; frontend/backend checks run offline |
+| M0 Foundation | uv/React projects, lockfiles, migrations, lifecycle management, local origin checks, API types, and FakeProvider interface | The Web UI opens directly and can read health; an empty database migrates successfully; frontend/backend checks run offline |
 | M1 Prompt workflow | Block/preset versioning, variables and conditions, pure compiler, adapter capability interface, composer, and preview | Save-to-preview works; identical inputs produce stable outputs; exclusions and capability errors can be located; edits invalidate old previews |
 | M2 Conversation workflow | At least one real provider, snapshots, Run management, conversations without tools, SSE, session persistence, and model traces | The Web UI streams conversations and exposes each actual request; refreshes do not duplicate Runs; simulation covers failure paths |
 | M3 Tool workflow | Tool registry/profiles, controlled file reads, both MCP transports, policy, and approval UI | Complete model→tool→model; multiple call IDs pair correctly; rejection, schema errors, and timeouts are visible and traceable |
@@ -641,7 +636,7 @@ Select the first real provider based on available accounts/models. Without crede
 
 Complete first-release acceptance scenarios:
 
-1. A new user starts the service, opens and unlocks the Web UI, then configures a provider and a read-only profile.
+1. A new user starts the service, opens the Web UI directly, then configures a provider and a read-only profile.
 2. Create a preset with a conditional block and an assistant example, order and save it, and preview every message and transformation.
 3. Compilation errors identify their blocks; a valid preview's first request matches the outbound capture.
 4. A real model calls a controlled tool and completes its response. The UI exposes every model and tool call, not just the final text.

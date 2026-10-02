@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import secrets
 from typing import Any
 
 from anyio import CancelScope
@@ -31,12 +30,6 @@ from rtagent.tracing import redact
 router = APIRouter(prefix="/api/v1")
 
 
-class Unlock(Contract):
-    """Local access-token exchange payload; never persisted as configuration."""
-
-    token: str = Field(min_length=1, max_length=500)
-
-
 class SessionCreate(Contract):
     """Optional display title for a new empty conversation."""
 
@@ -56,45 +49,8 @@ class Bootstrap(Contract):
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    """Expose process availability without requiring workspace access."""
+    """Expose local process availability."""
     return {"status": "ok", "version": "0.1.0"}
-
-
-@router.post("/auth/session")
-async def unlock(body: Unlock, request: Request, response: Response) -> dict[str, str]:
-    """Exchange the workspace token for an HttpOnly browser cookie and CSRF token."""
-    from rtagent.domain import AppError
-
-    if not secrets.compare_digest(body.token, request.app.state.settings.access_token):
-        await asyncio.sleep(0.2)
-        raise AppError("unauthenticated", "The local access token is incorrect.", 401)
-    token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
-    await request.app.state.studio.repository.create_browser_session(token, csrf)
-    response.set_cookie(
-        "studio_session",
-        token,
-        httponly=True,
-        samesite="strict",
-        secure=request.url.scheme == "https",
-        max_age=43200,
-    )
-    return {"csrf_token": csrf}
-
-
-@router.get("/auth/session")
-async def auth_session(request: Request) -> dict[str, str]:
-    """Restore the CSRF token for an already authenticated browser."""
-    return {
-        "csrf_token": request.state.browser_session["csrf"],
-        "expires_at": request.state.browser_session["expires_at"],
-    }
-
-
-@router.delete("/auth/session", status_code=204)
-async def logout(request: Request, response: Response) -> None:
-    """Revoke server-side authentication and clear the browser cookie."""
-    await request.app.state.studio.repository.logout(request.cookies.get("studio_session", ""))
-    response.delete_cookie("studio_session")
 
 
 @router.get("/bootstrap", response_model=Bootstrap)

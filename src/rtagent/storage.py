@@ -1,7 +1,6 @@
 """SQLite persistence with short transactions and one local writer."""
 
 import asyncio
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -93,14 +92,6 @@ calls = Table(
     Column("data", JSON, nullable=False),
     Column("result", JSON),
 )
-browser_sessions = Table(
-    "browser_sessions",
-    metadata,
-    Column("id", String, primary_key=True),
-    Column("csrf", String, nullable=False),
-    Column("expires_at", String, nullable=False),
-)
-
 TERMINAL = {"succeeded", "failed", "cancelled"}
 
 
@@ -550,34 +541,6 @@ class Repository:
                 (
                     await connection.execute(select(runs.c.id).where(runs.c.status == "queued"))
                 ).scalars()
-            )
-
-    async def create_browser_session(self, token: str, csrf: str) -> None:
-        """Store only the hash of a fresh browser session token."""
-        async with self.lock, self.engine.begin() as connection:
-            await connection.execute(
-                delete(browser_sessions).where(browser_sessions.c.expires_at < now())
-            )
-            await connection.execute(
-                insert(browser_sessions).values(
-                    id=digest(token),
-                    csrf=csrf,
-                    expires_at=(datetime.now(UTC) + timedelta(hours=12)).isoformat(),
-                )
-            )
-
-    async def browser_session(self, token: str) -> dict[str, Any]:
-        """Validate an opaque browser token against its stored expiry."""
-        session = await self._one(browser_sessions, digest(token))
-        if session["expires_at"] < now():
-            raise AppError("unauthenticated", "Local session expired.", 401)
-        return session
-
-    async def logout(self, token: str) -> None:
-        """Revoke a browser session without exposing its token in database records."""
-        async with self.lock, self.engine.begin() as connection:
-            await connection.execute(
-                delete(browser_sessions).where(browser_sessions.c.id == digest(token))
             )
 
     async def delete_session(self, session_id: str) -> list[str]:

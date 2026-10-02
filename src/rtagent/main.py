@@ -62,30 +62,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def local_access(request: Request, call_next):
-        """Require local origins, authenticated cookies, and CSRF for mutations."""
-        path = request.url.path
-        if path.startswith("/api/") and path != "/api/v1/health":
-            if request.method not in {"GET", "HEAD", "OPTIONS"}:
-                if request.headers.get("origin") not in settings.allowed_origins:
-                    return error_response(
-                        AppError("origin_denied", "Request origin is not allowed.", 403)
-                    )
-            if not (path == "/api/v1/auth/session" and request.method == "POST"):
-                try:
-                    session = await app.state.studio.repository.browser_session(
-                        request.cookies.get("studio_session", "")
-                    )
-                except AppError:
-                    return error_response(
-                        AppError("unauthenticated", "Unlock the local workspace first.", 401)
-                    )
-                request.state.browser_session = session
-                if request.method not in {"GET", "HEAD", "OPTIONS"} and not secrets.compare_digest(
-                    session["csrf"], request.headers.get("x-csrf-token", "")
-                ):
-                    return error_response(
-                        AppError("csrf_denied", "Refresh the local session before submitting.", 403)
-                    )
+        """Reject foreign browser origins while allowing direct local clients."""
+        if request.url.path.startswith("/api/"):
+            origin = request.headers.get("origin")
+            # Native clients omit these headers; browsers supply them for cross-site requests.
+            if (origin is not None and origin not in settings.allowed_origins) or (
+                request.headers.get("sec-fetch-site") == "cross-site"
+            ):
+                return error_response(
+                    AppError("origin_denied", "Request origin is not allowed.", 403)
+                )
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"

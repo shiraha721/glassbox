@@ -12,9 +12,7 @@ export type RunEvent = components['schemas']['RunEvent'];
 export type ResumeRequest = components['schemas']['ResumeRequest'];
 export type Trace = components['schemas']['TraceView'];
 
-let csrf = '';
-
-/** Carry the server error code so conflicts and authentication failures remain identifiable. */
+/** Carry the server error code so conflicts and validation failures remain identifiable. */
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -25,7 +23,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Make same-origin API calls; credentials stay in an HttpOnly cookie and CSRF stays in memory. */
+/** Call the local API directly; the server validates browser origins. */
 export async function request<T>(
   path: string,
   method = 'GET',
@@ -34,10 +32,8 @@ export async function request<T>(
 ): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
     method,
-    credentials: 'same-origin',
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(method !== 'GET' ? { 'X-CSRF-Token': csrf } : {}),
       ...(key ? { 'Idempotency-Key': key } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -51,22 +47,10 @@ export async function request<T>(
             .map((item: { loc: string[]; msg: string }) => `${item.loc.join('.')}: ${item.msg}`)
             .join('; ')
         : `Request failed (${response.status}).`);
-    if (response.status === 401) window.dispatchEvent(new Event('studio:locked'));
     throw new ApiError(message, response.status, payload.error?.code || 'request_error');
   }
   if (response.status === 204) return undefined as T;
   return response.json();
-}
-
-/** Restore or create browser access without writing the access token to local storage. */
-export async function authenticate(token?: string): Promise<boolean> {
-  const data = await request<{ csrf_token: string }>(
-    '/auth/session',
-    token ? 'POST' : 'GET',
-    token ? { token } : undefined,
-  );
-  csrf = data.csrf_token;
-  return true;
 }
 
 /** Convert arbitrary caught failures into an actionable display string. */
