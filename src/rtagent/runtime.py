@@ -210,8 +210,11 @@ class Runner:
             await self.repository.emit(run_id, "run.cancelling", {}, status="cancelling")
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        else:
-            await self.repository.finish(run_id, "cancelled", run["messages"], "cancelled_by_user")
+        # Cancellation may arrive in drive's final metrics write or before it starts.
+        # Settle the command here as well; finish is an idempotent transaction.
+        await self.mark_unknown(run_id)
+        current = await self.repository.run(run_id)
+        await self.repository.finish(run_id, "cancelled", current["messages"], "cancelled_by_user")
 
     async def model_node(self, state: AgentState) -> dict[str, Any]:
         """Reuse a durable response or invoke the model with the frozen compiler input."""
@@ -259,6 +262,7 @@ class Runner:
                     else []
                 ),
                 "attempts": (existing or {}).get("data", {}).get("attempts", 0) + 1,
+                "attempt_history": (existing or {}).get("data", {}).get("attempt_history", []),
             }
             attempts = sum(
                 call["data"].get("attempts", 1)
@@ -297,7 +301,11 @@ class Runner:
         for key in ("input_tokens", "output_tokens"):
             values = [call["data"].get("usage", {}).get(key) for call in trace]
             usage[key] = (
-                sum(values) if values and all(value is not None for value in values) else None
+                sum(values)
+                if values
+                and all(value is not None for value in values)
+                and not any(call["data"].get("attempt_history") for call in trace)
+                else None
             )
         await self.repository.emit(
             run_id,
@@ -349,6 +357,7 @@ class Runner:
                 "args_hash": digest(call.args),
                 "started_at": now(),
                 "attempts": (existing or {}).get("data", {}).get("attempts", 0) + 1,
+                "attempt_history": (existing or {}).get("data", {}).get("attempt_history", []),
             }
             status = "succeeded"
             started = time.monotonic()
@@ -373,8 +382,11 @@ class Runner:
                             status="waiting_approval",
                             approval=approval,
                         )
-                    interrupt({"approval_id": call_id})
-                    approval = (await self.repository.run(run_id))["approval"]
+                    # A decision can be durable before the interrupt checkpoint is.
+                    # Reentry must honor it without pausing a second time.
+                    if approval["decision"] is None:
+                        interrupt({"approval_id": call_id})
+                        approval = (await self.repository.run(run_id))["approval"]
                     decision = (
                         "allow"
                         if approval
@@ -395,6 +407,14 @@ class Runner:
                 raise
             except AppError as exc:
                 if exc.code == "tool_schema_changed":
+                    await self.repository.save_call(
+                        call_id,
+                        run_id,
+                        "tool",
+                        "failed",
+                        data,
+                        json.dumps({"error": {"code": exc.code, "message": exc.message}}),
+                    )
                     raise
                 content, status = (
                     json.dumps({"error": {"code": exc.code, "message": exc.message}}),

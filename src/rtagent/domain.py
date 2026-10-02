@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -25,6 +26,31 @@ def digest(value: Any) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def credential_reference(value: str) -> str:
+    """Accept an optional environment variable name, never a literal secret."""
+    if value and (not value.isidentifier() or not value.isascii()):
+        raise ValueError("Use an environment variable name, not a secret value.")
+    return value
+
+
+def endpoint_url(value: str) -> str:
+    """Keep URLs free of embedded credentials; authentication uses separate references."""
+    if value:
+        url = urlparse(value)
+        if (
+            url.scheme not in {"http", "https"}
+            or not url.hostname
+            or url.username
+            or url.password
+            or url.query
+            or url.fragment
+        ):
+            raise ValueError(
+                "Use an HTTP(S) URL without credentials, query parameters, or fragments."
+            )
+    return value
+
+
 class AppError(Exception):
     """An expected application failure with a safe message and HTTP mapping."""
 
@@ -37,7 +63,7 @@ class AppError(Exception):
 class Contract(BaseModel):
     """Reject unknown fields at configuration and API boundaries."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_serialization_defaults_required=True)
 
 
 class Variable(Contract):
@@ -88,9 +114,13 @@ class ProviderConfig(Contract):
     @classmethod
     def credential_name(cls, value: str) -> str:
         """Accept environment variable names and reject literal credential values."""
-        if value and (not value.isidentifier() or not value.isascii()):
-            raise ValueError("Use an environment variable name, not a secret value.")
-        return value
+        return credential_reference(value)
+
+    @field_validator("base_url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        """Reject credentials embedded in a serialized provider URL."""
+        return endpoint_url(value)
 
 
 class MCPServer(Contract):
@@ -105,6 +135,29 @@ class MCPServer(Contract):
     url: str = ""
     env: dict[str, str] = Field(default_factory=dict)
     credential_ref: str = ""
+
+    @field_validator("credential_ref")
+    @classmethod
+    def credential_name(cls, value: str) -> str:
+        """Keep MCP bearer credentials out of configuration snapshots."""
+        return credential_reference(value)
+
+    @field_validator("url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        """Validate an optional HTTP endpoint independently of its transport choice."""
+        return endpoint_url(value)
+
+    @field_validator("env")
+    @classmethod
+    def environment_references(cls, value: dict[str, str]) -> dict[str, str]:
+        """Validate both child environment names and their server-side references."""
+        for key, reference in value.items():
+            if not key or not reference:
+                raise ValueError("Each environment entry needs a name and a credential reference.")
+            credential_reference(key)
+            credential_reference(reference)
+        return value
 
 
 class ToolDefinition(Contract):
@@ -239,6 +292,7 @@ class RunView(Contract):
 
     id: str
     session_id: str
+    input: str
     status: str
     stop_reason: str | None
     messages: list[Message]
@@ -252,3 +306,22 @@ class RunView(Contract):
     provider: str
     usage: dict[str, Any]
     unknown_calls: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CallView(Contract):
+    """A persisted invocation with provider-specific evidence kept as structured data."""
+
+    id: str
+    run_id: str
+    kind: str
+    status: str
+    data: dict[str, Any]
+    result: Any
+
+
+class TraceView(Contract):
+    """Label redaction explicitly when exposing stored invocation evidence."""
+
+    schema_version: int = 1
+    redacted: bool
+    calls: list[CallView]

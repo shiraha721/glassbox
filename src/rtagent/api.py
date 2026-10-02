@@ -5,6 +5,7 @@ import json
 import secrets
 from typing import Any
 
+from anyio import CancelScope
 from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import Field
@@ -22,6 +23,7 @@ from rtagent.domain import (
     StartRun,
     StudioConfig,
     ToolDefinition,
+    TraceView,
 )
 from rtagent.storage import TERMINAL
 from rtagent.tracing import redact
@@ -96,7 +98,7 @@ async def logout(request: Request, response: Response) -> None:
 
 
 @router.get("/bootstrap", response_model=Bootstrap)
-async def bootstrap(request: Request):
+async def bootstrap(request: Request) -> Bootstrap:
     """Load settings, presets, sessions, and the currently discovered tool catalog."""
     studio = request.app.state.studio
     return Bootstrap(
@@ -110,13 +112,13 @@ async def bootstrap(request: Request):
 
 
 @router.put("/config", response_model=StudioConfig)
-async def save_config(body: StudioConfig, request: Request):
+async def save_config(body: StudioConfig, request: Request) -> StudioConfig:
     """Update settings with optimistic revision checks."""
     return await request.app.state.studio.save_config(body)
 
 
 @router.put("/presets/{preset_id}", response_model=Preset)
-async def save_preset(preset_id: str, body: Preset, request: Request):
+async def save_preset(preset_id: str, body: Preset, request: Request) -> Preset:
     """Persist an edited preset whose identifier matches the requested resource."""
     from rtagent.domain import AppError
 
@@ -126,20 +128,20 @@ async def save_preset(preset_id: str, body: Preset, request: Request):
 
 
 @router.post("/tools/refresh", response_model=list[ToolDefinition])
-async def refresh_tools(request: Request):
+async def refresh_tools(request: Request) -> list[ToolDefinition]:
     """Explicitly discover tools from the saved MCP configuration."""
     studio = request.app.state.studio
     return await studio.registry.discover(await studio.repository.config())
 
 
 @router.post("/sessions", response_model=SessionView, status_code=201)
-async def create_session(body: SessionCreate, request: Request):
+async def create_session(body: SessionCreate, request: Request) -> dict[str, Any]:
     """Create a conversation without starting model execution."""
     return await request.app.state.studio.repository.new_session(body.title)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionView)
-async def get_session(session_id: str, request: Request):
+async def get_session(session_id: str, request: Request) -> dict[str, Any]:
     """Read committed history and the active Run identifier."""
     return await request.app.state.studio.repository.session(session_id)
 
@@ -151,49 +153,51 @@ async def delete_session(session_id: str, request: Request) -> None:
 
 
 @router.get("/sessions/{session_id}/runs", response_model=list[RunView])
-async def session_runs(session_id: str, request: Request):
+async def session_runs(session_id: str, request: Request) -> list[RunView]:
     """List saved Run projections for a conversation."""
     studio = request.app.state.studio
     return [await studio.view(run["id"]) for run in await studio.repository.list_runs(session_id)]
 
 
 @router.post("/prompts/preview", response_model=Preview)
-async def preview(body: PreviewRequest, request: Request):
+async def preview(body: PreviewRequest, request: Request) -> Preview:
     """Compile and save a version-bound preview without calling a provider."""
     return await request.app.state.studio.preview(body)
 
 
 @router.post("/runs", response_model=RunView, status_code=202)
-async def start_run(body: StartRun, request: Request, idempotency_key: str = Header()):
+async def start_run(body: StartRun, request: Request, idempotency_key: str = Header()) -> RunView:
     """Schedule a saved preview with an idempotency key."""
     return await request.app.state.studio.start(body, idempotency_key)
 
 
 @router.get("/runs/{run_id}", response_model=RunView)
-async def get_run(run_id: str, request: Request):
+async def get_run(run_id: str, request: Request) -> RunView:
     """Read execution state without creating or resuming work."""
     return await request.app.state.studio.view(run_id)
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunView)
-async def cancel_run(run_id: str, request: Request):
+async def cancel_run(run_id: str, request: Request) -> RunView:
     """Cancel the local task and preserve any uncertain external effects."""
     return await request.app.state.studio.cancel(run_id)
 
 
 @router.post("/runs/{run_id}/approvals/{approval_id}", response_model=RunView)
-async def approve_run(run_id: str, approval_id: str, body: ApprovalDecision, request: Request):
+async def approve_run(
+    run_id: str, approval_id: str, body: ApprovalDecision, request: Request
+) -> RunView:
     """Resolve exactly the pending approval identified in the URL."""
     return await request.app.state.studio.approve(run_id, approval_id, body.decision)
 
 
 @router.post("/runs/{run_id}/resume", response_model=RunView)
-async def resume_run(run_id: str, body: ResumeRequest, request: Request):
+async def resume_run(run_id: str, body: ResumeRequest, request: Request) -> RunView:
     """Resume a checkpoint after explicit reconciliation of uncertain calls."""
     return await request.app.state.studio.resume(run_id, body)
 
 
-@router.get("/runs/{run_id}/trace")
+@router.get("/runs/{run_id}/trace", response_model=TraceView)
 async def trace(run_id: str, request: Request, raw: bool = False) -> dict[str, Any]:
     """Return redacted evidence by default; raw access is an explicit local choice."""
     studio = request.app.state.studio
@@ -249,11 +253,14 @@ async def run_events(
         nonlocal cursor
         ticks = 0
         while not await request.is_disconnected():
-            page = await studio.repository.read_events(run_id, cursor)
+            # Browser disconnects cancel this generator. Finish short DB reads before
+            # yielding so cancellation cannot return a half-closed SQLite connection.
+            with CancelScope(shield=True):
+                page = await studio.repository.read_events(run_id, cursor)
+                current = await studio.repository.run(run_id)
             for item in page:
                 cursor = item["seq"]
                 yield f"id: {cursor}\nevent: {item['type']}\ndata: {json.dumps(redact(item))}\n\n"
-            current = await studio.repository.run(run_id)
             if current["status"] in TERMINAL and cursor >= current["latest_event_seq"]:
                 break
             ticks += 1

@@ -1,3 +1,5 @@
+"""Isolated application resources shared by offline integration tests."""
+
 import httpx
 import pytest
 
@@ -7,6 +9,7 @@ from rtagent.main import create_app
 
 @pytest.fixture
 async def studio_client(tmp_path):
+    """Start the real app lifespan with temporary storage and authenticated HTTP access."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "README.md").write_text("Local tool evidence", encoding="utf-8")

@@ -115,6 +115,7 @@ class Studio:
             )
         }
         values.update(
+            input=run["snapshot"]["input"],
             preset_name=run["snapshot"]["preset"]["name"],
             provider=run["snapshot"]["config"]["provider"]["adapter"],
             unknown_calls=[
@@ -181,6 +182,19 @@ class Studio:
                 decision = request.resolutions[call["id"]]
                 status = "pending" if decision.action == "retry" else "succeeded"
                 data = {**call["data"], "recovery_decision": decision.action}
+                # Retrying must not overwrite evidence from the uncertain attempt.
+                data["attempt_history"] = call["data"].get("attempt_history", []) + [
+                    {
+                        "status": call["status"],
+                        "result": call["result"],
+                        "resolution": decision.action,
+                        "data": {
+                            key: value
+                            for key, value in call["data"].items()
+                            if key != "attempt_history"
+                        },
+                    }
+                ]
                 await self.repository.save_call(
                     call["id"],
                     run_id,

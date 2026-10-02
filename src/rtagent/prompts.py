@@ -29,7 +29,11 @@ def condition_value(condition: dict[str, Any], context: dict[str, Any], depth: i
     if not {"field", "op"} <= keys or keys - {"field", "op", "value"}:
         raise AppError("invalid_condition", "Use all/any/not or field/op/value.")
     field, operator = condition["field"], condition["op"]
-    if not isinstance(field, str) or operator not in {"eq", "in", "exists"}:
+    if (
+        not isinstance(field, str)
+        or not isinstance(operator, str)
+        or operator not in {"eq", "in", "exists"}
+    ):
         raise AppError("invalid_condition", "Unsupported field or operator.")
     if field.startswith("variables.") and field.count(".") == 1:
         values, field = context["variables"], field.split(".")[1]

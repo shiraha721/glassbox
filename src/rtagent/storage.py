@@ -450,7 +450,7 @@ class Repository:
                             "tool_call_id": None,
                         }
                     ]
-                    + messages,
+                    + [{**message, "source": "history"} for message in messages],
                 )
             await connection.execute(
                 update(sessions).where(sessions.c.id == run["session_id"]).values(**changes)

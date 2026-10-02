@@ -117,3 +117,9 @@ def test_condition_operators(condition, expected):
 def test_missing_condition_field_is_not_silently_false():
     with pytest.raises(AppError):
         condition_value({"field": "variables.x", "op": "eq", "value": 1}, {"variables": {}})
+
+
+def test_malformed_operator_is_an_application_error():
+    """Malformed JSON operators produce a compiler error rather than a Python type error."""
+    with pytest.raises(AppError, match="operator"):
+        condition_value({"field": "provider", "op": [], "value": "fake"}, {"provider": "fake"})

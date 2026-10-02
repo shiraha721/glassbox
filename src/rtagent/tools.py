@@ -159,13 +159,14 @@ class ToolRegistry:
         path = (self.workspace / relative).resolve()
         if not path.is_relative_to(self.workspace):
             raise AppError("tool_denied", "File path is outside the configured workspace.", 403)
-        parts = path.relative_to(self.workspace).parts
+        # Windows paths are case-insensitive, including credential file exclusions.
+        parts = [part.casefold() for part in path.relative_to(self.workspace).parts]
         if any(
             part in {".git", ".venv", "node_modules", "var", "access-token"}
             or part == ".env"
             or (part.startswith(".env.") and part != ".env.example")
             for part in parts
-        ) or path.suffix in {".db", ".sqlite", ".sqlite3"}:
+        ) or path.suffix.casefold() in {".db", ".sqlite", ".sqlite3"}:
             raise AppError(
                 "tool_denied",
                 "Credential, runtime, and dependency files are excluded from the file tool.",
@@ -212,12 +213,18 @@ class ToolRegistry:
                 cursor = page.nextCursor
                 if current or not cursor:
                     break
-            if current is None or digest(current.inputSchema) != definition.schema_hash:
-                raise AppError(
-                    "tool_schema_changed", "MCP tool schema changed. Create a new preview and Run."
-                )
-            result = await session.call_tool(definition.original_name, args)
-            text = json.dumps(result.model_dump(mode="json", exclude_none=True), ensure_ascii=False)
-            if len(text.encode()) > 65536:
-                raise AppError("tool_output_limit", "MCP result exceeds the 64 KiB limit.")
-            return text
+            schema_matches = (
+                current is not None and digest(current.inputSchema) == definition.schema_hash
+            )
+            result = (
+                await session.call_tool(definition.original_name, args) if schema_matches else None
+            )
+        # Raise local validation errors after SDK task groups close, preserving their identity.
+        if result is None:
+            raise AppError(
+                "tool_schema_changed", "MCP tool schema changed. Create a new preview and Run."
+            )
+        text = json.dumps(result.model_dump(mode="json", exclude_none=True), ensure_ascii=False)
+        if len(text.encode()) > 65536:
+            raise AppError("tool_output_limit", "MCP result exceeds the 64 KiB limit.")
+        return text
