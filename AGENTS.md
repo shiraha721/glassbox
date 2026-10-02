@@ -7,7 +7,7 @@ This file applies to the entire repository and defines project constraints and w
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-02, the repository is in the design phase. It contains the README and design documents, but no application implementation, dependency manifests, or tests.
+As of 2026-10-02, implementation has started. Consult the README and actual source files for current delivery status; the architecture document describes the target product.
 Inspect the actual files before starting work. Do not report the target directories, commands, or APIs below as implemented capabilities.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.

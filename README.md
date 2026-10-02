@@ -2,8 +2,8 @@
 
 ## Project Status
 
-As of 2026-10-02, the project is in the architecture design phase. Neither the backend nor the Web UI has been implemented.
-The Features section describes planned capabilities, not delivered functionality. Installation commands are not yet available.
+As of 2026-10-02, implementation is in progress. The project foundation, deterministic prompt compiler, and SQLite persistence are implemented and covered by offline tests.
+The Features section describes the target product. The complete Web and execution workflows are still being assembled; a verified quickstart will accompany the runnable application.
 
 The first release will include a **working Web UI, a Prompt Compiler, a single-agent tool loop, and execution tracing**.
 
