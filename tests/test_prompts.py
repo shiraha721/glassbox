@@ -1,13 +1,13 @@
 import pytest
 
-from rtagent.domain import AppError, Block, Message, Preset, StudioConfig, Variable
+from rtagent.domain import AppError, Block, Message, Preset, ProviderConfig, StudioConfig, Variable
 from rtagent.prompts import compile_prompt, condition_value
 
 
 def compile_blocks(blocks, **kwargs):
     return compile_prompt(
         Preset(blocks=blocks, name="Test", id="test"),
-        StudioConfig(),
+        StudioConfig(provider=ProviderConfig(adapter="fake")),
         [],
         "Task",
         kwargs.get("variables", {}),

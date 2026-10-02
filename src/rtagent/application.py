@@ -1,17 +1,23 @@
 """Application use cases; keep HTTP and framework orchestration out of these methods."""
 
 import asyncio
+import re
 from datetime import UTC, datetime, timedelta
 
 from rtagent.domain import (
     AppError,
+    MemoryDocument,
+    MemorySave,
     Message,
     Preview,
     PreviewRequest,
     ResumeRequest,
     RunView,
+    SkillDocument,
+    SkillSave,
     StartRun,
     StudioConfig,
+    WorkspaceView,
     uid,
 )
 from rtagent.prompts import compile_prompt
@@ -20,6 +26,7 @@ from rtagent.runtime import Runner
 from rtagent.storage import Repository
 from rtagent.tools import ToolRegistry
 from rtagent.tracing import redact
+from rtagent.workspace import MEMORY_PATH
 
 
 class Studio:
@@ -29,6 +36,35 @@ class Studio:
         """Share the process-owned repository, registry, and runner between use cases."""
         self.repository, self.registry, self.runner = repository, registry, runner
         self.commands = asyncio.Lock()
+
+    async def workspace(self, refresh: bool = False) -> WorkspaceView:
+        """Read editable workspace context and probe the configured sandbox."""
+        skills, errors = await asyncio.to_thread(self.registry.files.skills)
+        return WorkspaceView(
+            root=str(self.registry.workspace),
+            sandbox=await self.registry.sandbox.status(refresh),
+            memory=await asyncio.to_thread(self.registry.files.memory),
+            skills=[
+                {key: value for key, value in skill.items() if key != "content"} for skill in skills
+            ],
+            skill_errors=errors,
+        )
+
+    async def save_memory(self, request: MemorySave) -> MemoryDocument:
+        """Persist a user-authored note without silently overwriting a concurrent edit."""
+        await asyncio.to_thread(self.registry.files.write, MEMORY_PATH, **request.model_dump())
+        return MemoryDocument.model_validate(await asyncio.to_thread(self.registry.files.memory))
+
+    async def skill(self, name: str) -> SkillDocument:
+        """Load the current source for the workspace editor."""
+        return SkillDocument.model_validate(
+            await asyncio.to_thread(self.registry.files.load_skill, name)
+        )
+
+    async def save_skill(self, request: SkillSave) -> SkillDocument:
+        """Persist a skill through the same validation used by the native tool."""
+        await asyncio.to_thread(self.registry.files.save_skill, **request.model_dump())
+        return await self.skill(request.name)
 
     async def preview(self, request: PreviewRequest) -> Preview:
         """Validate revisions and persist the immutable input that execution will consume."""
@@ -47,6 +83,11 @@ class Studio:
             )
         tools = self.registry.selected(config)
         encoded_tools = [tool.model_dump() for tool in tools]
+        # Explicit mentions load a skill body; ordinary runs receive only the small catalog.
+        selected_skills = request.skills + re.findall(
+            r"(?<!\S)\$([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$|[.,!?])", request.input
+        )
+        workspace_context = await asyncio.to_thread(self.registry.files.context, selected_skills)
         compiled = compile_prompt(
             preset,
             config,
@@ -54,6 +95,7 @@ class Studio:
             request.input,
             request.variables,
             encoded_tools,
+            workspace_context=workspace_context,
         )
         prepared = prepare(config.provider, compiled, encoded_tools)
         preview = Preview(
@@ -75,6 +117,7 @@ class Studio:
             "session_id": session["id"],
             "session_revision": session["revision"],
             "workspace_root": str(self.registry.workspace),
+            "workspace_context": [message.model_dump() for message in workspace_context],
             "prepared_request": prepared,
         }
         await self.repository.put_preview(
@@ -82,14 +125,26 @@ class Studio:
         )
         return preview
 
-    async def start(self, request: StartRun, key: str) -> RunView:
-        """Create or retrieve an idempotent Run, then schedule its existing snapshot."""
+    async def start(self, request: StartRun | PreviewRequest, key: str) -> RunView:
+        """Compile direct input or consume an optional preview, preserving retry identity."""
         if not key or len(key) > 200:
             raise AppError(
                 "idempotency_key", "Provide an Idempotency-Key of at most 200 characters."
             )
         async with self.commands:
-            run = await self.repository.create_run(request.preview_id, request.model_dump(), key)
+            submission = request.model_dump()
+            run = await self.repository.submitted_run(key, submission)
+            if run is None:
+                if isinstance(request, PreviewRequest):
+                    prepared = await self.preview(request)
+                    request = StartRun(
+                        preview_id=prepared.id,
+                        input_hash=prepared.input_hash,
+                        expected_session_revision=request.expected_session_revision,
+                    )
+                run = await self.repository.create_run(
+                    request.preview_id, request.model_dump(), key, submission
+                )
             if run["status"] == "queued":
                 self.runner.start(run["id"])
             return await self.view(run["id"])

@@ -12,6 +12,8 @@ from pydantic import Field
 from rtagent.domain import (
     ApprovalDecision,
     Contract,
+    MemoryDocument,
+    MemorySave,
     Preset,
     Preview,
     PreviewRequest,
@@ -19,10 +21,13 @@ from rtagent.domain import (
     RunEvent,
     RunView,
     SessionView,
+    SkillDocument,
+    SkillSave,
     StartRun,
     StudioConfig,
     ToolDefinition,
     TraceView,
+    WorkspaceView,
 )
 from rtagent.storage import TERMINAL
 from rtagent.tracing import redact
@@ -71,6 +76,30 @@ async def bootstrap(request: Request) -> Bootstrap:
 async def save_config(body: StudioConfig, request: Request) -> StudioConfig:
     """Update settings with optimistic revision checks."""
     return await request.app.state.studio.save_config(body)
+
+
+@router.get("/workspace", response_model=WorkspaceView)
+async def workspace(request: Request, refresh: bool = False) -> WorkspaceView:
+    """Inspect project memory, skills, and the actual Bash sandbox status."""
+    return await request.app.state.studio.workspace(refresh)
+
+
+@router.put("/workspace/memory", response_model=MemoryDocument)
+async def save_memory(body: MemorySave, request: Request) -> MemoryDocument:
+    """Save explicitly edited project notes."""
+    return await request.app.state.studio.save_memory(body)
+
+
+@router.get("/workspace/skills/{name}", response_model=SkillDocument)
+async def skill(name: str, request: Request) -> SkillDocument:
+    """Load a skill body on demand."""
+    return await request.app.state.studio.skill(name)
+
+
+@router.put("/workspace/skills", response_model=SkillDocument)
+async def save_skill(body: SkillSave, request: Request) -> SkillDocument:
+    """Create or update a workspace skill with conflict detection."""
+    return await request.app.state.studio.save_skill(body)
 
 
 @router.put("/presets/{preset_id}", response_model=Preset)
@@ -122,8 +151,10 @@ async def preview(body: PreviewRequest, request: Request) -> Preview:
 
 
 @router.post("/runs", response_model=RunView, status_code=202)
-async def start_run(body: StartRun, request: Request, idempotency_key: str = Header()) -> RunView:
-    """Schedule a saved preview with an idempotency key."""
+async def start_run(
+    body: StartRun | PreviewRequest, request: Request, idempotency_key: str = Header()
+) -> RunView:
+    """Compile a direct submission or run an optional preview with retry protection."""
     return await request.app.state.studio.start(body, idempotency_key)
 
 

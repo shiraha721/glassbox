@@ -757,6 +757,56 @@ summary::marker {
   margin-block: 12px;
   gap: 8px;
 }
+.workspace-panel {
+  height: 100%;
+  overflow-y: auto;
+}
+.workspace-content {
+  padding: 16px;
+}
+.workspace-path {
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+.sandbox-status {
+  font-size: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.workspace-tabs {
+  margin-block: 12px;
+}
+.workspace-tabs [aria-pressed='true'] {
+  background: var(--soft);
+}
+.workspace-editor {
+  display: grid;
+  gap: 12px;
+  margin-block: 16px;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.workspace-editor textarea {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.skill-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.skill-row input[type='checkbox'] {
+  width: auto;
+}
+.selected-skills {
+  color: var(--muted);
+  font-size: 12px;
+  padding-block: 4px;
+}
 .metric-grid strong {
   display: block;
   font-size: 15px;

@@ -62,6 +62,7 @@ def compile_prompt(
     variables: dict[str, Any],
     tools: list[dict[str, Any]],
     delta: list[Message] | None = None,
+    workspace_context: list[Message] | None = None,
 ) -> CompiledPrompt:
     """Compile a frozen configuration without I/O or implicit message transformations.
 
@@ -133,6 +134,7 @@ def compile_prompt(
         slots[block.placement].append(Message(role=block.role, content=content, source=block.id))
     messages = (
         slots["before_history"]
+        + (workspace_context or [])
         + history
         + slots["before_input"]
         + [Message(role="user", content=user_input, source="current_input")]

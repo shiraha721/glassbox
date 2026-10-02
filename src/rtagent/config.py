@@ -2,9 +2,13 @@
 
 import os
 from pathlib import Path
+from typing import Literal
 
 from dotenv import dotenv_values
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from rtagent.domain import StudioConfig
 
 
 def resolve_secret(reference: str) -> str:
@@ -23,6 +27,10 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("var")
     workspace_root: Path = Path(".")
+    provider: Literal["openai", "fake"] | None = None
+    openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
+    openai_model: str | None = Field(default=None, validation_alias="OPENAI_MODEL")
+    wsl_distro: str = ""
     allowed_origins: list[str] = [
         "http://127.0.0.1:8001",
         "http://localhost:8001",
@@ -37,6 +45,21 @@ class Settings(BaseSettings):
         self.data_dir = self.data_dir.resolve()
         self.workspace_root = self.workspace_root.resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
+
+    def apply_provider(self, config: StudioConfig) -> StudioConfig:
+        """Apply explicit environment values on startup; later UI edits remain usable."""
+        values = config.model_dump()
+        overrides = {
+            "adapter": self.provider,
+            "base_url": self.openai_base_url,
+            "model": self.openai_model,
+        }
+        values["provider"].update(
+            {key: value for key, value in overrides.items() if value is not None}
+        )
+        if self.provider is None and (self.openai_base_url or self.openai_model):
+            values["provider"]["adapter"] = "openai"
+        return StudioConfig.model_validate(values)
 
     @property
     def database_url(self) -> str:

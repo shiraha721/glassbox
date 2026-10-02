@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
   Code2,
   Eye,
+  FolderOpen,
   MessageSquare,
   PanelLeft,
   Play,
@@ -31,6 +32,7 @@ import { useRunEvents } from './api/events';
 import { Composer } from './Composer';
 import { Inspector, Json } from './Inspector';
 import { Settings } from './Settings';
+import { WorkspacePanel } from './WorkspacePanel';
 
 // Untrusted output must not trigger automatic requests to remote image URLs.
 const markdownComponents: Components = {
@@ -74,7 +76,9 @@ function Workspace({ data }: { data: Bootstrap }) {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.matchMedia('(min-width: 761px)').matches,
   );
-  const [panel, setPanel] = useState<'prompt' | 'inspector' | null>(null);
+  const [panel, setPanel] = useState<'prompt' | 'inspector' | 'workspace' | null>(null);
+  const [skills, setSkills] = useState<string[]>([]);
+  const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const session = data.sessions.find((item) => item.id === sessionId) || data.sessions[0];
@@ -117,10 +121,11 @@ function Workspace({ data }: { data: Bootstrap }) {
     setInput('');
     setError('');
   };
-  const newSession = async () => {
+  const newSession = async (keepDraft = false) => {
     const created = await request<Session>('/sessions', 'POST', {});
     await refresh();
     chooseSession(created.id);
+    if (keepDraft) setInput(input);
     return created;
   };
   const savePreset = async (): Promise<Preset> => {
@@ -132,13 +137,13 @@ function Workspace({ data }: { data: Bootstrap }) {
     await refresh();
     return saved;
   };
-  const buildPreview = async () => {
+  const inputRequest = async () => {
     const parsed: unknown = JSON.parse(variables);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       throw new Error('Variables must be a JSON object.');
     const saved = await savePreset();
-    const current = session || (await newSession());
-    const compiled = await request<Preview>('/prompts/preview', 'POST', {
+    const current = session || (await newSession(true));
+    return {
       session_id: current.id,
       expected_session_revision: current.revision,
       preset_id: saved.id,
@@ -146,25 +151,31 @@ function Workspace({ data }: { data: Bootstrap }) {
       config_revision: data.config.revision,
       input,
       variables: parsed,
-    });
-    setPreviewRevision(current.revision);
+      skills,
+    };
+  };
+  const buildPreview = async () => {
+    const body = await inputRequest();
+    const compiled = await request<Preview>('/prompts/preview', 'POST', body);
+    setPreviewRevision(body.expected_session_revision);
     setPreview(compiled);
     setTab('preview');
     setPanel('inspector');
   };
   const start = async () => {
-    if (!preview) return;
-    // The preview ID is stable across a lost response and a user's explicit retry.
-    const created = await request<Run>(
-      '/runs',
-      'POST',
-      {
-        preview_id: preview.id,
-        input_hash: preview.input_hash,
-        expected_session_revision: previewRevision,
-      },
-      preview.id,
-    );
+    const body = preview
+      ? {
+          preview_id: preview.id,
+          input_hash: preview.input_hash,
+          expected_session_revision: previewRevision,
+        }
+      : await inputRequest();
+    const fingerprint = JSON.stringify(body);
+    // An explicit retry of unchanged input keeps its identity even if the response was lost.
+    if (submission.current?.fingerprint !== fingerprint)
+      submission.current = { fingerprint, key: crypto.randomUUID() };
+    const created = await request<Run>('/runs', 'POST', body, submission.current.key);
+    submission.current = null;
     setSelectedRun(created.id);
     setInput('');
     setPreview(null);
@@ -225,6 +236,13 @@ function Workspace({ data }: { data: Bootstrap }) {
           {!data.sessions.length && <p className="subtle sidebar-empty">No conversations</p>}
         </nav>
         <div className="sidebar-footer">
+          <button
+            className="nav-button"
+            disabled={busy}
+            onClick={() => setPanel(panel === 'workspace' ? null : 'workspace')}
+          >
+            <FolderOpen size={16} /> Workspace
+          </button>
           <button className="nav-button" disabled={busy} onClick={() => setSettings(true)}>
             <SlidersHorizontal size={16} /> Settings
           </button>
@@ -345,7 +363,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                             Tool result
                             <span className="subtle">{message.tool_call_id?.slice(-10)}</span>
                           </summary>
-                          <pre>{message.content}</pre>
+                          <ToolOutput content={message.content} />
                         </details>
                       ) : (
                         <>
@@ -464,7 +482,22 @@ function Workspace({ data }: { data: Bootstrap }) {
                 placeholder="Message the agent…"
                 rows={3}
                 disabled={!!active || busy}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === 'Enter' &&
+                    (event.ctrlKey || event.metaKey) &&
+                    input.trim() &&
+                    !active &&
+                    !busy
+                  ) {
+                    event.preventDefault();
+                    void perform(start);
+                  }
+                }}
               />
+              {skills.length > 0 && (
+                <div className="selected-skills">Skills: {skills.join(', ')}</div>
+              )}
               <details className="task-variables">
                 <summary>
                   Input variables <span className="subtle">JSON</span>
@@ -490,7 +523,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                 >
                   {data.config.provider.adapter === 'fake'
                     ? 'Simulated model'
-                    : data.config.provider.model}
+                    : data.config.provider.model || 'Configure model'}
                 </button>
                 <div className="row">
                   {active ? (
@@ -519,7 +552,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                       </button>
                       <button
                         className="button primary"
-                        disabled={busy || !preview}
+                        disabled={busy || !input.trim()}
                         onClick={() => void perform(start)}
                       >
                         <Play size={13} />
@@ -566,6 +599,19 @@ function Workspace({ data }: { data: Bootstrap }) {
               onClose={() => setPanel(null)}
             />
           </div>
+          {panel === 'workspace' && (
+            <div className="utility-pane">
+              <WorkspacePanel
+                selected={skills}
+                onSelect={(value) => {
+                  setSkills(value);
+                  setPreview(null);
+                }}
+                onClose={() => setPanel(null)}
+                onChanged={() => setPreview(null)}
+              />
+            </div>
+          )}
         </main>
       </div>
       {settings && (
@@ -580,6 +626,34 @@ function Workspace({ data }: { data: Bootstrap }) {
       )}
     </div>
   );
+}
+
+/** Display actual command output without forcing users to read an escaped JSON string. */
+function ToolOutput({ content }: { content: string }) {
+  let value: unknown;
+  try {
+    value = JSON.parse(content);
+  } catch {
+    // Plain-text and MCP results use the same fallback as an unrecognized JSON shape.
+    value = null;
+  }
+  if (value && typeof value === 'object') {
+    const result = value as Record<string, unknown>;
+    if (typeof result.stdout === 'string' && typeof result.stderr === 'string')
+      return (
+        <>
+          <div className="subtle">
+            Exit {String(result.exit_code)}
+            {result.timed_out ? ' · timed out; edits may be partial' : ''}
+            {result.truncated ? ' · output truncated' : ''}
+          </div>
+          {result.stdout && <pre>{result.stdout}</pre>}
+          {result.stderr && <pre>{result.stderr}</pre>}
+        </>
+      );
+    if (typeof result.content === 'string') return <pre>{result.content}</pre>;
+  }
+  return <pre>{content}</pre>;
 }
 
 /** Require a per-call recovery choice; uncertain external effects are never silently repeated. */

@@ -7,13 +7,15 @@ This file applies to the entire repository and defines project constraints and w
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-03, a local MVP and Web UI are implemented. Consult the README and actual source files for current delivery status; the architecture document distinguishes this baseline from the target product.
+As of 2026-10-03, Stage 1 (the inspectable execution foundation) and initial Stage 2 workspace capabilities are implemented. The target is an extensible everyday agent harness; the original MVP is only the first stage. Consult README delivery stages and actual source files. Live-model acceptance remains pending endpoint configuration.
 Inspect the actual files before starting work. Do not report the target directories, commands, or APIs below as implemented capabilities.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
 Multi-agent orchestration, batch evaluation, PostgreSQL, and team deployment belong to later phases.
 
 Keep the local single-user workflow simple: open the workspace directly, with no accounts, login screen, workspace access token, or lock feature. Prefer removing unnecessary code and steps over adding configuration switches or abstractions. Validate changes against the running service before expanding tests.
+
+Run must work directly from task input. Preview is optional inspection using the same compiler, never a UI gate. Keep Base URL, model, and credential references configurable through .env and Settings. Never silently fall back to simulation.
 
 Read in this order:
 
@@ -67,6 +69,10 @@ docs/              Architecture and necessary decision records
 
 ### Agents, Tools, and Recovery
 
+- Bash uses actual bubblewrap isolation on Linux or WSL. Never replace it with unrestricted host execution or present a cwd check as an OS sandbox. Preserve no-network behavior, hidden credentials/runtime paths, bounded output, and child-process cleanup.
+- Memory and Skills use ordinary files. Snapshot initial AGENTS.md, memory, and selected skill content with source mapping. Load skill bodies on demand; no vector store or plugin framework is needed.
+- Writes use content hashes or unambiguous exact edits. Skills and memory cannot grant permissions or bypass isolation. Explicitly configured MCP servers remain outside the Bash sandbox.
+
 - Implement a bounded `model -> policy -> tools -> model` loop for the first release. Finish when there are no tool calls.
 - Preserve the original `tool_call_id` for every model tool call. Supply a matching success or error result for each before calling the model again.
 - Expose only the intersection of the tool profile, Run configuration, and execution policy. MCP read-only annotations do not replace local policy.
@@ -113,6 +119,7 @@ Backend commands, from the repository root:
 uv sync --dev --locked
 uv run alembic upgrade head
 uv run uvicorn rtagent.main:create_app --factory --reload --host 127.0.0.1 --port 8001
+uv run python scripts/smoke_workspace.py
 uv run pytest
 uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations

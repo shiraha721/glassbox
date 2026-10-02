@@ -11,11 +11,9 @@ async function openWorkspace(page: Page) {
   await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeDisabled();
 }
 
-/** Require the visible preview before requesting model execution. */
+/** Submit tasks directly; preview is an optional inspection action. */
 async function startTask(page: Page, input: string) {
   await page.getByLabel('Task', { exact: true }).fill(input);
-  await page.getByRole('button', { name: /^(Save & preview|Preview)$/ }).click();
-  await expect(page.getByText('Frozen', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Run', exact: true }).click();
 }
 
@@ -27,7 +25,10 @@ test('edit, preview, real file tool, inspect trace, and refresh without another 
   await page
     .getByLabel('Base identity template')
     .fill('Analyze only with recorded evidence. Browser contract marker.');
-  await startTask(page, '/read README.md');
+  await page.getByLabel('Task', { exact: true }).fill('/read README.md');
+  await page.getByRole('button', { name: 'Save & preview', exact: true }).click();
+  await expect(page.getByText('Frozen', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
   await expect(page.getByTestId('run-status')).toHaveText('succeeded');
   await expect(page.locator('.markdown')).toContainText('Local MCP and browser test workspace.');
   await page.getByRole('button', { name: 'Inspector', exact: true }).click();
@@ -78,14 +79,14 @@ test('settings save real endpoint references and invalidate a prepared preview',
   await page.getByLabel('Base URL', { exact: true }).fill('http://127.0.0.1:11434/v1');
   await page.getByLabel('Model', { exact: true }).fill('local-contract-model');
   await page.getByRole('button', { name: 'Save settings', exact: true }).click();
-  await expect(page.getByText('Settings saved. Create a new preview to use them.')).toBeVisible();
+  await expect(page.getByText('Settings saved. New runs use these settings.')).toBeVisible();
   await page.getByLabel('Close settings').click();
-  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByLabel('Model', { exact: true })).toHaveValue('local-contract-model');
   await page.getByRole('combobox', { name: 'Provider', exact: true }).selectOption('fake');
   await page.getByRole('button', { name: 'Save settings', exact: true }).click();
-  await expect(page.getByText('Settings saved. Create a new preview to use them.')).toBeVisible();
+  await expect(page.getByText('Settings saved. New runs use these settings.')).toBeVisible();
 });
 
 test('discover a stdio MCP tool, authorize it, and complete the tool loop', async ({ page }) => {
@@ -107,12 +108,42 @@ test('discover a stdio MCP tool, authorize it, and complete the tool loop', asyn
   const name = (await permission.getAttribute('aria-label'))!.replace(' permission', '');
   await permission.selectOption('ask');
   await page.getByRole('button', { name: 'Save settings', exact: true }).click();
-  await expect(page.getByText('Settings saved. Create a new preview to use them.')).toBeVisible();
+  await expect(page.getByText('Settings saved. New runs use these settings.')).toBeVisible();
   await page.getByLabel('Close settings').click();
   await startTask(page, `/tool ${name} {"text":"browser MCP evidence"}`);
   await page.getByRole('button', { name: 'Approve once' }).click();
   await expect(page.getByTestId('run-status')).toHaveText('succeeded');
   await expect(page.locator('.markdown')).toContainText('MCP evidence: browser MCP evidence');
+});
+
+test('workspace memory and skills can be saved, selected, and used by direct Run', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  await page.getByLabel('Project memory', { exact: true }).fill('Browser memory evidence.');
+  await page.getByRole('button', { name: 'Save memory', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Save memory', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await expect(page.getByLabel('Use skill-creator', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'New skill', exact: true }).click();
+  await page.getByLabel('Skill name', { exact: true }).fill('browser-review');
+  await page
+    .getByLabel('Description', { exact: true })
+    .fill('Review evidence for the browser check.');
+  await page
+    .getByLabel('Instructions', { exact: true })
+    .fill('Browser skill evidence. Cite source paths.');
+  await page.getByRole('button', { name: 'Save skill', exact: true }).click();
+  await page.getByLabel('Use browser-review', { exact: true }).check();
+  await page.getByRole('button', { name: 'Close workspace', exact: true }).click();
+  await startTask(page, 'Check recorded workspace context');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await page.getByRole('button', { name: 'Inspector', exact: true }).click();
+  await page.getByText('Prepared request', { exact: true }).first().click();
+  await expect(page.getByLabel('Request inspector')).toContainText('Browser memory evidence.');
+  await expect(page.getByLabel('Request inspector')).toContainText('Browser skill evidence.');
+  await page.screenshot({ path: 'test-results/workspace-context.png', fullPage: true });
 });
 
 test('the workbench remains usable on a narrow viewport', async ({ page }) => {

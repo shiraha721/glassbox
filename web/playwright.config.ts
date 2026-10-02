@@ -1,7 +1,15 @@
 import { defineConfig } from '@playwright/test';
 import path from 'node:path';
+import { mkdirSync, copyFileSync } from 'node:fs';
 
 const root = path.resolve(import.meta.dirname, '..');
+const runRoot = path.join(root, 'var', `e2e-${Date.now()}`);
+const workspaceRoot = path.join(runRoot, 'workspace');
+mkdirSync(workspaceRoot, { recursive: true });
+copyFileSync(
+  path.join(root, 'tests', 'fixtures', 'README.md'),
+  path.join(workspaceRoot, 'README.md'),
+);
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,8 +28,9 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 30_000,
     env: {
-      STUDIO_DATA_DIR: path.join(root, 'var', `e2e-${Date.now()}`),
-      STUDIO_WORKSPACE_ROOT: path.join(root, 'tests', 'fixtures'),
+      STUDIO_PROVIDER: 'fake',
+      STUDIO_DATA_DIR: path.join(runRoot, 'data'),
+      STUDIO_WORKSPACE_ROOT: workspaceRoot,
       STUDIO_ALLOWED_ORIGINS: '["http://127.0.0.1:8765"]',
     },
   },

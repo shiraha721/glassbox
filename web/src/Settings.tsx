@@ -31,7 +31,7 @@ export function Settings({
       setNotice(
         discover
           ? 'Settings saved. Discovery complete; review server errors and tool permissions below.'
-          : 'Settings saved. Create a new preview to use them.',
+          : 'Settings saved. New runs use these settings.',
       );
     } catch (caught) {
       setError(errorMessage(caught));
@@ -109,8 +109,9 @@ export function Settings({
                     />
                   </label>
                   <p className="subtle">
-                    Set the key in the server environment or .env file. Enter only the variable name
-                    here. Leave blank for a keyless local endpoint.
+                    Set OPENAI_BASE_URL, OPENAI_MODEL, and OPENAI_API_KEY in .env. Base URL and
+                    model are applied on server startup; changes here apply immediately. Enter only
+                    the key variable name above, or leave it blank for a keyless local endpoint.
                   </p>
                 </>
               )}
@@ -152,6 +153,29 @@ export function Settings({
                   />
                 </label>
               </div>
+            </section>
+            <section>
+              <h3>Bash sandbox</h3>
+              <label>
+                Workspace access
+                <select
+                  value={draft.sandbox_mode}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      sandbox_mode: event.target.value as Config['sandbox_mode'],
+                    })
+                  }
+                >
+                  <option value="workspace-write">Read and write workspace files</option>
+                  <option value="read-only">Read-only workspace</option>
+                </select>
+              </label>
+              <p className="subtle">
+                Bash uses bubblewrap on Linux or WSL. Network access is disabled. Check availability
+                in Workspace. MCP servers have their own permissions and run outside this Bash
+                sandbox.
+              </p>
             </section>
             <section>
               <h3>Tool permissions</h3>

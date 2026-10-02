@@ -42,6 +42,11 @@ def langchain_messages(messages: list[Message]) -> list:
 
 def model(config: ProviderConfig, key: str, client: httpx.AsyncClient | None = None) -> ChatOpenAI:
     """Create a Chat Completions adapter with retries and role fallback disabled."""
+    if not config.model.strip():
+        raise AppError(
+            "provider_not_configured",
+            "Set OPENAI_MODEL and OPENAI_BASE_URL in .env, or configure the model in Settings.",
+        )
     url = urlparse(config.base_url)
     if (
         url.scheme not in {"https", "http"}

@@ -267,7 +267,11 @@ class Repository:
         return (await self._one(previews, identifier))["data"]
 
     async def create_run(
-        self, preview_id: str, request: dict[str, Any], key: str
+        self,
+        preview_id: str,
+        request: dict[str, Any],
+        key: str,
+        submission: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically claim a fresh preview and session, or return an idempotent retry."""
         async with self.lock, self.engine.begin() as connection:
@@ -277,7 +281,7 @@ class Repository:
                 .first()
             )
             if existing:
-                if existing["request_hash"] != digest(request):
+                if existing["request_hash"] != digest(submission or request):
                     raise AppError(
                         "idempotency_conflict", "This idempotency key has different input.", 409
                     )
@@ -328,7 +332,7 @@ class Repository:
                 "session_id": session["id"],
                 "preview_id": preview_id,
                 "idempotency_key": key,
-                "request_hash": digest(request),
+                "request_hash": digest(submission or request),
                 "snapshot": snapshot,
                 "status": "queued",
                 "stop_reason": None,
@@ -353,6 +357,18 @@ class Repository:
             await self._event(connection, value["id"], "run.queued", {})
             value["latest_event_seq"] = 1
         return value
+
+    async def submitted_run(self, key: str, submission: dict[str, Any]) -> dict[str, Any] | None:
+        """Resolve a direct submission retry before creating another input snapshot."""
+        async with self.engine.connect() as connection:
+            row = (
+                (await connection.execute(select(runs).where(runs.c.idempotency_key == key)))
+                .mappings()
+                .first()
+            )
+        if row is not None and row["request_hash"] != digest(submission):
+            raise AppError("idempotency_conflict", "This idempotency key has different input.", 409)
+        return dict(row) if row else None
 
     async def run(self, identifier: str) -> dict[str, Any]:
         """Read a Run including its private frozen snapshot and current projection."""

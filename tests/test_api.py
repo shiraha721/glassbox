@@ -72,9 +72,58 @@ async def test_native_file_tool_returns_to_model(studio_client):
     messages = completed["messages"]
     assert [message["role"] for message in messages] == ["assistant", "tool", "assistant"]
     assert messages[1]["tool_call_id"] == messages[0]["tool_calls"][0]["id"]
-    assert messages[1]["content"] == "Local tool evidence"
+    assert json.loads(messages[1]["content"])["content"] == "Local tool evidence"
     trace = (await client.get(f"/api/v1/runs/{run['id']}/trace")).json()["calls"]
     assert len([call for call in trace if call["kind"] == "model"]) == 2
+
+
+async def test_direct_run_retries_and_frozen_memory(studio_client):
+    """Direct submissions stay idempotent and memory edits cannot alter an active Run."""
+    client, app = studio_client
+    memory = app.state.studio.registry.files.memory()
+    saved = (
+        await client.put(
+            "/api/v1/workspace/memory",
+            json={
+                "content": "Original project note.",
+                "expected_hash": memory["hash"],
+            },
+        )
+    ).json()
+    bootstrap = (await client.get("/api/v1/bootstrap")).json()
+    session = (await client.post("/api/v1/sessions", json={})).json()
+    body = {
+        "session_id": session["id"],
+        "expected_session_revision": 0,
+        "preset_id": bootstrap["presets"][0]["id"],
+        "preset_revision": bootstrap["presets"][0]["revision"],
+        "config_revision": bootstrap["config"]["revision"],
+        "input": "/echo pause for edit",
+    }
+    headers = {"Idempotency-Key": session["id"]}
+    response = await client.post("/api/v1/runs", json=body, headers=headers)
+    assert response.status_code == 202, response.text
+    run = await wait_state(client, response.json()["id"], {"waiting_approval"})
+    update = {"content": "Changed project note.", "expected_hash": saved["hash"]}
+    assert (await client.put("/api/v1/workspace/memory", json=update)).status_code == 200
+    assert (await client.put("/api/v1/workspace/memory", json=update)).status_code == 409
+    await client.post(
+        f'/api/v1/runs/{run["id"]}/approvals/{run["approval"]["id"]}', json={"decision": "approve"}
+    )
+    await wait_state(client, run["id"], {"succeeded"})
+    repeated = await client.post("/api/v1/runs", json=body, headers=headers)
+    assert repeated.json()["id"] == run["id"]
+    assert (
+        await client.post("/api/v1/runs", json={**body, "input": "Different task"}, headers=headers)
+    ).status_code == 409
+    trace = (await client.get(f'/api/v1/runs/{run["id"]}/trace')).json()["calls"]
+    for call in (item for item in trace if item["kind"] == "model"):
+        context = next(
+            item
+            for item in call["data"]["canonical_messages"]
+            if item["source"] == "workspace:memory"
+        )
+        assert context["content"].endswith("Original project note.")
 
 
 @pytest.mark.parametrize("decision", ["approve", "reject"])

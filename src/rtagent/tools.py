@@ -14,14 +14,90 @@ from mcp.client.streamable_http import streamable_http_client
 
 from rtagent.config import resolve_secret
 from rtagent.domain import AppError, MCPServer, StudioConfig, ToolDefinition, digest
+from rtagent.sandbox import BashSandbox
+from rtagent.workspace import MEMORY_PATH, Workspace
+
+WRITE_TOOLS = {"write_text", "edit_text", "save_memory", "save_skill"}
 
 
 def native_tools() -> list[ToolDefinition]:
-    """Describe the bounded file reader and side-effect-free approval demo tool."""
+    """Describe the concrete workspace tools without a generic extension framework."""
+
+    def tool(name: str, description: str, properties: dict, required: list[str]) -> ToolDefinition:
+        return ToolDefinition(
+            name=name,
+            description=description,
+            input_schema={
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": False,
+            },
+        )
+
+    string = {"type": "string"}
+    content = {"type": "string", "maxLength": 65536}
     return [
+        tool(
+            "list_files",
+            "List one workspace directory, excluding credentials and runtime data.",
+            {"path": string},
+            [],
+        ),
+        tool(
+            "write_text",
+            "Create a UTF-8 file. To replace an existing file, pass expected_hash from read_text.",
+            {"path": string, "content": content, "expected_hash": string},
+            ["path", "content"],
+        ),
+        tool(
+            "edit_text",
+            "Replace exactly one occurrence of old_text in a workspace file; ambiguous matches fail.",
+            {"path": string, "old_text": content, "new_text": content},
+            ["path", "old_text", "new_text"],
+        ),
+        tool(
+            "bash",
+            "Run Bash in the workspace sandbox. Only /workspace and temporary scratch space are writable; host network is disabled. Host credentials, runtime data, Git metadata, and dependency folders are hidden. Returns exit code, stdout, stderr, and timeout status.",
+            {
+                "command": {"type": "string", "minLength": 1, "maxLength": 16000},
+                "cwd": string,
+                "timeout": {"type": "number", "minimum": 0.1, "maximum": 300},
+            },
+            ["command"],
+        ),
+        tool(
+            "read_memory",
+            "Read durable project notes and their hash from .rtagent/MEMORY.md.",
+            {},
+            [],
+        ),
+        tool(
+            "save_memory",
+            "Save durable project notes without credentials. Pass the hash returned by read_memory.",
+            {"content": content, "expected_hash": string},
+            ["content", "expected_hash"],
+        ),
+        tool(
+            "load_skill",
+            "Load the full instructions of one discovered skill when its description matches the task.",
+            {"name": string},
+            ["name"],
+        ),
+        tool(
+            "save_skill",
+            "Create .agents/skills/<name>/SKILL.md. Supply an English description and Markdown instructions without frontmatter. For updates, pass expected_hash from load_skill.",
+            {
+                "name": string,
+                "description": {"type": "string", "maxLength": 1000},
+                "instructions": content,
+                "expected_hash": string,
+            },
+            ["name", "description", "instructions"],
+        ),
         ToolDefinition(
             name="read_text",
-            description="Read a UTF-8 text file inside the configured workspace (maximum 64 KiB).",
+            description="Read workspace UTF-8 text and its content hash (maximum 64 KiB).",
             input_schema={
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
@@ -84,9 +160,11 @@ async def mcp_session(server: MCPServer):
 class ToolRegistry:
     """Discover tools and execute schemas pinned to a Run snapshot."""
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, data_dir: Path | None = None, wsl_distro: str = ""):
         """Bind local tools to one resolved workspace and seed the native catalog."""
         self.workspace = workspace.resolve()
+        self.files = Workspace(self.workspace, data_dir)
+        self.sandbox = BashSandbox(self.files, wsl_distro)
         self.catalog: dict[str, ToolDefinition] = {}
         self.errors: dict[str, str] = {}
         self.reset()
@@ -144,7 +222,7 @@ class ToolRegistry:
         """Intersect discovered tools with the locally configured permission map."""
         result = []
         for name, permission in config.tools.items():
-            if permission == "deny":
+            if permission == "deny" or (config.sandbox_mode == "read-only" and name in WRITE_TOOLS):
                 continue
             if name not in self.catalog:
                 raise AppError(
@@ -156,48 +234,42 @@ class ToolRegistry:
 
     def read_file(self, relative: str) -> str:
         """Read at most 64 KiB of workspace UTF-8 text, excluding links and secrets."""
-        path = (self.workspace / relative).resolve()
-        if not path.is_relative_to(self.workspace):
-            raise AppError("tool_denied", "File path is outside the configured workspace.", 403)
-        # Windows paths are case-insensitive, including credential file exclusions.
-        parts = [part.casefold() for part in path.relative_to(self.workspace).parts]
-        if any(
-            part in {".git", ".venv", "node_modules", "var", "access-token"}
-            or part == ".env"
-            or (part.startswith(".env.") and part != ".env.example")
-            for part in parts
-        ) or path.suffix.casefold() in {".db", ".sqlite", ".sqlite3"}:
-            raise AppError(
-                "tool_denied",
-                "Credential, runtime, and dependency files are excluded from the file tool.",
-                403,
-            )
-        if not path.is_file():
-            raise AppError("tool_error", "The requested text file does not exist.")
-        # Refuse links in every component; this local tool is not an OS sandbox.
-        candidate = self.workspace / relative
-        for part in [candidate, *candidate.parents]:
-            if part == self.workspace:
-                break
-            if part.is_symlink() or (hasattr(part, "is_junction") and part.is_junction()):
-                raise AppError(
-                    "tool_denied", "Linked paths are not supported by the local file tool.", 403
-                )
-        with path.open("rb") as handle:
-            content = handle.read(65537)
-        if len(content) > 65536:
-            raise AppError("tool_output_limit", "File exceeds the 64 KiB read limit.")
-        try:
-            return content.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise AppError("tool_error", "The selected file is not UTF-8 text.") from exc
+        return self.files.read(relative)["content"]
 
     async def execute(self, definition: ToolDefinition, args: dict, config: StudioConfig) -> str:
         """Execute one authorized call after checking its current MCP schema."""
-        if definition.name == "read_text":
-            return await asyncio.to_thread(self.read_file, args["path"])
-        if definition.name == "echo":
+        name = definition.name
+        if config.sandbox_mode == "read-only" and name in WRITE_TOOLS:
+            raise AppError("tool_denied", "The workspace is read-only.", 403)
+        if name == "bash":
+            timeout = min(args.get("timeout", config.tool_timeout), config.tool_timeout)
+            return await self.sandbox.execute(
+                args["command"], args.get("cwd", "."), config.sandbox_mode, timeout
+            )
+        if name == "echo":
             return args["text"]
+        operations = {
+            "read_text": self.files.read,
+            "list_files": self.files.list_files,
+            "write_text": self.files.write,
+            "edit_text": self.files.edit,
+            "read_memory": self.files.memory,
+            "load_skill": self.files.load_skill,
+            "save_skill": self.files.save_skill,
+        }
+        if name == "save_memory":
+            result = await asyncio.to_thread(self.files.write, MEMORY_PATH, **args)
+        elif name in operations:
+            result = await asyncio.to_thread(operations[name], **args)
+        else:
+            result = None
+        if result is not None:
+            text = json.dumps(result, ensure_ascii=False)
+            if len(text.encode()) > 65536:
+                raise AppError(
+                    "tool_output_limit", "Serialized tool output exceeds the 64 KiB limit."
+                )
+            return text
         server = next(
             (server for server in config.mcp_servers if server.id == definition.server_id), None
         )

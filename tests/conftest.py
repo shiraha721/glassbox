@@ -13,7 +13,9 @@ async def studio_client(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "README.md").write_text("Local tool evidence", encoding="utf-8")
-    settings = Settings(data_dir=tmp_path / "data", workspace_root=workspace)
+    settings = Settings(
+        data_dir=tmp_path / "data", workspace_root=workspace, provider="fake", _env_file=None
+    )
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(

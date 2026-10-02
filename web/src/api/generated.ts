@@ -64,6 +64,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workspace
+         * @description Inspect project memory, skills, and the actual Bash sandbox status.
+         */
+        get: operations["workspace_api_v1_workspace_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Memory
+         * @description Save explicitly edited project notes.
+         */
+        put: operations["save_memory_api_v1_workspace_memory_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Skill
+         * @description Load a skill body on demand.
+         */
+        get: operations["skill_api_v1_workspace_skills__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Skill
+         * @description Create or update a workspace skill with conflict detection.
+         */
+        put: operations["save_skill_api_v1_workspace_skills_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/presets/{preset_id}": {
         parameters: {
             query?: never;
@@ -199,7 +279,7 @@ export interface paths {
         put?: never;
         /**
          * Start Run
-         * @description Schedule a saved preview with an idempotency key.
+         * @description Compile a direct submission or run an optional preview with retry protection.
          */
         post: operations["start_run_api_v1_runs_post"];
         delete?: never;
@@ -594,6 +674,28 @@ export interface components {
             credential_ref: string;
         };
         /**
+         * MemoryDocument
+         * @description Editable project memory with a fingerprint for conflict detection.
+         */
+        MemoryDocument: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+            /** Hash */
+            hash: string;
+        };
+        /**
+         * MemorySave
+         * @description An explicit replacement of the memory text the user last read.
+         */
+        MemorySave: {
+            /** Content */
+            content: string;
+            /** Expected Hash */
+            expected_hash: string;
+        };
+        /**
          * Message
          * @description Canonical message with provenance and explicit tool-call pairing.
          */
@@ -673,7 +775,7 @@ export interface components {
         };
         /**
          * PreviewRequest
-         * @description Bind a preview to the configuration and session revisions the user edited.
+         * @description Compile a task for optional inspection or immediate execution.
          */
         PreviewRequest: {
             /** Session Id */
@@ -692,6 +794,8 @@ export interface components {
             variables?: {
                 [key: string]: unknown;
             };
+            /** Skills */
+            skills?: string[];
         };
         /**
          * ProviderConfig
@@ -700,18 +804,18 @@ export interface components {
         "ProviderConfig-Input": {
             /**
              * Adapter
-             * @default fake
+             * @default openai
              * @enum {string}
              */
             adapter: "fake" | "openai";
             /**
              * Model
-             * @default studio-demo
+             * @default
              */
             model: string;
             /**
              * Base Url
-             * @default http://127.0.0.1:11434/v1
+             * @default https://api.openai.com/v1
              */
             base_url: string;
             /**
@@ -739,18 +843,18 @@ export interface components {
         "ProviderConfig-Output": {
             /**
              * Adapter
-             * @default fake
+             * @default openai
              * @enum {string}
              */
             adapter: "fake" | "openai";
             /**
              * Model
-             * @default studio-demo
+             * @default
              */
             model: string;
             /**
              * Base Url
-             * @default http://127.0.0.1:11434/v1
+             * @default https://api.openai.com/v1
              */
             base_url: string;
             /**
@@ -842,6 +946,20 @@ export interface components {
             }[];
         };
         /**
+         * SandboxStatus
+         * @description Report the checked OS boundary, including when it is unavailable.
+         */
+        SandboxStatus: {
+            /** Backend */
+            backend: string;
+            /** Ready */
+            ready: boolean;
+            /** Network */
+            network: string;
+            /** Detail */
+            detail: string;
+        };
+        /**
          * SessionCreate
          * @description Optional display title for a new empty conversation.
          */
@@ -871,6 +989,54 @@ export interface components {
             created_at: string;
         };
         /**
+         * SkillDocument
+         * @description Full skill source for inspection or an explicit model load.
+         */
+        SkillDocument: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Path */
+            path: string;
+            /** Builtin */
+            builtin: boolean;
+            /** Hash */
+            hash: string;
+            /** Content */
+            content: string;
+        };
+        /**
+         * SkillInfo
+         * @description Lightweight skill catalog entry; bodies load only on demand.
+         */
+        SkillInfo: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Path */
+            path: string;
+            /** Builtin */
+            builtin: boolean;
+            /** Hash */
+            hash: string;
+        };
+        /**
+         * SkillSave
+         * @description A concise skill authored directly by the user or the skill-creator workflow.
+         */
+        SkillSave: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Instructions */
+            instructions: string;
+            /** Expected Hash */
+            expected_hash?: string | null;
+        };
+        /**
          * StartRun
          * @description Consume a saved preview without accepting replacement execution settings.
          */
@@ -897,6 +1063,12 @@ export interface components {
             tools?: {
                 [key: string]: "allow" | "ask" | "deny";
             };
+            /**
+             * Sandbox Mode
+             * @default workspace-write
+             * @enum {string}
+             */
+            sandbox_mode: "workspace-write" | "read-only";
             /** Mcp Servers */
             mcp_servers?: components["schemas"]["MCPServer-Input"][];
             /**
@@ -935,6 +1107,12 @@ export interface components {
             tools: {
                 [key: string]: "allow" | "ask" | "deny";
             };
+            /**
+             * Sandbox Mode
+             * @default workspace-write
+             * @enum {string}
+             */
+            sandbox_mode: "workspace-write" | "read-only";
             /** Mcp Servers */
             mcp_servers: components["schemas"]["MCPServer-Output"][];
             /**
@@ -1062,6 +1240,22 @@ export interface components {
             default: unknown;
         };
         /**
+         * WorkspaceView
+         * @description File-backed workspace context and actual sandbox availability.
+         */
+        WorkspaceView: {
+            /** Root */
+            root: string;
+            sandbox: components["schemas"]["SandboxStatus"];
+            memory: components["schemas"]["MemoryDocument"];
+            /** Skills */
+            skills: components["schemas"]["SkillInfo"][];
+            /** Skill Errors */
+            skill_errors: {
+                [key: string]: string;
+            };
+        };
+        /**
          * RunEvent
          * @description Versioned, persistent SSE envelope with a per-Run sequence number.
          */
@@ -1155,6 +1349,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StudioConfig-Output"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workspace_api_v1_workspace_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_memory_api_v1_workspace_memory_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemorySave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skill_api_v1_workspace_skills__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_skill_api_v1_workspace_skills_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDocument"];
                 };
             };
             /** @description Validation Error */
@@ -1391,7 +1713,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StartRun"];
+                "application/json": components["schemas"]["StartRun"] | components["schemas"]["PreviewRequest"];
             };
         };
         responses: {

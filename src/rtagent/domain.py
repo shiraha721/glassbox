@@ -102,9 +102,9 @@ class Preset(Contract):
 class ProviderConfig(Contract):
     """Serializable provider options containing references, never API key values."""
 
-    adapter: Literal["fake", "openai"] = "fake"
-    model: str = "studio-demo"
-    base_url: str = "http://127.0.0.1:11434/v1"
+    adapter: Literal["fake", "openai"] = "openai"
+    model: str = ""
+    base_url: str = "https://api.openai.com/v1"
     credential_ref: str = "OPENAI_API_KEY"
     temperature: float = Field(default=0.2, ge=0, le=2)
     max_output_tokens: int = Field(default=2048, ge=1, le=32768)
@@ -177,8 +177,20 @@ class StudioConfig(Contract):
     revision: int = Field(default=0, ge=0)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
     tools: dict[str, Literal["allow", "ask", "deny"]] = Field(
-        default_factory=lambda: {"read_text": "allow", "echo": "ask"}
+        default_factory=lambda: {
+            "read_text": "allow",
+            "list_files": "allow",
+            "write_text": "allow",
+            "edit_text": "allow",
+            "bash": "allow",
+            "read_memory": "allow",
+            "save_memory": "allow",
+            "load_skill": "allow",
+            "save_skill": "allow",
+            "echo": "ask",
+        }
     )
+    sandbox_mode: Literal["workspace-write", "read-only"] = "workspace-write"
     mcp_servers: list[MCPServer] = Field(default_factory=list, max_length=10)
     max_steps: int = Field(default=20, ge=1, le=100)
     max_tool_calls: int = Field(default=40, ge=1, le=200)
@@ -216,7 +228,7 @@ class CompiledPrompt(Contract):
 
 
 class PreviewRequest(Contract):
-    """Bind a preview to the configuration and session revisions the user edited."""
+    """Compile a task for optional inspection or immediate execution."""
 
     session_id: str
     expected_session_revision: int
@@ -225,6 +237,66 @@ class PreviewRequest(Contract):
     config_revision: int
     input: str = Field(min_length=1, max_length=100_000)
     variables: dict[str, Any] = Field(default_factory=dict)
+    skills: list[str] = Field(default_factory=list, max_length=20)
+
+
+class MemoryDocument(Contract):
+    """Editable project memory with a fingerprint for conflict detection."""
+
+    path: str
+    content: str
+    hash: str
+
+
+class MemorySave(Contract):
+    """An explicit replacement of the memory text the user last read."""
+
+    content: str = Field(max_length=65_536)
+    expected_hash: str
+
+
+class SkillInfo(Contract):
+    """Lightweight skill catalog entry; bodies load only on demand."""
+
+    name: str
+    description: str
+    path: str
+    builtin: bool
+    hash: str
+
+
+class SkillDocument(SkillInfo):
+    """Full skill source for inspection or an explicit model load."""
+
+    content: str
+
+
+class SkillSave(Contract):
+    """A concise skill authored directly by the user or the skill-creator workflow."""
+
+    name: str = Field(min_length=1, max_length=64)
+    description: str = Field(min_length=1, max_length=1000)
+    instructions: str = Field(min_length=1, max_length=65_536)
+    expected_hash: str | None = None
+
+
+class SandboxStatus(Contract):
+    """Report the checked OS boundary, including when it is unavailable."""
+
+    backend: str
+    ready: bool
+    network: str
+    detail: str
+
+
+class WorkspaceView(Contract):
+    """File-backed workspace context and actual sandbox availability."""
+
+    root: str
+    sandbox: SandboxStatus
+    memory: MemoryDocument
+    skills: list[SkillInfo]
+    skill_errors: dict[str, str]
 
 
 class Preview(Contract):

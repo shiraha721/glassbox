@@ -1,78 +1,127 @@
 # Security Agent Studio
 
-## Project Status
+A local agent workspace for coding, reverse engineering, CTF challenges, debugging, and other authorized security work. Compose inspectable prompts, run a tool-using agent, and retain evidence for each model and tool call.
 
-As of 2026-10-03, a local MVP is implemented: **a working Web UI, deterministic Prompt Compiler, single-agent tool loop, approval and recovery controls, and execution tracing**.
-The offline model exercises the complete workflow without credentials. The OpenAI-compatible Chat Completions adapter is verified against a mocked HTTP boundary; a live account or self-hosted model has not been tested in this environment.
+The target is an extensible everyday agent harness in the scope of [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent), with prompt composition and inspection as core features. The original Web UI and tool loop are **Stage 1**, not the finished product. Develop working vertical features without speculative services or a generic plugin framework.
 
-The Features section describes the broader product direction. Current capabilities and limits are listed below; specialized security tools and evaluation workflows remain future work.
+## Current status
 
-- [Architecture and Detailed Design](docs/architecture.md): module boundaries, data models, APIs, UI design, and the implementation plan.
-- [Development Guidelines](AGENTS.md): implementation and verification rules for developers and coding agents.
+As of 2026-10-03, Stage 1 is implemented and the first Stage 2 workspace capabilities are available:
 
-## Quickstart
+- Direct **Run**, streaming replies, persistent conversations, cancellation, approval, and checkpoint recovery. Preview is optional.
+- Prompt blocks with roles, ordering, conditions, variables, and source mapping; immutable Run inputs.
+- OpenAI-compatible Chat Completions with configurable Base URL, model, and server-side API key. The real adapter is the default; a missing model produces a configuration error.
+- Actual Bash execution in bubblewrap (through WSL on Windows), plus list/read/write/edit file tools.
+- Workspace instructions, persistent Markdown memory, on-demand Skills, and a bundled skill-creator that saves reusable procedures.
+- Stateless stdio/Streamable HTTP MCP, per-tool permissions, captured requests, tool results, usage, and redacted exports.
 
-Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), and Node.js 22.12+ with npm. Run commands from the repository root. The lockfiles were validated on Windows with Python 3.12.11 and Node.js 26.4.0.
+Local HTTP checks exercise actual tools, sandbox boundaries, memory, Skills, and cancellation. The OpenAI-compatible request boundary is covered with an HTTP fixture. **Live model acceptance is pending user endpoint configuration**; simulated decisions do not establish real model quality.
+
+See [Architecture](docs/architecture.md) for the implemented design and [AGENTS.md](AGENTS.md) for development conventions.
+
+## Start the application
+
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22.12+ and npm. From the repository root:
 
 ```powershell
 uv sync --dev --locked
 npm --prefix web ci
 npm --prefix web run build
-uv run rtagent
+Copy-Item .env.example .env   # Only if .env does not already exist.
 ```
 
-Open **http://127.0.0.1:8001** to enter the workspace directly. No login or access token is needed. Startup applies Alembic migrations and seeds an example preset. Run one server worker, bound to loopback.
+Configure the endpoint and model in .env:
 
-Try the complete offline workflow:
+```dotenv
+STUDIO_DATA_DIR=var
+STUDIO_WORKSPACE_ROOT=.
+STUDIO_PROVIDER=openai
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=
+OPENAI_API_KEY=
+STUDIO_WSL_DISTRO=
+```
 
-1. Open **Prompt** to edit a message block, then enter `/read README.md` in **Task**. Conversations are listed in the left sidebar; the editor and inspector open only when needed.
-2. Select **Save & preview** or **Preview**. Inspect roles, ordering, source mappings, activation decisions, and the prepared request.
-3. Select **Run**. The simulated model calls the real, bounded file tool and incorporates its result.
-4. Open **Inspector → Run trace** to inspect both model calls and the tool receipt. **Show original trace** is an explicit local view; **Export JSON** always produces a labeled, redacted copy.
-5. Try `/echo hello` to approve or reject a tool. `/slow` exercises cancellation. Refreshing the browser reloads existing state without submitting another Run.
+Start with `uv run rtagent` and open **http://127.0.0.1:8001**. Enter a task and click **Run**, or press **Ctrl+Enter / Cmd+Enter**. Open **Prompt** to edit the preset and **Inspector** to examine requests. **Preview** inspects the frozen first request without calling a model; it is never a prerequisite for Run.
 
-### Connect a model or MCP server
+The app opens directly without login or a workspace access token. Startup applies migrations. Use one server worker on loopback. Changing the workspace root or .env provider options requires a restart. Explicit .env provider values override saved settings on startup; edits in **Settings** apply immediately to new Runs until the next restart. API keys stay on the server.
 
-Optionally copy `.env.example` to `.env`. Set credentials in that file or the server environment; enter only their variable names in **Settings**.
+For a keyless local endpoint, leave the credential reference in Settings empty. The adapter requires streaming Chat Completions and tool calls. It does not silently rewrite roles, retry requests, or fall back to simulation.
 
-For a real model, select **OpenAI-compatible**, set the base URL and model ID served by your endpoint, and save. Use `OPENAI_API_KEY` as the credential reference, or leave the reference blank for a keyless local server. The adapter uses streaming Chat Completions with tool calls and usage reporting; endpoints must support the prepared fields shown in the preview. Unsupported role rewrites are rejected rather than silently changing the prompt. No SDK retries or provider fallbacks run automatically.
+## Bash and workspace tools
 
-For MCP, add a **stdio** executable and argument list, or a **Streamable HTTP** URL. Use **Save & discover**, choose each tool's permission, then **Save settings**. New tools default to **Disabled**. Child environment entries map `NAME=SERVER_VARIABLE`; they do not contain secret values. HTTP bearer authentication uses a separate environment reference. With the simulated model, `/tool NAME {"argument":"value"}` invokes an enabled tool by its namespaced catalog name, visible in the preview's tool schemas.
+On Linux, install Bash, bubblewrap, and util-linux. On Windows, install them in a WSL distribution and set STUDIO_WSL_DISTRO if it is not the default distribution. In Debian/Ubuntu or its WSL shell:
 
-The file reader is limited to UTF-8 files of at most 64 KiB under `STUDIO_WORKSPACE_ROOT`. It excludes linked paths, common credential/runtime files, and dependency directories. It is a local convenience boundary, not an OS sandbox.
+```bash
+sudo apt-get update
+sudo apt-get install bash bubblewrap util-linux
+```
 
-### Local data and recovery
+**Workspace** shows whether an actual sandbox probe succeeds. The app can start without these dependencies; Bash reports an actionable error if isolation is unavailable. There is no unrestricted fallback to Git Bash, PowerShell, or the host shell.
 
-- `var/app.db`: presets, settings, sessions, immutable Run snapshots, events, and call receipts.
-- `var/checkpoints.db`: LangGraph checkpoints, keyed by Run ID.
-Runtime files and `.env` are ignored by Git.
+The boundary follows the separation between OS isolation and approval policy described in [Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing):
 
-Changing settings affects new Runs. Existing Runs retain their snapshot. A pending approval survives a restart. Interrupted calls with uncertain outcomes require an explicit retry or a verified tool result in the Web UI; retries may repeat an external effect or model charge. Cancellation stops local work and retains uncertainty; it cannot roll back external effects. Only successful turns enter conversation history.
+- Commands see the project at /workspace, read-only system binaries/libraries, a private process namespace, and temporary scratch space. Host home directories and Windows drives are not mounted.
+- The environment is cleared. Server credential variables are not forwarded. Existing .env files, Git metadata, runtime databases, the configured data directory, and dependency/cache directories are masked. .env.example remains readable.
+- Network access is disabled, including host services and downloads. WSL linked paths/junctions cause a clear refusal instead of traversal through DrvFS.
+- **Settings → Bash sandbox** selects workspace-write or read-only. Read-only also removes native file/memory/skill mutation tools from model exposure. Scratch storage remains writable.
+- Tool deadlines, bounded stdout/stderr, and process-tree cleanup apply. Timeout/cancellation can leave partial project edits; inspect those files before repeating a write.
 
-Use **Delete conversation** for an idle session to remove its Runs, traces, events, previews, and checkpoints. Raw data is stored locally without application-level encryption. Redaction masks common patterns and fields; review exports before sharing.
+On Windows/WSL, each Bash call uses a filtered copy on a private Linux filesystem. This prevents case aliases such as .ENV from bypassing a .env mask on a Windows drive. Changed files are copied back after the command stops, with checks for concurrent host edits; live edits appear after the call completes. The copy is limited to 64 MiB of files and 10,000 entries in each direction, excluding dependencies and runtime data. Unsupported links, case collisions, or conflicting edits fail explicitly. Native Linux uses a direct workspace mount.
 
-## Current Implementation and Limits
+This is Linux/WSL isolation, not Codex's native Windows sandbox. Network allowlists, interactive terminals, persistent background jobs, and disk quotas are not implemented. The boundary assumes the workspace is not concurrently modified by a hostile host process.
 
-| Area | Implemented baseline | Deliberately deferred |
-| --- | --- | --- |
-| Composer | Embedded blocks, aggregate preset revisions, conditions/variables as JSON, ordering, duplication, deterministic preview | Shared block library, historical revision editor, drag-and-drop |
-| Runtime | One LangGraph worker, bounded model/tool attempts, streaming, approval, cancellation, durable receipts, explicit recovery | Multiple workers, multi-agent orchestration, automatic retries |
-| Providers | Offline simulation and OpenAI-compatible text/tool streaming with request capture | Other provider protocols, images, automatic capability negotiation |
-| Tools | Controlled file reads, echo, stateless stdio/HTTP MCP with schema checks | Stateful MCP sessions, built-in shell/Python sandbox, IDA/Ghidra acceptance |
-| Inspection | Per-call canonical/prepared/captured requests, results, actual usage when returned, export, session deletion | Replay imports, automatic retention jobs, side-by-side comparisons, cost catalog |
+Native file tools use relative paths, reject traversal/links, and bound UTF-8 files to 64 KiB. read_text returns content and a hash; write_text requires that hash before replacing a file. edit_text requires exactly one literal match. File tools use application path checks; Bash uses OS isolation.
 
-Presets own their blocks; settings own provider options, permissions, and MCP connections. Versions protect edits and immutable snapshots preserve execution evidence. Each backend responsibility is a small module, without generic repository or plugin abstractions. MCP opens a fresh session for each discovery/call, so a server that requires a long-lived analysis session needs a future adapter. The sidebar lists the 100 most recent sessions. Context estimates use a byte heuristic; unknown usage remains `null` and no automatic trimming occurs. Approvals remain pending until explicitly resolved or cancelled.
+MCP servers run **outside the Bash sandbox**, under their configured transports and permissions. Add a stdio executable and arguments or Streamable HTTP URL in Settings, select **Save & discover**, then enable individual tools. New MCP tools default to Disabled. Connections are stateless; IDA/Ghidra workflows need separate integration acceptance.
 
-## Development and Verification
+## Memory and Skills
 
-For live frontend development, run the backend command above and `npm --prefix web run dev` in another terminal. Open http://127.0.0.1:5173; Vite proxies `/api` to the backend. After changing API contracts, regenerate the committed TypeScript types:
+**Workspace → Memory** edits .rtagent/MEMORY.md. The agent uses read_memory/save_memory for the same file. There is no vector store or hidden automatic summarization.
+
+At submission, root AGENTS.md, memory, and skill metadata are captured with explicit sources in the Run snapshot. They are not repeatedly appended to conversation history. Later edits affect new Runs. Memory updates reject stale hashes. Local memory is ignored by this repository's Git configuration; never put credentials in it.
+
+Workspace skills live at `.agents/skills/<name>/SKILL.md`:
+
+```markdown
+---
+name: evidence-review
+description: Review workspace evidence and prepare a report with file references.
+---
+
+Read the evidence, distinguish facts from assumptions, and cite file paths.
+```
+
+Only name, description, and location enter the default catalog. The model calls load_skill when a description matches the task. To load a skill explicitly, select it in **Workspace → Skills** or mention **$evidence-review** in your task. Supporting files can live beside SKILL.md and be read with file tools. Invalid entries are shown in Workspace.
+
+The bundled **$skill-creator** guides the agent to inspect existing procedures, write one with save_skill, and load it again to validate the result. For example: “$skill-creator create a skill for reviewing this project's Python changes.” You can also create/edit skills directly in Workspace. Bundled skills are read-only; project skills can be committed after review. Skill text cannot grant permissions or alter the sandbox.
+
+## Execution records
+
+STUDIO_DATA_DIR contains app.db (settings, presets, sessions, snapshots, events, receipts) and checkpoints.db (LangGraph state). Runtime files, .env, raw traces, and local memory are excluded from Git.
+
+Each model call records canonical messages, prepared and captured application-level requests, transformations, metadata, and returned usage. Missing usage/cost data stays null. Token estimates use a byte heuristic; configured context overflow fails explicitly without hidden trimming.
+
+Approvals survive restarts. Unknown outcomes require a recovery decision rather than automatic retry. Stop awaits local cleanup but does not undo completed edits or remote effects. Only successful turns enter session history. Refresh/SSE reconnect reload saved state without creating another Run. Deleting an idle conversation removes its associated records and checkpoints. Original traces remain local; exports are labeled redacted copies.
+
+## Development and live verification
+
+Use `npm --prefix web run dev` alongside the backend for Vite at http://127.0.0.1:5173. Regenerate API types after contract changes:
 
 ```powershell
 uv run python scripts/export_api.py
 npm --prefix web run generate:api
 ```
 
-Checks from the repository root:
+Validate changed behavior against the running service first. A repeatable check with a real HTTP server and OS tools is available:
+
+```powershell
+uv run python scripts/smoke_workspace.py
+```
+
+It temporarily binds port 8766, uses a disposable workspace and an explicitly simulated model, and requires working Linux/WSL bubblewrap. It verifies direct Run retry identity, actual file/Bash operations, hidden host paths, network isolation, memory/Skills, context provenance, read-only enforcement, and cancellation cleanup. It does not call a model service or modify the selected user workspace.
+
+For manual offline checks, explicitly select **Simulated model** in Settings or set STUDIO_PROVIDER=fake. Commands such as `/read README.md`, `/echo hello`, and `/tool bash {"command":"pwd"}` use simulated decisions with real tools. `/slow` exercises Stop. Simulation is a development aid, not the default provider.
 
 ```powershell
 uv run pytest
@@ -86,295 +135,17 @@ npm --prefix web run format:check
 npm --prefix web run build
 ```
 
-Browser tests start their own loopback backend with temporary data under `var/`. Build the frontend first, then:
+Browser checks use a separate backend and temporary data. Build first, then run `npx playwright install chromium` and `npm run test:e2e` from web/. Offline checks do not replace acceptance against a real model.
 
-```powershell
-Set-Location web
-npx playwright install chromium
-npm run test:e2e
-```
+## Delivery stages
 
-Default Python tests use temporary SQLite databases, HTTP mocks, and local stdio/HTTP MCP fixtures. Browser tests cover editing, request inspection, tool approval/rejection, cancellation, refresh, settings, MCP execution, and narrow layouts. These checks do not call paid or external model services.
+The previous foundation/compiler/conversation/tools/recovery milestones are all subdivisions of **Stage 1**. These stages describe delivery boundaries, not instructions to build speculative infrastructure now.
 
-## Description
-A prompt-orchestrated AI agent platform built with LangChain, LangGraph, FastAPI, and MCP.
-
-Security Agent Studio combines the prompt composition experience of tools such as SillyTavern with the tool-using capabilities of modern coding agents.
-
-Instead of hiding all instructions inside a single system prompt, the project allows prompts to be composed from independently configurable message blocks with explicit roles, ordering, conditions, and provider-specific behavior.
-
-The long-term goal is to provide a flexible environment for building and evaluating security-oriented AI agents for tasks such as reverse engineering, code analysis, CTF challenges, debugging, and other authorized security workflows.
-
-## Features
-
-### Prompt Composer
-
-Prompts are built from independent blocks rather than one large system prompt.
-
-Each block supports:
-- system, user, or assistant role
-- enable / disable
-- explicit ordering
-- reusable presets
-- provider-specific activation
-- model-specific activation
-- conditional activation
-
-Example:
-
-```
-☑ Base Identity          SYSTEM
-☑ Security Rules         SYSTEM
-☑ Assistant Anchor       ASSISTANT
-☐ Claude Adapter         SYSTEM
-☑ Reverse Engineering    SYSTEM
-☐ Web Security           SYSTEM
-☑ Task Context           USER
-```
-
-The final message sequence remains visible and inspectable before it is sent to the model.
-
-### Tool and MCP Integration
-
-Agents can dynamically load tools through MCP.
-
-Planned integrations include:
-- IDA Pro
-- Ghidra
-- Python
-- shell
-- filesystem
-- browser
-- security-oriented MCP servers
-
-Tools can be grouped into reusable profiles.
-
-Example:
-
-```
-reverse:
-  - ida
-  - python
-  - shell
-
-analysis:
-  - python
-  - filesystem
-
-web:
-  - browser
-  - shell
-```
-
-This prevents every agent from receiving every available tool.
-
-### Agent Runtime
-
-The project uses LangGraph for stateful agent execution.
-
-Initial architecture:
-
-```
-User
- │
- ▼
-Prompt Compiler
- │
- ▼
-LangGraph Agent
- │
- ├──── no tool call ────► Response
- │
- └──── tool call
-          │
-          ▼
-        Tools
-          │
-          └────────────► Agent
-```
-
-The first version intentionally uses a simple tool loop instead of a complex multi-agent architecture.
-
-Future versions may introduce:
-
-```
-Planner
-   ↓
-Router
-   ↓
-Executor
-   ↓
-Reviewer
-   ↓
-Finish / Continue
-```
-
-### Prompt Execution Trace
-
-Every model call can expose the exact messages that were generated.
-
-Example:
-
-```
-[0] SYSTEM
-Base Identity
-
-[1] SYSTEM
-Reverse Engineering Rules
-
-[2] ASSISTANT
-Assistant Anchor
-
-[3] USER
-Analyze this executable.
-```
-
-Prompt contribution and token usage can also be inspected:
-
-```
-Base Identity          620 tokens
-Reverse Rules         1230 tokens
-Assistant Anchor        87 tokens
-Conversation          4200 tokens
-Tool Schemas          7300 tokens
---------------------------------
-Total                13437 tokens
-```
-
-This makes prompt behavior easier to debug than systems where the final model context is hidden.
-
-### Prompt Evaluation
-
-Security Agent Studio is designed to eventually support reproducible prompt experiments.
-
-For example:
-
-```
-Preset A
-vs
-Preset B
-```
-
-can be evaluated against the same task set.
-
-Possible metrics include:
-
-- task success rate
-- correctness
-- refusal rate
-- format compliance
-- tool-call success rate
-- tool-selection accuracy
-- number of agent steps
-- token usage
-- latency
-- API cost
-
-Prompt ablation experiments can also measure the effect of individual blocks:
-
-```
-Full preset
-
-Full - Identity
-Full - Assistant Anchor
-Full - Reverse Rules
-Full - Output Rules
-
-Identity only
-Identity + Anchor
-Identity + Reverse Rules
-```
-
-This helps determine which prompt components actually improve performance.
-
-## Tech Stack
-
-The following stack is planned. Exact dependency versions will be verified and recorded in lockfiles during project initialization.
-
-Frontend (included in the first release):
-- React + TypeScript + Vite
-- TanStack Query for server state
-- REST + Server-Sent Events (SSE)
-- Vitest + Testing Library + Playwright
-
-Backend:
-- Python 3.12+
-- FastAPI
-- LangChain
-- LangGraph
-- Pydantic v2
-
-Tool integration:
-- MCP
-- LangChain tools
-
-Storage:
-- SQLite initially
-- SQLAlchemy 2 + Alembic for application data and migrations
-- Persistent LangGraph checkpointer for run state
-- PostgreSQL may be added later
-
-Development:
-- uv
-- pytest
-- Ruff
-- Black
-- isort
-- npm + ESLint + Prettier for the frontend
-
-## First Release Scope
-
-| Capability | First release | Later extensions |
+| Stage | Scope | Exit criteria / status |
 | --- | --- | --- |
-| Prompt Composer | Block editing, enable/disable, ordering, conditions, variables, and versioned presets | Advanced templates and experiment management |
-| Prompt Preview | Canonical messages, provider transformations, source mapping, and budget estimates | Context compression and finer token attribution |
-| Agent Runtime | A single agent, multi-turn conversations, tool loops, timeouts, cancellation, approval, and recovery | Planner / Router / Executor / Reviewer |
-| Tool / MCP | Tool profiles, controlled file reads, MCP stdio, and Streamable HTTP | Specialized integrations such as IDA, Ghidra, and browsers |
-| Execution Trace | Requests for every model call, tool results, usage, latency, and redacted exports | Cross-experiment statistics and cost trends |
-| Web Studio | Composer, conversation workspace, inspector, settings, and restored history | Evaluation dashboards and team collaboration |
-| Prompt Evaluation | Immutable snapshots and a design for evaluation data interfaces | A/B comparisons, ablation experiments, and batch scoring |
-
-The first release targets a single local user and binds to a loopback address. Remote multi-user deployment and a general-purpose code execution sandbox are outside its scope.
-Actual shell/Python execution and specialized security tools require separate integration acceptance; MCP connectivity alone does not establish support.
-
-## Architecture Overview
-
-```mermaid
-flowchart TD
-    UI[Web Studio: React + TypeScript] -->|REST / SSE| API[FastAPI]
-    API --> APP[Application Services]
-    APP --> COMP[Prompt Compiler]
-    APP --> RUN[LangGraph Runtime]
-    COMP --> SNAP[Immutable Run Snapshot]
-    SNAP --> RUN
-    RUN --> PROVIDER[Provider Adapter / LangChain]
-    PROVIDER --> MODEL[Model API]
-    RUN --> POLICY[Tool Policy]
-    POLICY --> TOOLS[Tool Registry / MCP Client]
-    TOOLS --> TARGET[Local Tools / MCP Servers]
-    TARGET --> RUN
-    APP --> DB[(SQLite)]
-    RUN --> CHECKPOINT[(LangGraph Checkpoints)]
-    RUN --> TRACE[Execution Trace / Events]
-    TRACE --> DB
-    TRACE -->|SSE| UI
-```
-
-The application is a modular monolith. Frontend and backend development run separately; FastAPI serves the built frontend in a release.
-Prompt compilation and provider adaptation remain separate. Runs bind to configuration snapshots, so editing a preset does not change an active task.
-See the [architecture design](docs/architecture.md) for data flows, error handling, and recovery semantics.
-
-## Implementation Roadmap
-
-The local baseline covers the core workflows in M0–M4. The detailed design also contains deferred capabilities listed above; this is not a claim that every design proposal has shipped. Live model acceptance remains pending user endpoint configuration.
-
-| Milestone | Deliverables | Completion criteria |
-| --- | --- | --- |
-| M0 Foundation | Python/React projects, database migrations, API types, and offline mocks | The Web UI can reach the backend health endpoint; baseline checks pass |
-| M1 Prompt workflow | Block and preset management, compiler, and preview UI | Configuration edited in the UI deterministically produces messages with source mappings |
-| M2 Conversation workflow | Provider integration, a single agent, streaming events, and session persistence | The Web UI starts real model conversations and exposes each request |
-| M3 Tool workflow | Tool profiles, MCP, execution policies, and approval/rejection | Tool results return to the model; permission and error paths can be verified |
-| M4 Usability and recovery | Cancellation, reconnection, checkpoint recovery, trace export, and end-to-end tests | State remains reliable after refreshes and process restarts; side effects are not blindly retried |
-| M5 Evaluation and extensions | A/B tests, ablation, specialized tools, PostgreSQL, and more | Each capability is delivered against its own requirements and acceptance evidence |
-
-M5 remains future work. Extend the current vertical workflow only when a concrete use case requires it.
+| **1 — Inspectable execution foundation** | Web workspace, prompt blocks, provider boundary, single-agent loop, MCP, traces, persistence, approvals, recovery | Implemented locally. Live-provider acceptance remains pending endpoint configuration. |
+| **2 — Working local agent** | Direct Run, Bash/read/write/edit, OS workspace sandbox, instructions, persistent memory, Skills and skill creation | Implemented in this increment and exercised through real local requests. Complete real-model coding/analysis acceptance before declaring the stage complete. |
+| **3 — Daily agent use** | Explicit context compaction, context accounting, session branching, diff review, command output streaming, interactive/background process lifecycle, practical dependency/network policies | Complete substantial multi-file tasks across stop/restart/resume with reliable context and no stray processes; verify resource/permission boundaries. |
+| **4 — Extensible harness** | Stable programmatic run interface, CLI/JSON/RPC, focused lifecycle/tool hooks, reusable prompt/skill packages, more providers | Use the same loop through Web, CLI, and embedding; add integrations without patching the core. Derive hooks from real use cases. |
+| **5 — Security analysis workflows** | Stateful MCP, accepted IDA/Ghidra/debugger/browser integrations, evidence/artifacts, reusable analysis skills | Complete representative authorized reverse-engineering, debugging, and CTF tasks with real tools and inspectable evidence. |
+| **6 — Evaluation and justified scale** | Reproducible task sets, replay/comparison, A/B and ablation, usage/cost reporting; bounded delegation, more workers, PostgreSQL or teams only when needed | Give each capability a real workload and its own acceptance criteria. Preserve the simple local path. |

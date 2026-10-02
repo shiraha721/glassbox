@@ -242,6 +242,9 @@ class Runner:
                 snapshot["variables"],
                 snapshot["tools"],
                 [Message.model_validate(item) for item in state["messages"]],
+                workspace_context=[
+                    Message.model_validate(item) for item in snapshot.get("workspace_context", [])
+                ],
             )
             prepared = prepare(config.provider, compiled, snapshot["tools"])
             if step == 0 and prepared != snapshot["prepared_request"]:
@@ -401,7 +404,9 @@ class Runner:
                 await self.repository.emit(
                     run_id, "tool.started", {"call_id": call_id, "name": call.name}, approval=None
                 )
-                async with asyncio.timeout(config.tool_timeout):
+                # Bash owns its command deadline; allow its process-tree cleanup to finish.
+                deadline = config.tool_timeout + 35 if call.name == "bash" else config.tool_timeout
+                async with asyncio.timeout(deadline):
                     content = await self.registry.execute(definition, call.args, config)
             except GraphInterrupt:
                 raise

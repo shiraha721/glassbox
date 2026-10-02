@@ -11,6 +11,9 @@ export type Tool = components['schemas']['ToolDefinition'];
 export type RunEvent = components['schemas']['RunEvent'];
 export type ResumeRequest = components['schemas']['ResumeRequest'];
 export type Trace = components['schemas']['TraceView'];
+export type WorkspaceView = components['schemas']['WorkspaceView'];
+export type MemoryDocument = components['schemas']['MemoryDocument'];
+export type SkillDocument = components['schemas']['SkillDocument'];
 
 /** Carry the server error code so conflicts and validation failures remain identifiable. */
 export class ApiError extends Error {
