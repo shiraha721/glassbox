@@ -349,6 +349,60 @@ class RunEvent(Contract):
     payload: dict[str, Any]
 
 
+class FolderView(Contract):
+    """A flat collection of conversations, independent of workspace files."""
+
+    id: str
+    name: str
+    revision: int
+    created_at: str
+
+
+class FolderCreate(Contract):
+    """Name a conversation folder without introducing nested paths."""
+
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def nonempty_name(cls, value: str) -> str:
+        """Reject invisible names and normalize surrounding whitespace."""
+        if not value.strip():
+            raise ValueError("Enter a name.")
+        return value.strip()
+
+
+class FolderUpdate(FolderCreate):
+    """Rename only the folder revision the user has actually seen."""
+
+    expected_revision: int = Field(ge=0)
+
+
+class SessionUpdate(Contract):
+    """Edit conversation metadata; an explicit null removes folder membership."""
+
+    expected_revision: int = Field(ge=0)
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    archived: bool | None = None
+    folder_id: str | None = None
+
+    @field_validator("title")
+    @classmethod
+    def nonempty_title(cls, value: str | None) -> str | None:
+        """Treat a supplied title as an intentional nonempty rename."""
+        if value is not None and not value.strip():
+            raise ValueError("Enter a conversation title.")
+        return value.strip() if value is not None else None
+
+
+class SessionCopy(Contract):
+    """Copy saved evidence, optionally stopping at a completed turn for a fork."""
+
+    expected_revision: int = Field(ge=0)
+    operation: Literal["duplicate", "fork"]
+    through_run_id: str | None = None
+
+
 class SessionView(Contract):
     """Conversation history containing only committed successful turns."""
 
@@ -358,6 +412,9 @@ class SessionView(Contract):
     active_run_id: str | None
     messages: list[Message]
     created_at: str
+    folder_id: str | None = None
+    archived: bool = False
+    copied_from_session_id: str | None = None
 
 
 class RunView(Contract):
@@ -378,6 +435,7 @@ class RunView(Contract):
     preset_name: str
     provider: str
     usage: dict[str, Any]
+    source_run_id: str | None = None
     unknown_calls: list[dict[str, Any]] = Field(default_factory=list)
 
 

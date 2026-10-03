@@ -12,6 +12,9 @@ from pydantic import Field
 from rtagent.domain import (
     ApprovalDecision,
     Contract,
+    FolderCreate,
+    FolderUpdate,
+    FolderView,
     MemoryDocument,
     MemorySave,
     Preset,
@@ -20,6 +23,8 @@ from rtagent.domain import (
     ResumeRequest,
     RunEvent,
     RunView,
+    SessionCopy,
+    SessionUpdate,
     SessionView,
     SkillDocument,
     SkillSave,
@@ -47,6 +52,7 @@ class Bootstrap(Contract):
     config: StudioConfig
     presets: list[Preset]
     sessions: list[SessionView]
+    folders: list[FolderView]
     tools: list[ToolDefinition]
     tool_errors: dict[str, str]
     workspace_root: str
@@ -66,6 +72,7 @@ async def bootstrap(request: Request) -> Bootstrap:
         config=await studio.repository.config(),
         presets=await studio.repository.list_presets(),
         sessions=await studio.repository.list_sessions(),
+        folders=await studio.repository.list_folders(),
         tools=list(studio.registry.catalog.values()),
         tool_errors=studio.registry.errors,
         workspace_root=str(studio.registry.workspace),
@@ -129,6 +136,38 @@ async def create_session(body: SessionCreate, request: Request) -> dict[str, Any
 async def get_session(session_id: str, request: Request) -> dict[str, Any]:
     """Read committed history and the active Run identifier."""
     return await request.app.state.studio.repository.session(session_id)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionView)
+async def update_session(session_id: str, body: SessionUpdate, request: Request) -> dict[str, Any]:
+    """Rename, archive, restore, or move a conversation using its observed revision."""
+    return await request.app.state.studio.repository.update_session(session_id, body)
+
+
+@router.post("/sessions/{session_id}/copy", response_model=SessionView, status_code=201)
+async def copy_session(session_id: str, body: SessionCopy, request: Request) -> dict[str, Any]:
+    """Create an independent duplicate or turn-boundary fork without model execution."""
+    return await request.app.state.studio.repository.copy_session(session_id, body)
+
+
+@router.post("/folders", response_model=FolderView, status_code=201)
+async def create_folder(body: FolderCreate, request: Request) -> dict[str, Any]:
+    """Create an empty conversation folder."""
+    return await request.app.state.studio.repository.save_folder(body.name)
+
+
+@router.patch("/folders/{folder_id}", response_model=FolderView)
+async def rename_folder(folder_id: str, body: FolderUpdate, request: Request) -> dict[str, Any]:
+    """Rename a folder without changing conversation membership."""
+    return await request.app.state.studio.repository.save_folder(
+        body.name, folder_id, body.expected_revision
+    )
+
+
+@router.delete("/folders/{folder_id}", status_code=204)
+async def delete_folder(folder_id: str, request: Request) -> None:
+    """Delete a folder while keeping its conversations in the unfiled group."""
+    await request.app.state.studio.repository.delete_folder(folder_id)
 
 
 @router.delete("/sessions/{session_id}", status_code=204)

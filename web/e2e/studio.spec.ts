@@ -164,3 +164,114 @@ test('the workbench remains usable on a narrow viewport', async ({ page }) => {
   expect(save!.y + save!.height).toBeLessThanOrEqual(composer!.y + composer!.height);
   await page.screenshot({ path: 'test-results/narrow-workbench.png', fullPage: true });
 });
+
+test('preset drafts remain switchable, with undo, redo, and discard', async ({ page }) => {
+  await openWorkspace(page);
+  await page.getByRole('button', { name: 'Prompt', exact: true }).click();
+  const picker = page.getByLabel('Active preset', { exact: true });
+  const originalId = await picker.inputValue();
+  const originalText = await page.getByLabel('Base identity template').inputValue();
+  await page.getByRole('button', { name: 'Duplicate preset', exact: true }).click();
+  const draftId = await picker.inputValue();
+  await page.getByLabel('Preset name', { exact: true }).fill('Draft switching check');
+  await page.getByLabel('Base identity template').fill('Reversible draft instructions.');
+  await picker.selectOption(originalId);
+  await expect(page.getByLabel('Base identity template')).toHaveValue(originalText);
+  await picker.selectOption(draftId);
+  await expect(page.getByLabel('Preset name', { exact: true })).toHaveValue(
+    'Draft switching check',
+  );
+  await expect(page.getByLabel('Base identity template')).toHaveValue(
+    'Reversible draft instructions.',
+  );
+  await page.getByLabel('Undo preset edit', { exact: true }).click();
+  await expect(page.getByLabel('Base identity template')).toHaveValue(originalText);
+  await page.getByLabel('Redo preset edit', { exact: true }).click();
+  await expect(page.getByLabel('Base identity template')).toHaveValue(
+    'Reversible draft instructions.',
+  );
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await expect(picker).toHaveValue(originalId);
+  await expect(page.getByRole('button', { name: 'Save preset', exact: true })).toBeDisabled();
+});
+
+test('conversation menus organize history and fork an independent earlier turn', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  await startTask(page, 'History first turn');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await startTask(page, 'History second turn');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await expect(page.locator('.conversation-turn')).toHaveCount(2);
+
+  const actions = () =>
+    page
+      .locator('.session-row[data-selected="true"]')
+      .getByRole('button', { name: /Conversation actions/ });
+  await actions().click();
+  await page.getByRole('menuitem', { name: 'Rename conversation', exact: true }).click();
+  await page.getByLabel('Conversation name', { exact: true }).fill('History workflow');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.topbar h1')).toHaveText('History workflow');
+  await page.getByRole('button', { name: 'New folder', exact: true }).click();
+  await page.getByLabel('Folder name', { exact: true }).fill('Browser investigations');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: /Folder actions for Browser investigations/ }),
+  ).toBeVisible();
+  await actions().click();
+  await page.getByRole('menuitem', { name: 'Move to folder', exact: true }).click();
+  await page
+    .getByLabel('Folder', { exact: true })
+    .selectOption({ label: 'Browser investigations' });
+  await page.getByRole('dialog').getByRole('button', { name: 'Move', exact: true }).click();
+  await actions().click();
+  await page.getByRole('menuitem', { name: 'Fork conversation', exact: true }).click();
+  await page.getByLabel('Fork after turn', { exact: true }).selectOption({ index: 0 });
+  await page.getByRole('button', { name: 'Create fork', exact: true }).click();
+  await expect(page.locator('.topbar h1')).toHaveText('History workflow fork');
+  await expect(page.locator('.conversation-turn')).toHaveCount(1);
+  await expect(page.getByText('Copied history', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Conversation workspace')).not.toContainText('History second turn');
+  await startTask(page, 'Continue forked history');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await expect(page.locator('.conversation-turn')).toHaveCount(2);
+  await actions().click();
+  await page.getByRole('menuitem', { name: 'Duplicate conversation', exact: true }).click();
+  await expect(page.locator('.topbar h1')).toHaveText('History workflow fork copy');
+  await expect(page.locator('.conversation-turn')).toHaveCount(2);
+  await actions().click();
+  await page.getByRole('menuitem', { name: 'Archive conversation', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Restore conversation', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Task', { exact: true })).not.toBeAttached();
+  await page.getByRole('button', { name: 'Archived', exact: true }).click();
+  await expect(actions()).toBeVisible();
+  await actions().click();
+  await page.getByRole('menuitem', { name: 'Restore conversation', exact: true }).click();
+  await expect(page.getByLabel('Task', { exact: true })).toBeVisible();
+  await actions().click();
+  await page.getByRole('menuitem', { name: 'Delete conversation', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByRole('dialog')).not.toBeAttached();
+  await expect(
+    page.getByRole('button', { name: 'History workflow fork copy', exact: true }),
+  ).not.toBeAttached();
+  await page.getByRole('button', { name: 'History workflow', exact: true }).click();
+  await expect(page.locator('.conversation-turn')).toHaveCount(2);
+  await page.getByLabel('Folder actions for Browser investigations', { exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Rename folder', exact: true }).click();
+  await page.getByLabel('Folder name', { exact: true }).fill('Renamed investigations');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByLabel('Folder actions for Renamed investigations', { exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Delete folder', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'History workflow', exact: true })).toBeVisible();
+  await expect(page.locator('.conversation-turn')).toHaveCount(2);
+  await page.reload();
+  await expect(page.locator('.topbar h1')).toHaveText('History workflow');
+  await expect(page.locator('.conversation-turn')).toHaveCount(2);
+  await page.screenshot({ path: 'test-results/conversation-history.png', fullPage: true });
+});

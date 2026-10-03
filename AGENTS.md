@@ -7,7 +7,7 @@ This file applies to the entire repository and defines project constraints and w
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-03, Stage 1 (the inspectable execution foundation) and initial Stage 2 workspace capabilities are implemented. The target is an extensible everyday agent harness; the original MVP is only the first stage. Consult README delivery stages and actual source files. Live-model acceptance remains pending endpoint configuration.
+As of 2026-10-03, Stage 1 (the inspectable execution foundation), initial Stage 2 workspace capabilities, and Stage 3 conversation organization/branching are implemented. A basic live-model/native-Windows-tool loop has passed; substantial coding/analysis acceptance remains ahead. The target is an extensible everyday agent harness; the original MVP is only the first stage. Consult README delivery stages and actual source files.
 Inspect the actual files before starting work. Do not report the target directories, commands, or APIs below as implemented capabilities.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
@@ -87,6 +87,7 @@ docs/              Architecture and necessary decision records
 ### Data and Tracing
 
 - Version presets, blocks, and tool configuration. Editing configuration must not alter existing Run snapshots.
+- Conversation duplication and forks copy saved evidence only, with independent IDs and explicit provenance. Never replay model/tool calls or clone resumable checkpoints. Forks stop at a successful turn and commit only successful history. Archive requires an idle conversation; restore before execution. Folder deletion must preserve its conversations.
 - Record canonical messages, the actual outbound request body, transformations, and response metadata separately for every model call.
 - An actual request means the application-level request body sent by the client. Do not claim visibility into content added inside a provider.
 - Resolve credentials only through server-side environment variables or credential references. Keep secret values out of database configuration snapshots, prompts, logs, and frontend storage.
@@ -120,6 +121,7 @@ uv sync --dev --locked
 uv run alembic upgrade head
 uv run uvicorn rtagent.main:create_app --factory --reload --host 127.0.0.1 --port 8001
 uv run python scripts/smoke_workspace.py
+uv run python scripts/smoke_conversations.py
 uv run pytest
 uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations

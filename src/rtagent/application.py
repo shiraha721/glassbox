@@ -73,6 +73,10 @@ class Studio:
         config = await self.repository.config()
         if session["active_run_id"]:
             raise AppError("session_busy", "Finish or cancel the current Run first.", 409)
+        if session["archived"]:
+            raise AppError(
+                "session_archived", "Restore this conversation before running a task.", 409
+            )
         if (
             session["revision"] != request.expected_session_revision
             or preset.revision != request.preset_revision
@@ -169,6 +173,7 @@ class Studio:
                 "created_at",
                 "updated_at",
                 "usage",
+                "source_run_id",
             )
         }
         values.update(

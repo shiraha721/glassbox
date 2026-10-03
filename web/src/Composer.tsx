@@ -1,5 +1,16 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Plus, Save, Trash2, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Copy,
+  Pencil,
+  Plus,
+  Redo2,
+  Save,
+  Trash2,
+  Undo2,
+  X,
+} from 'lucide-react';
 import { errorMessage, type Block, type Preset } from './api/client';
 
 type Props = {
@@ -7,10 +18,15 @@ type Props = {
   presets: Preset[];
   dirty: boolean;
   busy: boolean;
-  onChange: (preset: Preset) => void;
+  onChange: (preset: Preset, group?: string) => void;
   onSelect: (preset: Preset) => void;
   onSave: () => void;
   onClose?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onDiscard?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 };
 
 /** Keep visual ordering aligned with the compiler's two insertion slots. */
@@ -30,7 +46,13 @@ export function Composer({
   onSelect,
   onSave,
   onClose,
+  onUndo,
+  onRedo,
+  onDiscard,
+  canUndo,
+  canRedo,
 }: Props) {
+  const [renamingId, setRenamingId] = useState('');
   const update = (blocks: Block[]) => onChange({ ...preset, blocks: ordered(blocks) });
   const move = (index: number, direction: number) => {
     const blocks = [...preset.blocks];
@@ -69,73 +91,168 @@ export function Composer({
       </div>
       <div className="composer-controls">
         <div className="preset-picker">
-          <label htmlFor="preset">Preset</label>
+          <div className="row-between">
+            <label htmlFor="preset">Active preset</label>
+            <span className={`draft-status ${dirty ? 'unsaved' : ''}`}>
+              {dirty ? 'Unsaved' : 'Saved'}
+            </span>
+          </div>
           <div className="row">
             <select
               id="preset"
-              value={preset.revision === 0 ? '' : preset.id}
-              disabled={dirty || busy}
+              value={preset.id}
+              disabled={busy}
               onChange={(event) => {
                 const next = presets.find((item) => item.id === event.target.value);
                 if (next) onSelect(next);
               }}
             >
-              {preset.revision === 0 && <option value="">New preset</option>}
-              {presets.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
+              {(presets.some((item) => item.id === preset.id) ? presets : [...presets, preset]).map(
+                (item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                    {item.revision === 0 ? ' (draft)' : ''}
+                  </option>
+                ),
+              )}
             </select>
+          </div>
+          <div className="preset-actions">
             <button
-              className="icon-button"
-              title="Duplicate preset"
+              className="button small"
+              disabled={busy}
+              onClick={() =>
+                onChange({
+                  id: crypto.randomUUID(),
+                  name: 'Untitled preset',
+                  revision: 0,
+                  blocks: [],
+                })
+              }
+            >
+              <Plus size={13} /> New
+            </button>
+            <button
+              className="button small"
               aria-label="Duplicate preset"
               disabled={busy}
               onClick={() =>
                 onChange({
                   ...preset,
                   id: crypto.randomUUID(),
-                  name: `${preset.name} copy`,
+                  name: `${preset.name.slice(0, 115)} copy`,
                   revision: 0,
                 })
               }
             >
-              <Plus size={15} />
+              <Copy size={13} /> Duplicate
+            </button>
+            <button
+              className="button small"
+              aria-label="Rename preset"
+              disabled={busy}
+              aria-pressed={renamingId === preset.id}
+              onClick={() => setRenamingId(renamingId === preset.id ? '' : preset.id)}
+            >
+              <Pencil size={13} /> Rename
             </button>
           </div>
-          <label className="sr-only" htmlFor="preset-name">
-            Preset name
-          </label>
-          <input
-            id="preset-name"
-            disabled={busy}
-            value={preset.name}
-            onChange={(event) => onChange({ ...preset, name: event.target.value })}
-          />
+          {(renamingId === preset.id || preset.revision === 0) && (
+            <label htmlFor="preset-name">
+              Preset name
+              <input
+                id="preset-name"
+                disabled={busy}
+                value={preset.name}
+                maxLength={120}
+                onChange={(event) =>
+                  onChange({ ...preset, name: event.target.value }, 'preset-name')
+                }
+              />
+            </label>
+          )}
           <div className="subtle row-between">
-            <span>{dirty ? 'Unsaved changes' : `Revision ${preset.revision}`}</span>
-            <span>{preset.blocks.filter((block) => block.enabled).length} active</span>
+            <span>{preset.blocks.filter((block) => block.enabled).length} enabled blocks</span>
+            <div className="row tight">
+              <button
+                className="icon-button"
+                aria-label="Undo preset edit"
+                title="Undo"
+                disabled={busy || !canUndo}
+                onClick={onUndo}
+              >
+                <Undo2 size={15} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label="Redo preset edit"
+                title="Redo"
+                disabled={busy || !canRedo}
+                onClick={onRedo}
+              >
+                <Redo2 size={15} />
+              </button>
+            </div>
           </div>
         </div>
         <div className="block-list">
-          {preset.blocks.map((block, index) => (
-            <BlockEditor
-              key={block.id}
-              block={block}
-              index={index}
-              busy={busy}
-              canUp={index > 0 && preset.blocks[index - 1].placement === block.placement}
-              canDown={
-                index < preset.blocks.length - 1 &&
-                preset.blocks[index + 1].placement === block.placement
+          {(['before_history', 'before_input'] as const).map((placement) => (
+            <section
+              className="composer-slot"
+              key={placement}
+              aria-label={
+                placement === 'before_history' ? 'Before conversation' : 'Before your message'
               }
-              onMove={(direction) => move(index, direction)}
-              onDelete={() => update(preset.blocks.filter((item) => item.id !== block.id))}
-              onChange={(next) =>
-                update(preset.blocks.map((item) => (item.id === block.id ? next : item)))
-              }
-            />
+            >
+              <div className="slot-heading">
+                <h3>
+                  {placement === 'before_history' ? 'Before conversation' : 'Before your message'}
+                </h3>
+                <span className="count">
+                  {preset.blocks.filter((block) => block.placement === placement).length}
+                </span>
+              </div>
+              <p className="subtle slot-description">
+                {placement === 'before_history'
+                  ? 'Persistent instructions, followed by conversation history.'
+                  : 'Additional context, followed by your next message.'}
+              </p>
+              {preset.blocks.map(
+                (block, index) =>
+                  block.placement === placement && (
+                    <BlockEditor
+                      key={block.id}
+                      block={block}
+                      index={index}
+                      busy={busy}
+                      canUp={index > 0 && preset.blocks[index - 1].placement === block.placement}
+                      canDown={
+                        index < preset.blocks.length - 1 &&
+                        preset.blocks[index + 1].placement === block.placement
+                      }
+                      onMove={(direction) => move(index, direction)}
+                      onDelete={() => update(preset.blocks.filter((item) => item.id !== block.id))}
+                      onChange={(next, group) =>
+                        onChange(
+                          {
+                            ...preset,
+                            blocks: ordered(
+                              preset.blocks.map((item) => (item.id === block.id ? next : item)),
+                            ),
+                          },
+                          group,
+                        )
+                      }
+                    />
+                  ),
+              )}
+              {!preset.blocks.some((block) => block.placement === placement) && (
+                <div className="slot-empty">No blocks in this position</div>
+              )}
+              {placement === 'before_history' && (
+                <div className="history-boundary">Conversation history</div>
+              )}
+            </section>
           ))}
           <button className="add-block" disabled={busy} onClick={add}>
             <Plus size={15} />
@@ -143,7 +260,14 @@ export function Composer({
           </button>
         </div>
         <div className="panel-footer">
-          <button className="button wide" disabled={!dirty || busy} onClick={onSave}>
+          <button className="button" disabled={!dirty || busy} onClick={onDiscard}>
+            Discard changes
+          </button>
+          <button
+            className="button primary"
+            disabled={!dirty || busy || !preset.name.trim()}
+            onClick={onSave}
+          >
             <Save size={14} />
             Save preset
           </button>
@@ -171,20 +295,21 @@ function BlockEditor({
   canDown: boolean;
   onMove: (direction: number) => void;
   onDelete: () => void;
-  onChange: (block: Block) => void;
+  onChange: (block: Block, group?: string) => void;
 }) {
-  const [rules, setRules] = useState(
-    JSON.stringify(
-      {
-        variables: block.variables,
-        condition: block.condition,
-        provider_allowlist: block.provider_allowlist,
-        model_allowlist: block.model_allowlist,
-      },
-      null,
-      2,
-    ),
+  const source = JSON.stringify(
+    {
+      variables: block.variables,
+      condition: block.condition,
+      provider_allowlist: block.provider_allowlist,
+      model_allowlist: block.model_allowlist,
+    },
+    null,
+    2,
   );
+  const [ruleDraft, setRuleDraft] = useState({ source, text: source });
+  // An applied change or undo replaces the rule baseline; ordinary template edits do not.
+  const rules = ruleDraft.source === source ? ruleDraft.text : source;
   const [error, setError] = useState('');
   return (
     <details
@@ -229,39 +354,57 @@ function BlockEditor({
             </button>
           </div>
         </div>
-        <input
-          aria-label={`Block ${index + 1} name`}
-          value={block.name}
-          onChange={(event) => onChange({ ...block, name: event.target.value })}
-        />
-        <div className="row">
-          <select
-            aria-label={`${block.name} role`}
-            value={block.role}
-            onChange={(event) => onChange({ ...block, role: event.target.value as Block['role'] })}
-          >
-            <option value="system">System</option>
-            <option value="user">User</option>
-            <option value="assistant">Assistant</option>
-          </select>
-          <select
-            aria-label={`${block.name} placement`}
-            value={block.placement}
+        <label>
+          Block name
+          <input
+            aria-label={`Block ${index + 1} name`}
+            value={block.name}
             onChange={(event) =>
-              onChange({ ...block, placement: event.target.value as Block['placement'] })
+              onChange({ ...block, name: event.target.value }, `name:${block.id}`)
             }
-          >
-            <option value="before_history">Before history</option>
-            <option value="before_input">Before task</option>
-          </select>
+          />
+        </label>
+        <div className="row">
+          <label>
+            Role
+            <select
+              aria-label={`${block.name} role`}
+              value={block.role}
+              onChange={(event) =>
+                onChange({ ...block, role: event.target.value as Block['role'] })
+              }
+            >
+              <option value="system">System</option>
+              <option value="user">User</option>
+              <option value="assistant">Assistant</option>
+            </select>
+          </label>
+          <label>
+            Position
+            <select
+              aria-label={`${block.name} placement`}
+              value={block.placement}
+              onChange={(event) =>
+                onChange({ ...block, placement: event.target.value as Block['placement'] })
+              }
+            >
+              <option value="before_history">Before conversation</option>
+              <option value="before_input">Before your message</option>
+            </select>
+          </label>
         </div>
-        <textarea
-          aria-label={`${block.name} template`}
-          rows={6}
-          value={block.template}
-          onChange={(event) => onChange({ ...block, template: event.target.value })}
-          spellCheck={false}
-        />
+        <label>
+          Message template
+          <textarea
+            aria-label={`${block.name} template`}
+            rows={6}
+            value={block.template}
+            onChange={(event) =>
+              onChange({ ...block, template: event.target.value }, `template:${block.id}`)
+            }
+            spellCheck={false}
+          />
+        </label>
         <details className="advanced">
           <summary>Variables & activation rules</summary>
           <p className="subtle">
@@ -273,7 +416,7 @@ function BlockEditor({
             rows={9}
             className="code-input"
             value={rules}
-            onChange={(event) => setRules(event.target.value)}
+            onChange={(event) => setRuleDraft({ source, text: event.target.value })}
             spellCheck={false}
           />
           <button

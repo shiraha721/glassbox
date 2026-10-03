@@ -107,6 +107,12 @@ export function Inspector({
         {tab === 'trace' &&
           (run ? (
             <>
+              {run.source_run_id && (
+                <p className="notice">
+                  Copied history · requests, results, and usage come from the source run. No calls
+                  were executed by this copy.
+                </p>
+              )}
               <div className="row-between">
                 <span className="badge">{raw ? 'Original local view' : 'Redacted view'}</span>
                 <a className="text-button" href={`/api/v1/runs/${run.id}/export`} download>

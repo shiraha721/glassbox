@@ -125,7 +125,7 @@ The real Chat Completions adapter is default; a blank model fails clearly. Expli
 
 ## Persistence, API, and UI
 
-SQLite tables: settings, presets, sessions, previews, runs, events, calls. Alembic manages these; LangGraph manages its separate checkpoint database. Memory/Skills are files and need no business-table migration. UTC timestamps, stable IDs, and schema versions identify records.
+SQLite tables: settings, presets, conversation_folders, sessions, previews, runs, events, calls. Alembic manages these; LangGraph manages its separate checkpoint database. Memory/Skills are files and need no business-table migration. UTC timestamps, stable IDs, and schema versions identify records.
 
 A state projection and its numbered event commit together. Successful completion appends history and releases the session together. A session has one active Run. Settings use optimistic revisions; Run snapshots remain immutable. SSE sequence deduplication and active-state polling keep the UI current.
 
@@ -133,14 +133,22 @@ Actual routes under /api/v1:
 
 | Group | Behavior |
 | --- | --- |
-| /health, /bootstrap | Availability, saved config/presets/sessions, tool catalog |
+| /health, /bootstrap | Availability, saved config/presets/sessions/folders, tool catalog |
 | /config, /presets/{id}, /tools/refresh | Versioned edits and explicit discovery |
 | /workspace, /workspace/memory, /workspace/skills | Sandbox status, memory/skill edits; /workspace/skills/{name} loads a body |
-| /sessions, /sessions/{id}/runs | Conversations and saved Run history |
+| /sessions, /sessions/{id}, /sessions/{id}/runs | Conversations, versioned metadata edits, deletion, and saved Run history |
+| /sessions/{id}/copy | Duplicate all completed records or fork through a successful Run |
+| /folders, /folders/{id} | Create, rename, or delete flat conversation folders |
 | /prompts/preview, /runs | Optional inspection or direct execution |
 | /runs/{id} subresources | State, cancel, approval, recovery, events, trace, export |
 
 Generated /openapi.json and frontend types define exact contracts. The UI opens Prompt, Inspector, and Workspace only when needed. Run is enabled for nonempty input without a preview. Draft changes invalidate optional previews. File editor saves use hashes.
+
+Conversation metadata includes archive state and optional folder membership. Renames and moves use observed session revisions; explicit titles survive the first Run. Archiving requires an idle conversation, and the server rejects execution until restoration. Folder deletion clears membership and advances affected revisions without deleting history. Schema migration adds columns in place so SQLite foreign-key cascades cannot discard existing Runs.
+
+Duplicate/fork is a single business-data transaction. Duplicate retains all terminal Runs and committed history. Fork requires a successful Run boundary and rebuilds committed messages from successful turns through that point. Both assign new session, Run, and receipt IDs and preserve immutable source snapshots and request evidence. Run source_run_id and receipt provenance identify copied history; a new run.copied event records the copy instead of replaying original SSE events. Checkpoints are not copied and historical effects cannot be resumed or executed by copying. Source IDs are provenance strings without foreign-key ownership, so deleting a source leaves its copies intact. Subsequent turns use new Runs with the copied history and the current shared workspace/configuration.
+
+The UI renders all turns in one scroll region under a fixed history toolbar and above a fixed message dock. The sidebar has separate fixed search/filter controls and a scrolling folder/history list. Prompt controls and save/discard actions stay fixed while grouped message blocks scroll. Each preset has a page-local draft with bounded, reversible snapshots; switching preserves edits and saving updates the revision baseline. Menu actions derive state from the latest session projection even while a menu remains open across Run completion.
 
 The app binds to loopback without login/access tokens. TrustedHost and Origin/Sec-Fetch-Site checks reject foreign browser requests; local native clients can call directly. This is not remote deployment authentication. Original traces are explicit local views; exports are labeled redacted copies.
 
@@ -148,4 +156,6 @@ The app binds to loopback without login/access tokens. TrustedHost and Origin/Se
 
 Run the service and check actual behavior before growing tests. scripts/smoke_workspace.py starts a temporary HTTP server and exercises real OS effects in a disposable workspace. Focused checks protect compilation, pairing, request capture, snapshot consistency, recovery, and confidentiality. Browser checks cover direct Run, optional preview, approvals, cancellation, history, settings, and workspace editing.
 
-Live model acceptance awaits a configured endpoint. Next stages add long-session context handling, diff review and command/process usability, then CLI/RPC/SDK and focused extension hooks. Specialized security integrations and evaluation follow real workflows. Multi-agent orchestration, more workers, PostgreSQL, and remote teams are not prerequisites for a useful local harness.
+scripts/smoke_conversations.py checks management through a separate real HTTP server: copy boundaries, trace provenance, stale revisions, archive/restore, folder operations, and continuation after source deletion. Browser checks exercise preset switching/undo and the complete conversation-menu workflow.
+
+A basic live-model/native-PowerShell loop has passed on Windows; substantial coding/analysis acceptance is still required. Next stages add long-session context handling, diff review and command/process usability, then CLI/RPC/SDK and focused extension hooks. Specialized security integrations and evaluation follow real workflows. Multi-agent orchestration, more workers, PostgreSQL, and remote teams are not prerequisites for a useful local harness.

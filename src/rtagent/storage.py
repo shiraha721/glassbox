@@ -8,6 +8,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     ForeignKey,
     Integer,
@@ -22,7 +23,17 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from rtagent.domain import AppError, Block, Preset, StudioConfig, digest, now, uid
+from rtagent.domain import (
+    AppError,
+    Block,
+    Preset,
+    SessionCopy,
+    SessionUpdate,
+    StudioConfig,
+    digest,
+    now,
+    uid,
+)
 
 metadata = MetaData()
 settings_table = Table(
@@ -37,6 +48,14 @@ presets = Table(
     Column("id", String, primary_key=True),
     Column("data", JSON, nullable=False),
 )
+folders = Table(
+    "conversation_folders",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("name", String(collation="NOCASE"), nullable=False, unique=True),
+    Column("revision", Integer, nullable=False),
+    Column("created_at", String, nullable=False),
+)
 sessions = Table(
     "sessions",
     metadata,
@@ -46,6 +65,10 @@ sessions = Table(
     Column("active_run_id", String),
     Column("messages", JSON, nullable=False),
     Column("created_at", String, nullable=False),
+    Column("folder_id", String, ForeignKey("conversation_folders.id", ondelete="SET NULL")),
+    Column("archived", Boolean, nullable=False, default=False),
+    Column("title_locked", Boolean, nullable=False, default=False),
+    Column("copied_from_session_id", String),
 )
 previews = Table(
     "previews",
@@ -72,6 +95,7 @@ runs = Table(
     Column("usage", JSON, nullable=False),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
+    Column("source_run_id", String),
 )
 events = Table(
     "events",
@@ -93,6 +117,11 @@ calls = Table(
     Column("result", JSON),
 )
 TERMINAL = {"succeeded", "failed", "cancelled"}
+
+
+def _session_view(row: Any) -> dict[str, Any]:
+    """Exclude the internal auto-title flag from the public conversation contract."""
+    return {key: value for key, value in dict(row).items() if key != "title_locked"}
 
 
 class Repository:
@@ -236,26 +265,245 @@ class Repository:
             "active_run_id": None,
             "messages": [],
             "created_at": now(),
+            "folder_id": None,
+            "archived": False,
+            "title_locked": title != "New investigation",
+            "copied_from_session_id": None,
         }
         async with self.lock, self.engine.begin() as connection:
             await connection.execute(insert(sessions).values(**value))
-        return value
+        return _session_view(value)
 
     async def session(self, identifier: str) -> dict[str, Any]:
         """Load the authoritative history and active-Run reference."""
-        return await self._one(sessions, identifier)
+        return _session_view(await self._one(sessions, identifier))
 
     async def list_sessions(self) -> list[dict[str, Any]]:
         """Return the most recent local conversations for the sidebar."""
         async with self.engine.connect() as connection:
             return [
-                dict(row)
+                _session_view(row)
                 for row in (
                     await connection.execute(
-                        select(sessions).order_by(sessions.c.created_at.desc()).limit(100)
+                        select(sessions).order_by(sessions.c.created_at.desc())
                     )
                 ).mappings()
             ]
+
+    async def list_folders(self) -> list[dict[str, Any]]:
+        """List flat folders alphabetically, including empty folders."""
+        async with self.engine.connect() as connection:
+            return [
+                dict(row)
+                for row in (
+                    await connection.execute(select(folders).order_by(folders.c.name))
+                ).mappings()
+            ]
+
+    async def save_folder(
+        self, name: str, folder_id: str | None = None, expected_revision: int = 0
+    ) -> dict[str, Any]:
+        """Create or rename a folder, rejecting stale edits and duplicate names."""
+        async with self.lock, self.engine.begin() as connection:
+            current = None
+            if folder_id:
+                current = (
+                    (await connection.execute(select(folders).where(folders.c.id == folder_id)))
+                    .mappings()
+                    .first()
+                )
+                if current is None:
+                    raise AppError("not_found", "Folder does not exist.", 404)
+                if current["revision"] != expected_revision:
+                    raise AppError(
+                        "revision_conflict", "Folder changed. Reload before saving.", 409
+                    )
+            duplicate = (
+                await connection.execute(select(folders.c.id).where(folders.c.name == name))
+            ).scalar_one_or_none()
+            if duplicate and duplicate != folder_id:
+                raise AppError("folder_name", "A folder with this name already exists.", 409)
+            value = {
+                "id": folder_id or uid(),
+                "name": name,
+                "revision": expected_revision + 1,
+                "created_at": current["created_at"] if current else now(),
+            }
+            if current:
+                await connection.execute(
+                    update(folders).where(folders.c.id == folder_id).values(**value)
+                )
+            else:
+                await connection.execute(insert(folders).values(**value))
+        return value
+
+    async def delete_folder(self, folder_id: str) -> None:
+        """Ungroup conversations before deleting their folder; never delete their history."""
+        async with self.lock, self.engine.begin() as connection:
+            if not (
+                await connection.execute(select(folders.c.id).where(folders.c.id == folder_id))
+            ).first():
+                raise AppError("not_found", "Folder does not exist.", 404)
+            await connection.execute(
+                update(sessions)
+                .where(sessions.c.folder_id == folder_id)
+                .values(folder_id=None, revision=sessions.c.revision + 1)
+            )
+            await connection.execute(delete(folders).where(folders.c.id == folder_id))
+
+    async def update_session(self, session_id: str, request: SessionUpdate) -> dict[str, Any]:
+        """Apply a versioned metadata edit without touching messages or Run snapshots."""
+        async with self.lock, self.engine.begin() as connection:
+            current = (
+                (await connection.execute(select(sessions).where(sessions.c.id == session_id)))
+                .mappings()
+                .first()
+            )
+            if current is None:
+                raise AppError("not_found", "Conversation does not exist.", 404)
+            if current["revision"] != request.expected_revision:
+                raise AppError(
+                    "revision_conflict", "Conversation changed. Reload before editing.", 409
+                )
+            changes: dict[str, Any] = {}
+            if request.title is not None:
+                changes.update(title=request.title, title_locked=True)
+            if request.archived is not None:
+                if current["active_run_id"]:
+                    raise AppError(
+                        "session_busy", "Finish or cancel the active Run before archiving.", 409
+                    )
+                changes["archived"] = request.archived
+            if "folder_id" in request.model_fields_set:
+                if (
+                    request.folder_id
+                    and not (
+                        await connection.execute(
+                            select(folders.c.id).where(folders.c.id == request.folder_id)
+                        )
+                    ).first()
+                ):
+                    raise AppError("not_found", "Folder does not exist.", 404)
+                changes["folder_id"] = request.folder_id
+            if changes:
+                changes["revision"] = current["revision"] + 1
+                await connection.execute(
+                    update(sessions).where(sessions.c.id == session_id).values(**changes)
+                )
+            return _session_view({**current, **changes})
+
+    async def copy_session(self, session_id: str, request: SessionCopy) -> dict[str, Any]:
+        """Duplicate saved history or fork through a successful turn without executing anything."""
+        async with self.lock, self.engine.begin() as connection:
+            source = (
+                (await connection.execute(select(sessions).where(sessions.c.id == session_id)))
+                .mappings()
+                .first()
+            )
+            if source is None:
+                raise AppError("not_found", "Conversation does not exist.", 404)
+            if source["revision"] != request.expected_revision:
+                raise AppError(
+                    "revision_conflict", "Conversation changed. Reload before copying.", 409
+                )
+            if source["active_run_id"]:
+                raise AppError(
+                    "session_busy", "Finish or cancel the active Run before copying.", 409
+                )
+            history = [
+                dict(row)
+                for row in (
+                    await connection.execute(
+                        select(runs)
+                        .where(runs.c.session_id == session_id)
+                        .order_by(runs.c.created_at, runs.c.id)
+                    )
+                ).mappings()
+            ]
+            if request.operation == "fork":
+                point = next(
+                    (
+                        index
+                        for index, run in enumerate(history)
+                        if run["id"] == request.through_run_id and run["status"] == "succeeded"
+                    ),
+                    None,
+                )
+                if point is None:
+                    raise AppError(
+                        "fork_point", "Choose a completed successful turn in this conversation."
+                    )
+                history = history[: point + 1]
+            elif request.through_run_id is not None:
+                raise AppError("copy_boundary", "Only a fork accepts a turn boundary.")
+            if any(run["status"] not in TERMINAL for run in history):
+                raise AppError("session_busy", "Only finished Runs can be copied.", 409)
+            messages = source["messages"]
+            if request.operation == "fork":
+                messages = []
+                for run in history:
+                    if run["status"] == "succeeded":
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": run["snapshot"]["input"],
+                                "source": "history",
+                                "tool_calls": [],
+                                "tool_call_id": None,
+                            }
+                        )
+                        messages.extend(
+                            {**message, "source": "history"} for message in run["messages"]
+                        )
+            copied = {
+                "id": uid(),
+                "title": f"{source['title'][:114]} {request.operation if request.operation == 'fork' else 'copy'}",
+                "revision": 0,
+                "active_run_id": None,
+                "messages": messages,
+                "created_at": now(),
+                "folder_id": source["folder_id"],
+                "archived": False,
+                "title_locked": True,
+                "copied_from_session_id": session_id,
+            }
+            await connection.execute(insert(sessions).values(**copied))
+            for original in history:
+                new_id = uid()
+                # Preserve the original immutable snapshot and wire evidence. Copies own their
+                # records, but are never new model requests or resumable checkpoints.
+                clone = {
+                    **original,
+                    "id": new_id,
+                    "session_id": copied["id"],
+                    "preview_id": uid(),
+                    "idempotency_key": uid(),
+                    "latest_event_seq": 0,
+                    "source_run_id": original["source_run_id"] or original["id"],
+                }
+                await connection.execute(insert(runs).values(**clone))
+                for call in (
+                    await connection.execute(select(calls).where(calls.c.run_id == original["id"]))
+                ).mappings():
+                    call_id = new_id + call["id"][len(original["id"]) :]
+                    await connection.execute(
+                        insert(calls).values(
+                            **{
+                                **call,
+                                "id": call_id,
+                                "run_id": new_id,
+                                "data": {
+                                    **call["data"],
+                                    "copied_from_call_id": call["id"],
+                                    "copied_from_run_id": original["id"],
+                                },
+                            }
+                        )
+                    )
+                await self._event(
+                    connection, new_id, "run.copied", {"source_run_id": clone["source_run_id"]}
+                )
+        return _session_view(copied)
 
     async def put_preview(self, identifier: str, data: dict[str, Any]) -> None:
         """Persist the compiled preview and its immutable execution snapshot."""
@@ -313,6 +561,10 @@ class Repository:
             ).scalar_one()
             if session["active_run_id"]:
                 raise AppError("session_busy", "Finish or cancel the current Run first.", 409)
+            if session["archived"]:
+                raise AppError(
+                    "session_archived", "Restore this conversation before running a task.", 409
+                )
             if (
                 session["revision"] != request["expected_session_revision"]
                 or session["revision"] != snapshot["session_revision"]
@@ -351,7 +603,10 @@ class Repository:
                 .where(sessions.c.id == session["id"])
                 .values(
                     active_run_id=value["id"],
-                    title=snapshot["input"][:80] if session["revision"] == 0 else session["title"],
+                    title=(
+                        snapshot["input"][:80] if not session["title_locked"] else session["title"]
+                    ),
+                    title_locked=True,
                 )
             )
             await self._event(connection, value["id"], "run.queued", {})

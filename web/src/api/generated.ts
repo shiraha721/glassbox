@@ -225,7 +225,75 @@ export interface paths {
         delete: operations["delete_session_api_v1_sessions__session_id__delete"];
         options?: never;
         head?: never;
+        /**
+         * Update Session
+         * @description Rename, archive, restore, or move a conversation using its observed revision.
+         */
+        patch: operations["update_session_api_v1_sessions__session_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Session
+         * @description Create an independent duplicate or turn-boundary fork without model execution.
+         */
+        post: operations["copy_session_api_v1_sessions__session_id__copy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Folder
+         * @description Create an empty conversation folder.
+         */
+        post: operations["create_folder_api_v1_folders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/folders/{folder_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Folder
+         * @description Delete a folder while keeping its conversations in the unfiled group.
+         */
+        delete: operations["delete_folder_api_v1_folders__folder_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename Folder
+         * @description Rename a folder without changing conversation membership.
+         */
+        patch: operations["rename_folder_api_v1_folders__folder_id__patch"];
         trace?: never;
     };
     "/api/v1/sessions/{session_id}/runs": {
@@ -539,6 +607,8 @@ export interface components {
             presets: components["schemas"]["Preset-Output"][];
             /** Sessions */
             sessions: components["schemas"]["SessionView"][];
+            /** Folders */
+            folders: components["schemas"]["FolderView"][];
             /** Tools */
             tools: components["schemas"]["ToolDefinition"][];
             /** Tool Errors */
@@ -589,6 +659,38 @@ export interface components {
             budget_status: string;
             /** Input Hash */
             input_hash: string;
+        };
+        /**
+         * FolderCreate
+         * @description Name a conversation folder without introducing nested paths.
+         */
+        FolderCreate: {
+            /** Name */
+            name: string;
+        };
+        /**
+         * FolderUpdate
+         * @description Rename only the folder revision the user has actually seen.
+         */
+        FolderUpdate: {
+            /** Name */
+            name: string;
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /**
+         * FolderView
+         * @description A flat collection of conversations, independent of workspace files.
+         */
+        FolderView: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Revision */
+            revision: number;
+            /** Created At */
+            created_at: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -940,6 +1042,8 @@ export interface components {
             usage: {
                 [key: string]: unknown;
             };
+            /** Source Run Id */
+            source_run_id: string | null;
             /** Unknown Calls */
             unknown_calls: {
                 [key: string]: unknown;
@@ -960,6 +1064,21 @@ export interface components {
             detail: string;
         };
         /**
+         * SessionCopy
+         * @description Copy saved evidence, optionally stopping at a completed turn for a fork.
+         */
+        SessionCopy: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "duplicate" | "fork";
+            /** Through Run Id */
+            through_run_id?: string | null;
+        };
+        /**
          * SessionCreate
          * @description Optional display title for a new empty conversation.
          */
@@ -969,6 +1088,20 @@ export interface components {
              * @default New investigation
              */
             title: string;
+        };
+        /**
+         * SessionUpdate
+         * @description Edit conversation metadata; an explicit null removes folder membership.
+         */
+        SessionUpdate: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Title */
+            title?: string | null;
+            /** Archived */
+            archived?: boolean | null;
+            /** Folder Id */
+            folder_id?: string | null;
         };
         /**
          * SessionView
@@ -987,6 +1120,15 @@ export interface components {
             messages: components["schemas"]["Message"][];
             /** Created At */
             created_at: string;
+            /** Folder Id */
+            folder_id: string | null;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /** Copied From Session Id */
+            copied_from_session_id: string | null;
         };
         /**
          * SkillDocument
@@ -1626,6 +1768,173 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_session_api_v1_sessions__session_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    copy_session_api_v1_sessions__session_id__copy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionCopy"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_folder_api_v1_folders_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_folder_api_v1_folders__folder_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_folder_api_v1_folders__folder_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderView"];
+                };
             };
             /** @description Validation Error */
             422: {

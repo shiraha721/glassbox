@@ -10,12 +10,13 @@ As of 2026-10-03, Stage 1 is implemented and the first Stage 2 workspace capabil
 
 - Direct **Run**, streaming replies, persistent conversations, cancellation, approval, and checkpoint recovery. Preview is optional.
 - Prompt blocks with roles, ordering, conditions, variables, and source mapping; immutable Run inputs.
+- Continuous chat history, conversation rename/duplicate/fork/archive/delete, flat folders, and reversible preset drafts.
 - OpenAI-compatible Chat Completions with configurable Base URL, model, and server-side API key. The real adapter is the default; a missing model produces a configuration error.
 - Native Windows PowerShell execution in AppContainer, or Linux Bash in bubblewrap, plus list/read/write/edit file tools.
 - Workspace instructions, persistent Markdown memory, on-demand Skills, and a bundled skill-creator that saves reusable procedures.
 - Stateless stdio/Streamable HTTP MCP, per-tool permissions, captured requests, tool results, usage, and redacted exports.
 
-Local HTTP checks exercise actual tools, sandbox boundaries, memory, Skills, and cancellation. The OpenAI-compatible request boundary is covered with an HTTP fixture. **Live model acceptance is pending user endpoint configuration**; simulated decisions do not establish real model quality.
+Local HTTP checks exercise actual tools, sandbox boundaries, memory, Skills, cancellation, and conversation management. A basic live OpenAI-compatible model → native Windows PowerShell → model loop has also completed, with both outbound requests captured. Substantial coding/analysis acceptance remains ahead; simulated decisions do not establish real model quality.
 
 See [Architecture](docs/architecture.md) for the implemented design and [AGENTS.md](AGENTS.md) for development conventions.
 
@@ -41,7 +42,7 @@ OPENAI_MODEL=
 OPENAI_API_KEY=
 ```
 
-Start with `uv run rtagent` and open **http://127.0.0.1:8001**. Enter a task and click **Run**, or press **Ctrl+Enter / Cmd+Enter**. Open **Prompt** to edit the preset and **Inspector** to examine requests. **Preview** inspects the frozen first request without calling a model; it is never a prerequisite for Run.
+Start with `uv run python -m rtagent.main` and open **http://127.0.0.1:8001**. Enter a task and click **Run**, or press **Ctrl+Enter / Cmd+Enter**. Open **Prompt** to edit the preset and **Inspector** to examine requests. **Preview** inspects the frozen first request without calling a model; it is never a prerequisite for Run. The `rtagent` console command also works; launching the module avoids holding that executable open during Windows dependency updates.
 
 The app opens directly without login or a workspace access token. Startup applies migrations. Use one server worker on loopback. Changing the workspace root or .env provider options requires a restart. Explicit .env provider values override saved settings on startup; edits in **Settings** apply immediately to new Runs until the next restart. API keys stay on the server.
 
@@ -96,6 +97,16 @@ Only name, description, and location enter the default catalog. The model calls 
 
 The bundled **$skill-creator** guides the agent to inspect existing procedures, write one with save_skill, and load it again to validate the result. For example: “$skill-creator create a skill for reviewing this project's Python changes.” You can also create/edit skills directly in Workspace. Bundled skills are read-only; project skills can be committed after review. Skill text cannot grant permissions or alter the sandbox.
 
+## Conversations and prompt editing
+
+The sidebar separates **Active** and **Archived** conversations, supports title search, and groups history in flat folders. Use a conversation's **…** menu to rename it, move it, duplicate it, choose a fork point, archive/restore it, or delete it. Folder menus rename or delete a folder; deleting a folder moves its conversations to **Unfiled** and preserves their records.
+
+**Duplicate** copies the full saved conversation and its completed runs/traces. **Fork** copies history through a selected successful turn; **Fork here** performs the same operation from a turn header. Copies have independent IDs and a **Copied history** label. They never repeat model/tool calls, clone checkpoints, or copy workspace files. Both conversations use the current shared workspace. Only successful turns become input history for subsequent runs. Finish or cancel an active Run before copying, archiving, or deleting its conversation.
+
+Chat displays all turns together. The conversation toolbar and message input stay fixed while history scrolls. Archived conversations can be inspected; restore one to send another message.
+
+In **Prompt**, the **Active preset** selector stays usable with unsaved changes. **New**, **Duplicate**, and **Rename** have separate controls. Each preset keeps its draft while switching; **Undo**, **Redo**, and **Discard changes** make edits reversible. Blocks are grouped into **Before conversation** and **Before your message** positions. Saving advances the preset revision; draft edits are local to the current page and are lost on reload. Existing Run snapshots remain unchanged.
+
 ## Execution records
 
 STUDIO_DATA_DIR contains app.db (settings, presets, sessions, snapshots, events, receipts) and checkpoints.db (LangGraph state). Runtime files, .env, raw traces, and local memory are excluded from Git.
@@ -117,9 +128,12 @@ Validate changed behavior against the running service first. A repeatable check 
 
 ```powershell
 uv run python scripts/smoke_workspace.py
+uv run python scripts/smoke_conversations.py
 ```
 
 It temporarily binds port 8766 and uses a disposable workspace with an explicitly simulated model. It exercises Windows AppContainer/PowerShell or Linux bubblewrap/Bash. It verifies direct Run retry identity, actual command/file operations, hidden host paths, network isolation, memory/Skills, context provenance, read-only enforcement, and cancellation cleanup. It does not call a model service or modify the selected user workspace.
+
+The conversation check uses port 8767 with separate temporary data. It verifies fork boundaries, duplicate traces and provenance, stale-edit rejection, archive/restore, folder rename/delete, and continuing a fork after deleting its source.
 
 For manual offline checks, explicitly select **Simulated model** in Settings or set STUDIO_PROVIDER=fake. Commands such as `/read README.md`, `/echo hello`, and `/tool powershell {"command":"Get-Location"}` (Windows) or `/tool bash {"command":"pwd"}` (Linux) use simulated decisions with real tools. `/slow` exercises Stop. Simulation is a development aid, not the default provider.
 
@@ -143,9 +157,9 @@ The previous foundation/compiler/conversation/tools/recovery milestones are all 
 
 | Stage | Scope | Exit criteria / status |
 | --- | --- | --- |
-| **1 — Inspectable execution foundation** | Web workspace, prompt blocks, provider boundary, single-agent loop, MCP, traces, persistence, approvals, recovery | Implemented locally. Live-provider acceptance remains pending endpoint configuration. |
+| **1 — Inspectable execution foundation** | Web workspace, prompt blocks, provider boundary, single-agent loop, MCP, traces, persistence, approvals, recovery | Implemented locally; a basic live-model/native-tool loop has passed on Windows. |
 | **2 — Working local agent** | Direct Run, native commands/read/write/edit, OS workspace sandbox, instructions, persistent memory, Skills and skill creation | Implemented in this increment and exercised through real local requests. Complete real-model coding/analysis acceptance before declaring the stage complete. |
-| **3 — Daily agent use** | Explicit context compaction, context accounting, session branching, diff review, command output streaming, interactive/background process lifecycle, practical dependency/network policies | Complete substantial multi-file tasks across stop/restart/resume with reliable context and no stray processes; verify resource/permission boundaries. |
+| **3 — Daily agent use** | Explicit context compaction, context accounting, session branching, diff review, command output streaming, interactive/background process lifecycle, practical dependency/network policies | Conversation organization and branching are implemented. Remaining scope must complete substantial multi-file tasks across stop/restart/resume with reliable context and no stray processes. |
 | **4 — Extensible harness** | Stable programmatic run interface, CLI/JSON/RPC, focused lifecycle/tool hooks, reusable prompt/skill packages, more providers | Use the same loop through Web, CLI, and embedding; add integrations without patching the core. Derive hooks from real use cases. |
 | **5 — Security analysis workflows** | Stateful MCP, accepted IDA/Ghidra/debugger/browser integrations, evidence/artifacts, reusable analysis skills | Complete representative authorized reverse-engineering, debugging, and CTF tasks with real tools and inspectable evidence. |
 | **6 — Evaluation and justified scale** | Reproducible task sets, replay/comparison, A/B and ablation, usage/cost reporting; bounded delegation, more workers, PostgreSQL or teams only when needed | Give each capability a real workload and its own acceptance criteria. Preserve the simple local path. |
