@@ -36,6 +36,12 @@ describe('preset editing', () => {
       <Composer
         preset={preset}
         presets={[preset]}
+        projectId=""
+        selectedSkills={[]}
+        input=""
+        onSkills={vi.fn()}
+        onWorkspace={vi.fn()}
+        onRefreshContext={vi.fn()}
         dirty={false}
         busy={false}
         onChange={changed}
@@ -57,6 +63,12 @@ describe('preset editing', () => {
       <Composer
         preset={preset}
         presets={[preset]}
+        projectId=""
+        selectedSkills={[]}
+        input=""
+        onSkills={vi.fn()}
+        onWorkspace={vi.fn()}
+        onRefreshContext={vi.fn()}
         dirty={false}
         busy={false}
         onChange={changed}

@@ -7,7 +7,7 @@ This guide applies to the entire repository and defines project constraints and 
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-03, Stage 1 (the inspectable execution foundation), initial Stage 2 workspace capabilities, and Stage 3 conversation organization/branching are implemented. A basic live-model/native-Windows-tool loop has passed; substantial coding/analysis acceptance remains ahead. The target is an extensible everyday agent harness; the original MVP is only the first stage. Consult README delivery stages and actual source files.
+As of 2026-10-04, Stage 1, the Windows Stage 2 local-agent workflow, and Stage 3 conversation organization/branching are implemented. Real-model coding/analysis, project binding, memory/Skill reuse after restart, and native Windows boundary checks passed; see [Stage 2 acceptance](acceptance-stage2.md). Linux sandbox acceptance requires a Linux host. The target is an extensible everyday agent harness; the original MVP is only the first stage. Consult README delivery stages and actual source files.
 Inspect the actual files before starting work. Do not report the target directories, commands, or APIs below as implemented capabilities.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
@@ -72,6 +72,7 @@ docs/              Project documentation, architecture, and development conventi
 ### Agents, Tools, and Recovery
 
 - Use native Windows AppContainer with PowerShell on Windows and bubblewrap with Bash on Linux. Do not require WSL for Windows execution. Never replace it with unrestricted host execution or present a cwd check as an OS sandbox. Preserve no-network behavior, hidden credentials/runtime paths, bounded output, and child-process cleanup.
+- Projects register one existing local folder; sessions bind to stable project IDs and Runs freeze their absolute root. Idle workspace moves affect future Runs only. Native tools and context are resolved from that root; the model cannot select a different project.
 - Memory and Skills use ordinary files. Snapshot initial AGENTS.md, memory, and selected skill content with source mapping. Load skill bodies on demand; no vector store or plugin framework is needed.
 - Writes use content hashes or unambiguous exact edits. Skills and memory cannot grant permissions or bypass isolation. Explicitly configured MCP servers remain outside the command sandbox.
 
@@ -125,6 +126,7 @@ uv run alembic upgrade head
 uv run uvicorn rtagent.main:create_app --factory --reload --host 127.0.0.1 --port 8001
 uv run python scripts/smoke_workspace.py
 uv run python scripts/smoke_conversations.py
+uv run python scripts/smoke_projects.py
 uv run pytest
 uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations

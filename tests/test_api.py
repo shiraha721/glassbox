@@ -2,6 +2,51 @@ import asyncio
 import json
 
 import pytest
+from sqlalchemy import func, select
+
+from rtagent.storage import previews
+
+
+async def test_draft_inspection_is_live_and_does_not_persist(studio_client):
+    """Inspect unsaved input, variables, and file context without creating execution records."""
+    client, app = studio_client
+    studio = app.state.studio
+    studio.registry.files.write("AGENTS.md", "Keep the project small.")
+    bootstrap = (await client.get("/api/v1/bootstrap")).json()
+    preset = bootstrap["presets"][0]
+    draft = {**preset, "blocks": [dict(block) for block in preset["blocks"]]}
+    draft["blocks"][0].update(
+        template="Draft for {{target}}", variables={"target": {"type": "string"}}
+    )
+    body = {
+        "preset": draft,
+        "config_revision": bootstrap["config"]["revision"],
+        "input": "First input",
+        "variables": {"target": "one"},
+        "skills": ["skill-creator"],
+    }
+    first = (await client.post("/api/v1/prompts/inspect", json=body)).json()
+    body.update(input="Second input", variables={"target": "two"})
+    response = await client.post("/api/v1/prompts/inspect", json=body)
+    assert response.status_code == 200, response.text
+    second = response.json()
+    assert first["input_hash"] != second["input_hash"]
+    assert second["compiled"]["messages"][0]["content"] == "Draft for two"
+    assert second["compiled"]["messages"][-1]["content"] == "Second input"
+    assert {"workspace:AGENTS.md", "workspace:skills", "skill:skill-creator"} <= {
+        item["source"] for item in second["compiled"]["messages"]
+    }
+    assert (await client.get("/api/v1/workspace")).json()["instructions"][
+        "content"
+    ] == "Keep the project small."
+    body["variables"] = {}
+    assert (await client.post("/api/v1/prompts/inspect", json=body)).status_code == 422
+    current = (await client.get("/api/v1/bootstrap")).json()
+    assert current["presets"] == bootstrap["presets"] and not current["sessions"]
+    async with studio.repository.engine.connect() as connection:
+        assert (
+            await connection.execute(select(func.count()).select_from(previews))
+        ).scalar_one() == 0
 
 
 async def start(client, text="Hello"):

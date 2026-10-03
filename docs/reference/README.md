@@ -1,6 +1,6 @@
 # Architecture Reference
 
-Reviewed against the repository source on 2026-10-03. Start with [System architecture](../architecture.md) for the whole application and then follow the responsibility you want to inspect. [Project guide](../README.md) covers startup and use; [Development guide](../development.md) defines working constraints.
+Reviewed against the repository source on 2026-10-04. Start with [System architecture](../architecture.md) for the whole application and then follow the responsibility you want to inspect. [Project guide](../README.md) covers startup and use; [Development guide](../development.md) defines working constraints.
 
 This reference explains implemented code from the application down to individual functions: **what it does, its inputs/results, how it works, why it exists, its architectural layer, and how it connects to the rest of the system**. Source links point to the reviewed declarations. Private methods and nested helpers are included, rather than only public HTTP handlers.
 
@@ -19,7 +19,7 @@ This reference explains implemented code from the application down to individual
 
 ## Coverage and boundaries
 
-The reviewed source contains **171 backend functions/methods and 52 backend classes**, **51 frontend named functions/methods and one frontend class**, and **67 supporting named functions/methods plus one supporting test class**. Each has an individual entry. The callback appendix additionally lists **11 Python lambdas and 238 TypeScript anonymous callbacks**, including verification callbacks. This totals 289 named functions/methods, 249 anonymous functions, and 54 classes.
+The reviewed source contains **184 backend functions/methods and 56 backend classes**, **56 frontend named functions/methods and 1 frontend class**, and **82 supporting named functions/methods plus 1 supporting test class**. Each has an individual entry. The callback appendix additionally lists **11 Python lambdas and 274 TypeScript anonymous callbacks**, including verification callbacks. This totals 322 named functions/methods, 285 anonymous functions, and 58 classes.
 
 The actual Python package is `rtagent`; its responsibilities are currently single modules. The npm package is `security-agent-studio-web`. `scripts`, `migrations`, and `tests` are supporting source directories. `skills/skill-creator` is a packaged Markdown resource. The proposed future subpackage layout in the development guide is not an implemented directory tree.
 

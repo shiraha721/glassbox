@@ -241,6 +241,19 @@ class PreviewRequest(Contract):
     skills: list[str] = Field(default_factory=list, max_length=20)
 
 
+class DraftPreviewRequest(Contract):
+    """Inspect an unsaved preset without creating a conversation or a saved preview."""
+
+    preset: Preset
+    config_revision: int
+    session_id: str | None = None
+    project_id: str | None = None
+    expected_session_revision: int | None = None
+    input: str = Field(default="", max_length=100_000)
+    variables: dict[str, Any] = Field(default_factory=dict)
+    skills: list[str] = Field(default_factory=list, max_length=20)
+
+
 class MemoryDocument(Contract):
     """Editable project memory with a fingerprint for conflict detection."""
 
@@ -295,19 +308,25 @@ class WorkspaceView(Contract):
 
     root: str
     sandbox: SandboxStatus
+    instructions: MemoryDocument | None
     memory: MemoryDocument
     skills: list[SkillInfo]
     skill_errors: dict[str, str]
 
 
-class Preview(Contract):
-    """An expiring compiled input and the exact prepared provider payload."""
+class PromptInspection(Contract):
+    """The compiled draft and prepared payload, with no persisted execution identity."""
 
-    id: str
     input_hash: str
     compiled: CompiledPrompt
     prepared_request: dict[str, Any]
     tools: list[ToolDefinition]
+
+
+class Preview(PromptInspection):
+    """An expiring, persisted input that can be consumed by Run."""
+
+    id: str
     expires_at: str
 
 
@@ -378,6 +397,21 @@ class FolderUpdate(FolderCreate):
     expected_revision: int = Field(ge=0)
 
 
+class ProjectCreate(FolderCreate):
+    """Register an existing local folder as a conversation workspace."""
+
+    workspace_root: str = Field(min_length=1, max_length=4096)
+
+
+class ProjectView(Contract):
+    """A named workspace folder; tool policy remains in the shared settings aggregate."""
+
+    id: str
+    name: str
+    workspace_root: str
+    created_at: str
+
+
 class SessionUpdate(Contract):
     """Edit conversation metadata; an explicit null removes folder membership."""
 
@@ -385,6 +419,7 @@ class SessionUpdate(Contract):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     archived: bool | None = None
     folder_id: str | None = None
+    project_id: str | None = None
 
     @field_validator("title")
     @classmethod
@@ -413,6 +448,7 @@ class SessionView(Contract):
     messages: list[Message]
     created_at: str
     folder_id: str | None = None
+    project_id: str | None = None
     archived: bool = False
     copied_from_session_id: str | None = None
 
@@ -423,6 +459,7 @@ class RunView(Contract):
     id: str
     session_id: str
     input: str
+    workspace_root: str
     status: str
     stop_reason: str | None
     messages: list[Message]

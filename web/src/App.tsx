@@ -23,9 +23,10 @@ import {
   errorMessage,
   request,
   terminal,
+  workspacePath,
   type Bootstrap,
   type Preset,
-  type Preview,
+  type WorkspaceView,
   type ResumeRequest,
   type Run,
   type Session,
@@ -36,7 +37,9 @@ import { ConversationHistory } from './ConversationHistory';
 import { Inspector, Json } from './Inspector';
 import { Settings } from './Settings';
 import { WorkspacePanel } from './WorkspacePanel';
+import { Projects } from './Projects';
 import { usePresetDrafts } from './usePresetDrafts';
+import { useLivePreview } from './useLivePreview';
 
 const emptyRuns: Run[] = [];
 
@@ -64,17 +67,23 @@ export default function App() {
   return <Workspace data={query.data!} />;
 }
 
-/** Coordinate saved server state with a small local draft and a single expiring preview. */
+/** Coordinate server state, reversible prompt drafts, and live inspection of current input. */
 function Workspace({ data }: { data: Bootstrap }) {
   const cache = useQueryClient();
   const drafts = usePresetDrafts(data.presets);
   const { preset, dirty } = drafts;
   const [sessionId, setSessionId] = useState(() => localStorage.getItem('studio.session') || '');
+  const [projectId, setProjectId] = useState(
+    () =>
+      data.sessions.find((item) => item.id === localStorage.getItem('studio.session'))
+        ?.project_id ||
+      localStorage.getItem('studio.project') ||
+      '',
+  );
   const [selectedRun, setSelectedRun] = useState('');
   const [input, setInput] = useState('');
   const [variables, setVariables] = useState('{}');
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [previewRevision, setPreviewRevision] = useState(0);
+  const [previewEnabled, setPreviewEnabled] = useState(false);
   const [tab, setTab] = useState<'preview' | 'trace'>(() =>
     localStorage.getItem('studio.session') ? 'trace' : 'preview',
   );
@@ -87,9 +96,11 @@ function Workspace({ data }: { data: Bootstrap }) {
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const project = data.projects.find((item) => item.id === projectId);
+  const projectSessions = data.sessions.filter((item) => (item.project_id || '') === projectId);
   const session =
-    data.sessions.find((item) => item.id === sessionId) ||
-    data.sessions.find((item) => !item.archived);
+    projectSessions.find((item) => item.id === sessionId) ||
+    projectSessions.find((item) => !item.archived);
   const conversationScroll = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
   const runQuery = useQuery({
@@ -103,6 +114,26 @@ function Workspace({ data }: { data: Bootstrap }) {
   const run = runs.find((item) => item.id === selectedRun) || runs.at(-1);
   const active = runs.find((item) => !terminal(item.status));
   const latestRun = active || runs.at(-1);
+  const workspaceQuery = useQuery({
+    queryKey: ['workspace', projectId],
+    queryFn: () => request<WorkspaceView>(workspacePath('', projectId)),
+    enabled: panel === 'prompt' || panel === 'workspace' || previewEnabled,
+    refetchOnWindowFocus: false,
+  });
+  const inspection = useLivePreview(
+    previewEnabled && !active,
+    JSON.stringify({
+      session_id: session?.id || null,
+      project_id: projectId || null,
+      expected_session_revision: session?.revision ?? null,
+      preset,
+      config_revision: data.config.revision,
+      input,
+      variables,
+      skills,
+    }),
+    workspaceQuery.dataUpdatedAt,
+  );
   useRunEvents(active?.id, !!active);
   useEffect(() => {
     const root = conversationScroll.current;
@@ -113,6 +144,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       cache.invalidateQueries({ queryKey: ['bootstrap'] }),
       cache.invalidateQueries({ queryKey: ['runs'] }),
       cache.invalidateQueries({ queryKey: ['trace'] }),
+      cache.invalidateQueries({ queryKey: ['workspace'] }),
     ]);
   };
   const perform = async (operation: () => Promise<void>) => {
@@ -126,21 +158,28 @@ function Workspace({ data }: { data: Bootstrap }) {
       setBusy(false);
     }
   };
-  const chooseSession = (id: string) => {
+  const chooseSession = (id: string, chosenProject?: string) => {
     localStorage.setItem('studio.session', id);
     setSessionId(id);
+    const chosen = data.sessions.find((item) => item.id === id);
+    if (chosen || chosenProject !== undefined) {
+      const nextProject = chosenProject ?? chosen?.project_id ?? '';
+      setProjectId(nextProject);
+      localStorage.setItem('studio.project', nextProject);
+    }
+    setSkills([]);
     followLatest.current = true;
     if (window.matchMedia('(max-width: 760px)').matches) setSidebarOpen(false);
     setSelectedRun('');
     setPanel(null);
-    setPreview(null);
+    setPreviewEnabled(false);
     setInput('');
     setError('');
   };
   const newSession = async (keepDraft = false) => {
-    const created = await request<Session>('/sessions', 'POST', {});
+    const created = await request<Session>('/sessions', 'POST', { project_id: projectId || null });
     await refresh();
-    chooseSession(created.id);
+    chooseSession(created.id, created.project_id || '');
     if (keepDraft) setInput(input);
     return created;
   };
@@ -148,7 +187,6 @@ function Workspace({ data }: { data: Bootstrap }) {
     if (!dirty) return preset;
     const saved = await request<Preset>(`/presets/${preset.id}`, 'PUT', preset);
     drafts.commit(saved);
-    setPreview(null);
     await refresh();
     return saved;
   };
@@ -169,22 +207,14 @@ function Workspace({ data }: { data: Bootstrap }) {
       skills,
     };
   };
-  const buildPreview = async () => {
-    const body = await inputRequest();
-    const compiled = await request<Preview>('/prompts/preview', 'POST', body);
-    setPreviewRevision(body.expected_session_revision);
-    setPreview(compiled);
+  const buildPreview = () => {
+    setPreviewEnabled(true);
     setTab('preview');
     setPanel('inspector');
   };
   const start = async () => {
-    const body = preview
-      ? {
-          preview_id: preview.id,
-          input_hash: preview.input_hash,
-          expected_session_revision: previewRevision,
-        }
-      : await inputRequest();
+    // Live inspection is a draft, so Run always compiles the latest input after saving edits.
+    const body = await inputRequest();
     const fingerprint = JSON.stringify(body);
     // An explicit retry of unchanged input keeps its identity even if the response was lost.
     if (submission.current?.fingerprint !== fingerprint)
@@ -194,14 +224,13 @@ function Workspace({ data }: { data: Bootstrap }) {
     followLatest.current = true;
     setSelectedRun(created.id);
     setInput('');
-    setPreview(null);
+    setPreviewEnabled(false);
     setTab('trace');
     setPanel(null);
     await refresh();
   };
   const changeInput = (text: string) => {
     setInput(text);
-    setPreview(null);
   };
   return (
     <div className="studio">
@@ -233,8 +262,24 @@ function Workspace({ data }: { data: Bootstrap }) {
         >
           <Plus size={16} /> New conversation
         </button>
+        <Projects
+          projects={data.projects}
+          selected={projectId}
+          defaultRoot={data.workspace_root}
+          busy={busy}
+          error={error}
+          onAction={perform}
+          onUpdated={refresh}
+          onSelect={(id) => {
+            if (id === projectId) return;
+            setProjectId(id);
+            localStorage.setItem('studio.project', id);
+            chooseSession('', id);
+          }}
+        />
         <ConversationHistory
-          sessions={data.sessions}
+          projects={data.projects}
+          sessions={projectSessions}
           folders={data.folders}
           selected={session?.id}
           busy={busy}
@@ -242,7 +287,6 @@ function Workspace({ data }: { data: Bootstrap }) {
           onChoose={chooseSession}
           onAction={perform}
           onUpdated={async () => {
-            setPreview(null);
             await refresh();
           }}
           onRemoved={(id) => {
@@ -280,7 +324,16 @@ function Workspace({ data }: { data: Bootstrap }) {
           >
             <PanelLeft size={18} />
           </button>
-          <h1 title={session?.title}>{session?.title || 'New conversation'}</h1>
+          <div className="conversation-heading">
+            <h1 title={session?.title}>{session?.title || 'New conversation'}</h1>
+            <span
+              className="workspace-caption"
+              title={project?.workspace_root || data.workspace_root}
+            >
+              {project?.name || 'Default workspace'} ·{' '}
+              {project?.workspace_root || data.workspace_root}
+            </span>
+          </div>
           {session?.archived && <span className="badge">Archived</span>}
           {latestRun && (
             <span className={`status status-${latestRun.status}`} data-testid="run-status">
@@ -494,7 +547,6 @@ function Workspace({ data }: { data: Bootstrap }) {
                       value={variables}
                       onChange={(event) => {
                         setVariables(event.target.value);
-                        setPreview(null);
                       }}
                     />
                   </details>
@@ -526,13 +578,9 @@ function Workspace({ data }: { data: Bootstrap }) {
                         </button>
                       ) : (
                         <>
-                          <button
-                            className="button"
-                            disabled={busy || !input.trim()}
-                            onClick={() => void perform(buildPreview)}
-                          >
+                          <button className="button" disabled={busy} onClick={buildPreview}>
                             <Eye size={14} />
-                            {dirty ? 'Save & preview' : 'Preview'}
+                            Preview
                           </button>
                           <button
                             className="button primary"
@@ -556,30 +604,33 @@ function Workspace({ data }: { data: Bootstrap }) {
             <Composer
               preset={preset}
               presets={drafts.presets}
+              projectId={projectId}
+              workspace={workspaceQuery.data}
+              workspaceError={workspaceQuery.error?.message}
+              selectedSkills={skills}
+              input={input}
+              onSkills={setSkills}
+              onWorkspace={() => setPanel('workspace')}
+              onRefreshContext={() => void workspaceQuery.refetch()}
               dirty={dirty}
               busy={busy}
               onClose={() => setPanel(null)}
               onChange={(value, group) => {
                 drafts.change(value, group);
-                setPreview(null);
               }}
               onSelect={(value) => {
                 drafts.select(value);
-                setPreview(null);
               }}
               canUndo={drafts.canUndo}
               canRedo={drafts.canRedo}
               onUndo={() => {
                 drafts.undo();
-                setPreview(null);
               }}
               onRedo={() => {
                 drafts.redo();
-                setPreview(null);
               }}
               onDiscard={() => {
                 drafts.discard();
-                setPreview(null);
               }}
               onSave={() =>
                 void perform(async () => {
@@ -591,7 +642,9 @@ function Workspace({ data }: { data: Bootstrap }) {
           <div className="utility-pane" hidden={panel !== 'inspector'}>
             <Inspector
               key={run?.id || 'empty'}
-              preview={preview}
+              preview={inspection.preview}
+              previewUpdating={inspection.updating}
+              previewError={inspection.error}
               run={run}
               tab={tab}
               onTab={setTab}
@@ -601,13 +654,14 @@ function Workspace({ data }: { data: Bootstrap }) {
           {panel === 'workspace' && (
             <div className="utility-pane">
               <WorkspacePanel
+                key={projectId}
+                projectId={projectId}
                 selected={skills}
                 onSelect={(value) => {
                   setSkills(value);
-                  setPreview(null);
                 }}
                 onClose={() => setPanel(null)}
-                onChanged={() => setPreview(null)}
+                onChanged={() => void cache.invalidateQueries({ queryKey: ['workspace'] })}
               />
             </div>
           )}
@@ -618,7 +672,6 @@ function Workspace({ data }: { data: Bootstrap }) {
           data={data}
           onClose={() => setSettings(false)}
           onSaved={async () => {
-            setPreview(null);
             await refresh();
           }}
         />

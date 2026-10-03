@@ -6,17 +6,17 @@ The target is an extensible everyday agent harness in the scope of [pi](https://
 
 ## Current status
 
-As of 2026-10-03, Stage 1 is implemented and the first Stage 2 workspace capabilities are available:
+As of 2026-10-04, Stage 1 and the Windows Stage 2 local-agent workflow are implemented and accepted:
 
 - Direct **Run**, streaming replies, persistent conversations, cancellation, approval, and checkpoint recovery. Preview is optional.
-- Prompt blocks with roles, ordering, conditions, variables, and source mapping; immutable Run inputs.
+- Prompt blocks with roles, ordering, conditions, variables, and source mapping; live draft inspection, including empty task input; immutable Run inputs.
 - Continuous chat history, conversation rename/duplicate/fork/archive/delete, flat folders, and reversible preset drafts.
 - OpenAI-compatible Chat Completions with configurable Base URL, model, and server-side API key. The real adapter is the default; a missing model produces a configuration error.
 - Native Windows PowerShell execution in AppContainer, or Linux Bash in bubblewrap, plus list/read/write/edit file tools.
-- Workspace instructions, persistent Markdown memory, on-demand Skills, and a bundled skill-creator that saves reusable procedures.
+- Named Projects bind conversations to local workspace folders, with project-specific instructions, file tools, native commands, memory, Skills, and a bundled skill-creator.
 - Stateless stdio/Streamable HTTP MCP, per-tool permissions, captured requests, tool results, usage, and redacted exports.
 
-Local HTTP checks exercise actual tools, sandbox boundaries, memory, Skills, cancellation, and conversation management. A basic live OpenAI-compatible model → native Windows PowerShell → model loop has also completed, with both outbound requests captured. Substantial coding/analysis acceptance remains ahead; simulated decisions do not establish real model quality.
+Real-model acceptance completed multi-file coding, actual sandbox checks, Skill creation, evidence-based security analysis, and memory/Skill reuse after restart in a registered project. The final acceptance captured 35 model requests and 70 tool calls. Separate real HTTP checks verify native isolation, read-only mode, cancellation, project boundaries, and conversation management. See [Stage 2 acceptance](acceptance-stage2.md) for scenarios, evidence, commands, and limits.
 
 See [Architecture](architecture.md) for the whole-system design and the [Architecture Reference](reference/README.md) for every module, class, function, callback, and dependency role. The [Development Guide](development.md) defines repository conventions. [AGENTS.md](../AGENTS.md) is the root entry point for coding agents.
 
@@ -42,7 +42,7 @@ OPENAI_MODEL=
 OPENAI_API_KEY=
 ```
 
-Start with `uv run python -m rtagent.main` and open **http://127.0.0.1:8001**. Enter a task and click **Run**, or press **Ctrl+Enter / Cmd+Enter**. Open **Prompt** to edit the preset and **Inspector** to examine requests. **Preview** inspects the frozen first request without calling a model; it is never a prerequisite for Run. The `rtagent` console command also works; launching the module avoids holding that executable open during Windows dependency updates.
+Start with `uv run python -m rtagent.main` and open **http://127.0.0.1:8001**. Enter a task and click **Run**, or press **Ctrl+Enter / Cmd+Enter**. Open **Prompt** to edit the preset and **Inspector** to examine requests. **Preview** inspects the current draft without calling a model. It updates after a 300 ms pause when input, variables, preset blocks, or selected Skills change. Empty input can inspect system instructions. The last valid result stays visible during an update/error; Run captures current input and is never gated by Preview. Inspection does not save preset edits or create history. The `rtagent` console command also works; launching the module avoids holding that executable open during Windows dependency updates.
 
 The app opens directly without login or a workspace access token. Startup applies migrations. Use one server worker on loopback. Changing the workspace root or .env provider options requires a restart. Explicit .env provider values override saved settings on startup; edits in **Settings** apply immediately to new Runs until the next restart. API keys stay on the server.
 
@@ -76,11 +76,19 @@ Native file tools use relative paths, reject traversal/links, and bound UTF-8 fi
 
 MCP servers run **outside the command sandbox**, under their configured transports and permissions. Add a stdio executable and arguments or Streamable HTTP URL in Settings, select **Save & discover**, then enable individual tools. New MCP tools default to Disabled. Connections are stateless; IDA/Ghidra workflows need separate integration acceptance.
 
+## Projects and workspace selection
+
+Use **Projects → Add project** in the sidebar, enter a name and an existing absolute folder path, then select it. Each Project has one workspace root. New conversations use that folder for file tools, sandbox commands, AGENTS.md, .rtagent/MEMORY.md, and .agents/skills. Tool permissions, model settings, and limits remain shared in Settings; workspace-write permits native writes, and read-only removes model mutation tools.
+
+**Default workspace** uses STUDIO_WORKSPACE_ROOT for existing conversations without a Project. The conversation menu's **Change workspace** moves an idle conversation to a saved Project or back to the default root. Future Runs use the new root; historical Runs and copied evidence keep their original roots. Finish/cancel active work before moving it. Duplicate/fork preserves the selected Project; workspace files are shared, not copied.
+
+The workspace path appears in the conversation header, Workspace, and each saved Run's Inspector. Ordinary history folders organize conversations separately from Project filesystem roots. Registering a Project does not copy files, create directories, or expose application runtime data as a workspace. Project root paths are fixed registrations; richer project management is later work.
+
 ## Memory and Skills
 
 **Workspace → Memory** edits .rtagent/MEMORY.md. The agent uses read_memory/save_memory for the same file. There is no vector store or hidden automatic summarization.
 
-At submission, root AGENTS.md, memory, and skill metadata are captured with explicit sources in the Run snapshot. They are not repeatedly appended to conversation history. Later edits affect new Runs. Memory updates reject stale hashes. Local memory is ignored by this repository's Git configuration; never put credentials in it.
+Prompt composer shows the active project’s AGENTS.md, memory, catalog, and selected Skill sources in their actual insertion position. At submission, root AGENTS.md, memory, and skill metadata are captured with explicit sources in the Run snapshot. They are not repeatedly appended to conversation history. Later edits affect new Runs. Memory updates reject stale hashes. Local memory is ignored by this repository's Git configuration; never put credentials in it.
 
 Workspace skills live at `.agents/skills/<name>/SKILL.md`:
 
@@ -93,7 +101,7 @@ description: Review workspace evidence and prepare a report with file references
 Read the evidence, distinguish facts from assumptions, and cite file paths.
 ```
 
-Only name, description, and location enter the default catalog. The model calls load_skill when a description matches the task. To load a skill explicitly, select it in **Workspace → Skills** or mention **$evidence-review** in your task. Supporting files can live beside SKILL.md and be read with file tools. Invalid entries are shown in Workspace.
+Only name, description, and location enter the default catalog. The model calls load_skill when a description matches the task. To load a skill explicitly, select it in **Prompt → Workspace context → Skill catalog** or **Workspace → Skills** or mention **$evidence-review** in your task. Supporting files can live beside SKILL.md and be read with file tools. Invalid entries are shown in Workspace.
 
 The bundled **$skill-creator** guides the agent to inspect existing procedures, write one with save_skill, and load it again to validate the result. For example: “$skill-creator create a skill for reviewing this project's Python changes.” You can also create/edit skills directly in Workspace. Bundled skills are read-only; project skills can be committed after review. Skill text cannot grant permissions or alter the sandbox.
 
@@ -101,11 +109,11 @@ The bundled **$skill-creator** guides the agent to inspect existing procedures, 
 
 The sidebar separates **Active** and **Archived** conversations, supports title search, and groups history in flat folders. Use a conversation's **…** menu to rename it, move it, duplicate it, choose a fork point, archive/restore it, or delete it. Folder menus rename or delete a folder; deleting a folder moves its conversations to **Unfiled** and preserves their records.
 
-**Duplicate** copies the full saved conversation and its completed runs/traces. **Fork** copies history through a selected successful turn; **Fork here** performs the same operation from a turn header. Copies have independent IDs and a **Copied history** label. They never repeat model/tool calls, clone checkpoints, or copy workspace files. Both conversations use the current shared workspace. Only successful turns become input history for subsequent runs. Finish or cancel an active Run before copying, archiving, or deleting its conversation.
+**Duplicate** copies the full saved conversation and its completed runs/traces. **Fork** copies history through a selected successful turn; **Fork here** performs the same operation from a turn header. Copies have independent IDs and a **Copied history** label. They never repeat model/tool calls, clone checkpoints, or copy workspace files. Copies keep their source conversation’s Project for future work; saved Run roots remain immutable. Only successful turns become input history for subsequent runs. Finish or cancel an active Run before copying, archiving, or deleting its conversation.
 
 Chat displays all turns together. The conversation toolbar and message input stay fixed while history scrolls. Archived conversations can be inspected; restore one to send another message.
 
-In **Prompt**, the **Active preset** selector stays usable with unsaved changes. **New**, **Duplicate**, and **Rename** have separate controls. Each preset keeps its draft while switching; **Undo**, **Redo**, and **Discard changes** make edits reversible. Blocks are grouped into **Before conversation** and **Before your message** positions. Saving advances the preset revision; draft edits are local to the current page and are lost on reload. Existing Run snapshots remain unchanged.
+In **Prompt**, the **Active preset** selector stays usable with unsaved changes. **New**, **Duplicate**, and **Rename** have separate controls. Each preset keeps its draft while switching; **Undo**, **Redo**, and **Discard changes** make edits reversible. Blocks are grouped into **Before conversation** and **Before your message** positions. Saving advances the preset revision; draft edits are local to the current page and are lost on reload. The default preset contains six editable system blocks covering identity, boundaries, practical work, native tools, memory/Skills, and reporting. Recognized unchanged old starter text upgrades automatically; user edits and existing Run snapshots remain unchanged.
 
 ## Execution records
 
@@ -129,11 +137,22 @@ Validate changed behavior against the running service first. A repeatable check 
 ```powershell
 uv run python scripts/smoke_workspace.py
 uv run python scripts/smoke_conversations.py
+uv run python scripts/smoke_projects.py
 ```
 
 It temporarily binds port 8766 and uses a disposable workspace with an explicitly simulated model. It exercises Windows AppContainer/PowerShell or Linux bubblewrap/Bash. It verifies direct Run retry identity, actual command/file operations, hidden host paths, network isolation, memory/Skills, context provenance, read-only enforcement, and cancellation cleanup. It does not call a model service or modify the selected user workspace.
 
 The conversation check uses port 8767 with separate temporary data. It verifies fork boundaries, duplicate traces and provenance, stale-edit rejection, archive/restore, folder rename/delete, and continuing a fork after deleting its source.
+
+The project check uses port 8769 and sibling temporary folders to verify project-bound files, commands, instructions, memory, Skills, idle moves, frozen Run roots, and busy-session rejection.
+
+For explicit real-model acceptance on Windows with the main service running:
+
+```powershell
+uv run python scripts/acceptance_stage2.py --live
+```
+
+It uses the configured real provider and may incur model usage. It owns port 8768, a registered project, and separate data; local results stay under ignored var. No real service is called by the default offline tests.
 
 For manual offline checks, explicitly select **Simulated model** in Settings or set STUDIO_PROVIDER=fake. Commands such as `/read README.md`, `/echo hello`, and `/tool powershell {"command":"Get-Location"}` (Windows) or `/tool bash {"command":"pwd"}` (Linux) use simulated decisions with real tools. `/slow` exercises Stop. Simulation is a development aid, not the default provider.
 
@@ -158,7 +177,7 @@ The previous foundation/compiler/conversation/tools/recovery milestones are all 
 | Stage | Scope | Exit criteria / status |
 | --- | --- | --- |
 | **1 — Inspectable execution foundation** | Web workspace, prompt blocks, provider boundary, single-agent loop, MCP, traces, persistence, approvals, recovery | Implemented locally; a basic live-model/native-tool loop has passed on Windows. |
-| **2 — Working local agent** | Direct Run, native commands/read/write/edit, OS workspace sandbox, instructions, persistent memory, Skills and skill creation | Implemented in this increment and exercised through real local requests. Complete real-model coding/analysis acceptance before declaring the stage complete. |
+| **2 — Working local agent** | Direct Run, live composition, Projects/workspace binding, native commands/read/write/edit, OS isolation, instructions, memory, Skills and skill creation | Complete on Windows; real-model coding/analysis, restart reuse, and native/project boundary checks passed. See [acceptance](acceptance-stage2.md). Linux requires acceptance on its own host. |
 | **3 — Daily agent use** | Explicit context compaction, context accounting, session branching, diff review, command output streaming, interactive/background process lifecycle, practical dependency/network policies | Conversation organization and branching are implemented. Remaining scope must complete substantial multi-file tasks across stop/restart/resume with reliable context and no stray processes. |
 | **4 — Extensible harness** | Stable programmatic run interface, CLI/JSON/RPC, focused lifecycle/tool hooks, reusable prompt/skill packages, more providers | Use the same loop through Web, CLI, and embedding; add integrations without patching the core. Derive hooks from real use cases. |
 | **5 — Security analysis workflows** | Stateful MCP, accepted IDA/Ghidra/debugger/browser integrations, evidence/artifacts, reusable analysis skills | Complete representative authorized reverse-engineering, debugging, and CTF tasks with real tools and inspectable evidence. |

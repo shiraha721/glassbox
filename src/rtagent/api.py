@@ -12,6 +12,7 @@ from pydantic import Field
 from rtagent.domain import (
     ApprovalDecision,
     Contract,
+    DraftPreviewRequest,
     FolderCreate,
     FolderUpdate,
     FolderView,
@@ -20,6 +21,9 @@ from rtagent.domain import (
     Preset,
     Preview,
     PreviewRequest,
+    ProjectCreate,
+    ProjectView,
+    PromptInspection,
     ResumeRequest,
     RunEvent,
     RunView,
@@ -44,6 +48,7 @@ class SessionCreate(Contract):
     """Optional display title for a new empty conversation."""
 
     title: str = Field(default="New investigation", min_length=1, max_length=120)
+    project_id: str | None = None
 
 
 class Bootstrap(Contract):
@@ -53,6 +58,7 @@ class Bootstrap(Contract):
     presets: list[Preset]
     sessions: list[SessionView]
     folders: list[FolderView]
+    projects: list[ProjectView]
     tools: list[ToolDefinition]
     tool_errors: dict[str, str]
     workspace_root: str
@@ -73,6 +79,7 @@ async def bootstrap(request: Request) -> Bootstrap:
         presets=await studio.repository.list_presets(),
         sessions=await studio.repository.list_sessions(),
         folders=await studio.repository.list_folders(),
+        projects=await studio.repository.list_projects(),
         tools=list(studio.registry.catalog.values()),
         tool_errors=studio.registry.errors,
         workspace_root=str(studio.registry.workspace),
@@ -86,27 +93,33 @@ async def save_config(body: StudioConfig, request: Request) -> StudioConfig:
 
 
 @router.get("/workspace", response_model=WorkspaceView)
-async def workspace(request: Request, refresh: bool = False) -> WorkspaceView:
+async def workspace(
+    request: Request, refresh: bool = False, project_id: str | None = None
+) -> WorkspaceView:
     """Inspect project memory, skills, and the native OS sandbox status."""
-    return await request.app.state.studio.workspace(refresh)
+    return await request.app.state.studio.workspace(refresh, project_id)
 
 
 @router.put("/workspace/memory", response_model=MemoryDocument)
-async def save_memory(body: MemorySave, request: Request) -> MemoryDocument:
+async def save_memory(
+    body: MemorySave, request: Request, project_id: str | None = None
+) -> MemoryDocument:
     """Save explicitly edited project notes."""
-    return await request.app.state.studio.save_memory(body)
+    return await request.app.state.studio.save_memory(body, project_id)
 
 
 @router.get("/workspace/skills/{name}", response_model=SkillDocument)
-async def skill(name: str, request: Request) -> SkillDocument:
+async def skill(name: str, request: Request, project_id: str | None = None) -> SkillDocument:
     """Load a skill body on demand."""
-    return await request.app.state.studio.skill(name)
+    return await request.app.state.studio.skill(name, project_id)
 
 
 @router.put("/workspace/skills", response_model=SkillDocument)
-async def save_skill(body: SkillSave, request: Request) -> SkillDocument:
+async def save_skill(
+    body: SkillSave, request: Request, project_id: str | None = None
+) -> SkillDocument:
     """Create or update a workspace skill with conflict detection."""
-    return await request.app.state.studio.save_skill(body)
+    return await request.app.state.studio.save_skill(body, project_id)
 
 
 @router.put("/presets/{preset_id}", response_model=Preset)
@@ -129,7 +142,13 @@ async def refresh_tools(request: Request) -> list[ToolDefinition]:
 @router.post("/sessions", response_model=SessionView, status_code=201)
 async def create_session(body: SessionCreate, request: Request) -> dict[str, Any]:
     """Create a conversation without starting model execution."""
-    return await request.app.state.studio.repository.new_session(body.title)
+    return await request.app.state.studio.repository.new_session(body.title, body.project_id)
+
+
+@router.post("/projects", response_model=ProjectView, status_code=201)
+async def create_project(body: ProjectCreate, request: Request) -> ProjectView:
+    """Register a named workspace folder for new and idle conversations."""
+    return await request.app.state.studio.create_project(body)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionView)
@@ -181,6 +200,12 @@ async def session_runs(session_id: str, request: Request) -> list[RunView]:
     """List saved Run projections for a conversation."""
     studio = request.app.state.studio
     return [await studio.view(run["id"]) for run in await studio.repository.list_runs(session_id)]
+
+
+@router.post("/prompts/inspect", response_model=PromptInspection)
+async def inspect_prompt(body: DraftPreviewRequest, request: Request) -> PromptInspection:
+    """Inspect a live draft without persistence or provider execution."""
+    return await request.app.state.studio.inspect(body)
 
 
 @router.post("/prompts/preview", response_model=Preview)

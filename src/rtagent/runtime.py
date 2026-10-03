@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any, TypedDict
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -102,7 +103,7 @@ class Runner:
                 if run["status"] in TERMINAL:
                     return
                 config = StudioConfig.model_validate(run["snapshot"]["config"])
-                if run["snapshot"]["workspace_root"] != str(self.registry.workspace):
+                if not await asyncio.to_thread(Path(run["snapshot"]["workspace_root"]).is_dir):
                     raise AppError(
                         "workspace_changed",
                         "Restore the original workspace before resuming this Run.",
@@ -411,7 +412,9 @@ class Runner:
                     else config.tool_timeout
                 )
                 async with asyncio.timeout(deadline):
-                    content = await self.registry.execute(definition, call.args, config)
+                    # Session/project changes never redirect tools from the frozen Run root.
+                    registry = self.registry.for_workspace(Path(run["snapshot"]["workspace_root"]))
+                    content = await registry.execute(definition, call.args, config)
             except GraphInterrupt:
                 raise
             except AppError as exc:

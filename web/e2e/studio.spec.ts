@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 /** Open the local workspace directly and create a fresh conversation. */
 async function openWorkspace(page: Page) {
@@ -8,7 +9,8 @@ async function openWorkspace(page: Page) {
   if (!(await page.getByRole('button', { name: 'New conversation', exact: true }).isVisible()))
     await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
   await page.getByRole('button', { name: 'New conversation', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeEnabled();
 }
 
 /** Submit tasks directly; preview is an optional inspection action. */
@@ -16,6 +18,120 @@ async function startTask(page: Page, input: string) {
   await page.getByLabel('Task', { exact: true }).fill(input);
   await page.getByRole('button', { name: 'Run', exact: true }).click();
 }
+
+test('projects bind conversations, tools and memory to the selected workspace folder', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  const boot = await (await page.request.get('/api/v1/bootstrap')).json();
+  const root = path.join(path.dirname(boot.workspace_root), 'browser-project');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(path.join(root, 'README.md'), 'Browser project evidence.');
+  writeFileSync(path.join(root, 'AGENTS.md'), 'Use this project folder only.');
+  await page.getByRole('button', { name: 'Add project', exact: true }).click();
+  await page.getByLabel('Project name', { exact: true }).fill('Browser project');
+  await page.getByLabel('Workspace folder', { exact: true }).fill(root);
+  await page.getByRole('dialog').getByRole('button', { name: 'Add project', exact: true }).click();
+  await expect(page.getByRole('dialog')).not.toBeAttached();
+  await expect(page.getByRole('button', { name: 'Browser project', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+  await startTask(page, '/read README.md');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await expect(page.locator('.markdown')).toContainText('Browser project evidence.');
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  await page.getByLabel('Project memory', { exact: true }).fill('Browser project notes.');
+  await page.getByRole('button', { name: 'Save memory', exact: true }).click();
+  await expect(page.getByText('Memory saved. New runs will use it.')).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Browser project', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.locator('.markdown')).toContainText('Browser project evidence.');
+  await page.getByRole('button', { name: 'Inspector', exact: true }).click();
+  await expect(page.getByLabel('Request inspector')).toContainText(`Run workspace: ${root}`);
+  const session = (await (await page.request.get('/api/v1/bootstrap')).json()).sessions.find(
+    (item: { project_id: string | null }) => item.project_id,
+  );
+  await page.getByLabel(`Conversation actions for ${session.title}`, { exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Change workspace', exact: true }).click();
+  await page.getByLabel('Conversation project', { exact: true }).selectOption('');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Default workspace', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.conversation-turn')).toHaveCount(1);
+  await startTask(page, '/read README.md');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await expect(page.locator('.markdown').last()).toContainText(
+    'Local MCP and browser test workspace.',
+  );
+  await page.screenshot({ path: 'test-results/project-workspace.png', fullPage: true });
+});
+
+test('live preview follows input, variables, preset and Skills without saving drafts', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  const before = await (await page.request.get('/api/v1/bootstrap')).json();
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  const inspector = page.getByLabel('Request inspector');
+  await expect(inspector.getByText('Live draft', { exact: true })).toBeVisible();
+  await expect(inspector).toContainText('workspace:AGENTS.md');
+  await expect(inspector.getByText('(No task input)', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Prompt', exact: true }).click();
+  await page.getByLabel('Base identity template').fill('Current target: {{target}}');
+  await page
+    .locator('.block')
+    .filter({ has: page.getByLabel('Base identity template') })
+    .getByText('Variables & activation rules', { exact: true })
+    .click();
+  await page.getByLabel('Base identity rules').fill(
+    JSON.stringify({
+      variables: { target: { type: 'string', required: true, default: null } },
+      condition: null,
+      provider_allowlist: null,
+      model_allowlist: null,
+    }),
+  );
+  await page.getByRole('button', { name: 'Apply rules', exact: true }).first().click();
+  const context = page.getByRole('region', { name: 'Workspace prompt context' });
+  await context.getByText('AGENTS.md', { exact: true }).click();
+  await expect(context).toContainText('Development Guide');
+  await page.getByLabel('Include skill-creator in prompt').check();
+  await page.getByText('Input variables', { exact: false }).first().click();
+  await page.getByLabel('Input variables JSON').fill('{"target":"first"}');
+  await page.getByLabel('Task', { exact: true }).fill('Old input');
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(inspector.getByText('Live draft', { exact: true })).toBeVisible();
+  await inspector.getByText('identity', { exact: true }).click();
+  await expect(inspector).toContainText('Current target: first');
+  await expect(inspector).toContainText('skill:skill-creator');
+  await page.getByLabel('Task', { exact: true }).fill('Latest input');
+  await page.getByLabel('Input variables JSON').fill('{"target":"second"}');
+  await expect(inspector).toContainText('Latest input');
+  await expect(inspector).toContainText('Current target: second');
+  await page.getByLabel('Input variables JSON').fill('{broken');
+  await expect(inspector.getByRole('alert')).toContainText('Showing the last valid preview');
+  await expect(inspector).toContainText('Current target: second');
+  await page.getByLabel('Input variables JSON').fill('{"target":"final"}');
+  await expect(inspector).toContainText('Current target: final');
+  await page.getByLabel('Task', { exact: true }).fill('');
+  await expect(inspector.getByText('(No task input)', { exact: true })).toBeVisible();
+  await page.getByLabel('Task', { exact: true }).fill('Final task');
+  await expect(inspector.getByText('Final task', { exact: true })).toBeVisible();
+  const unsaved = await (await page.request.get('/api/v1/bootstrap')).json();
+  expect(unsaved.presets).toEqual(before.presets);
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await page.getByRole('button', { name: 'Inspector', exact: true }).click();
+  await inspector.getByText('Prepared request', { exact: true }).first().click();
+  await expect(inspector).toContainText('Current target: final');
+  await expect(inspector).toContainText('Final task');
+});
 
 test('edit, preview, real file tool, inspect trace, and refresh without another run', async ({
   page,
@@ -26,8 +142,8 @@ test('edit, preview, real file tool, inspect trace, and refresh without another 
     .getByLabel('Base identity template')
     .fill('Analyze only with recorded evidence. Browser contract marker.');
   await page.getByLabel('Task', { exact: true }).fill('/read README.md');
-  await page.getByRole('button', { name: 'Save & preview', exact: true }).click();
-  await expect(page.getByText('Frozen', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(page.getByText('Live draft', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Run', exact: true }).click();
   await expect(page.getByTestId('run-status')).toHaveText('succeeded');
   await expect(page.locator('.markdown')).toContainText('Local MCP and browser test workspace.');
@@ -64,12 +180,11 @@ test('reject a tool and cancel the next turn', async ({ page }) => {
   await startTask(page, '/slow');
   await page.getByRole('button', { name: 'Stop run' }).click();
   await expect(page.getByTestId('run-status')).toHaveText('cancelled');
-  await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeEnabled();
 });
 
-test('settings save real endpoint references and invalidate a prepared preview', async ({
-  page,
-}) => {
+test('settings save real endpoint references and refresh the live preview', async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel('Task', { exact: true }).fill('configuration draft');
   await page.getByRole('button', { name: 'Preview', exact: true }).click();
@@ -151,7 +266,7 @@ test('the workbench remains usable on a narrow viewport', async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel('Task', { exact: true }).fill('Check narrow layout');
   await page.getByRole('button', { name: 'Preview', exact: true }).click();
-  await expect(page.getByText('Frozen', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live draft', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
   const width = await page.evaluate(() => ({
     content: document.documentElement.scrollWidth,

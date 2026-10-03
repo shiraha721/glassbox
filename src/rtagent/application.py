@@ -3,14 +3,21 @@
 import asyncio
 import re
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 from rtagent.domain import (
     AppError,
+    DraftPreviewRequest,
     MemoryDocument,
     MemorySave,
     Message,
+    Preset,
     Preview,
     PreviewRequest,
+    ProjectCreate,
+    ProjectView,
+    PromptInspection,
     ResumeRequest,
     RunView,
     SkillDocument,
@@ -37,34 +44,138 @@ class Studio:
         self.repository, self.registry, self.runner = repository, registry, runner
         self.commands = asyncio.Lock()
 
-    async def workspace(self, refresh: bool = False) -> WorkspaceView:
+    async def workspace_registry(self, project_id: str | None = None) -> ToolRegistry:
+        """Resolve native files/tools from the selected project, never from model arguments."""
+        root = (
+            Path((await self.repository.project(project_id))["workspace_root"])
+            if project_id
+            else self.registry.workspace
+        )
+        return self.registry.for_workspace(root)
+
+    async def create_project(self, request: ProjectCreate) -> ProjectView:
+        """Register an existing absolute workspace folder without creating or copying files."""
+        root = Path(request.workspace_root).expanduser()
+        if not root.is_absolute():
+            raise AppError(
+                "workspace_path", "Use an absolute path to an existing workspace folder."
+            )
+        try:
+            root = await asyncio.to_thread(root.resolve, strict=True)
+            is_directory = await asyncio.to_thread(root.is_dir)
+        except OSError as exc:
+            raise AppError(
+                "workspace_path", "The workspace folder does not exist or is inaccessible."
+            ) from exc
+        if not is_directory:
+            raise AppError("workspace_path", "The workspace path must be a directory.")
+        if root.is_relative_to(self.registry.files.data_dir):
+            raise AppError("workspace_path", "Application runtime data cannot be a workspace.")
+        return ProjectView.model_validate(
+            await self.repository.create_project(request.name, str(root))
+        )
+
+    async def workspace(
+        self, refresh: bool = False, project_id: str | None = None
+    ) -> WorkspaceView:
         """Read editable workspace context and probe the configured sandbox."""
-        skills, errors = await asyncio.to_thread(self.registry.files.skills)
+        registry = await self.workspace_registry(project_id)
+        skills, errors = await asyncio.to_thread(registry.files.skills)
         return WorkspaceView(
-            root=str(self.registry.workspace),
-            sandbox=await self.registry.sandbox.status(refresh),
-            memory=await asyncio.to_thread(self.registry.files.memory),
+            root=str(registry.workspace),
+            sandbox=await registry.sandbox.status(refresh),
+            instructions=await asyncio.to_thread(registry.files.instructions),
+            memory=await asyncio.to_thread(registry.files.memory),
             skills=[
                 {key: value for key, value in skill.items() if key != "content"} for skill in skills
             ],
             skill_errors=errors,
         )
 
-    async def save_memory(self, request: MemorySave) -> MemoryDocument:
+    async def save_memory(
+        self, request: MemorySave, project_id: str | None = None
+    ) -> MemoryDocument:
         """Persist a user-authored note without silently overwriting a concurrent edit."""
-        await asyncio.to_thread(self.registry.files.write, MEMORY_PATH, **request.model_dump())
-        return MemoryDocument.model_validate(await asyncio.to_thread(self.registry.files.memory))
+        registry = await self.workspace_registry(project_id)
+        await asyncio.to_thread(registry.files.write, MEMORY_PATH, **request.model_dump())
+        return MemoryDocument.model_validate(await asyncio.to_thread(registry.files.memory))
 
-    async def skill(self, name: str) -> SkillDocument:
+    async def skill(self, name: str, project_id: str | None = None) -> SkillDocument:
         """Load the current source for the workspace editor."""
+        registry = await self.workspace_registry(project_id)
         return SkillDocument.model_validate(
-            await asyncio.to_thread(self.registry.files.load_skill, name)
+            await asyncio.to_thread(registry.files.load_skill, name)
         )
 
-    async def save_skill(self, request: SkillSave) -> SkillDocument:
+    async def save_skill(self, request: SkillSave, project_id: str | None = None) -> SkillDocument:
         """Persist a skill through the same validation used by the native tool."""
-        await asyncio.to_thread(self.registry.files.save_skill, **request.model_dump())
-        return await self.skill(request.name)
+        registry = await self.workspace_registry(project_id)
+        await asyncio.to_thread(registry.files.save_skill, **request.model_dump())
+        return await self.skill(request.name, project_id)
+
+    async def _prepare(
+        self,
+        preset: Preset,
+        config: StudioConfig,
+        history: list[dict[str, Any]],
+        user_input: str,
+        variables: dict[str, Any],
+        skills: list[str],
+        registry: ToolRegistry,
+    ) -> tuple[PromptInspection, list[Message]]:
+        """Share compilation and file capture between live inspection and immutable execution."""
+        tools = registry.selected(config)
+        encoded_tools = [tool.model_dump() for tool in tools]
+        # Shell variables also start with $. Only catalogued names are implicit skill mentions;
+        # explicit UI selections still fail clearly when a skill is unavailable.
+        catalog, _ = await asyncio.to_thread(registry.files.skills)
+        known_skills = {skill["name"] for skill in catalog}
+        mentions = re.findall(r"(?<!\S)\$([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$|[.,!?])", user_input)
+        selected_skills = skills + [name for name in mentions if name in known_skills]
+        workspace_context = await asyncio.to_thread(registry.files.context, selected_skills)
+        compiled = compile_prompt(
+            preset,
+            config,
+            [Message.model_validate(item) for item in history],
+            user_input,
+            variables,
+            encoded_tools,
+            workspace_context=workspace_context,
+        )
+        prepared = prepare(config.provider, compiled, encoded_tools)
+        return (
+            PromptInspection(
+                input_hash=compiled.input_hash,
+                compiled=compiled,
+                prepared_request=prepared,
+                tools=tools,
+            ),
+            workspace_context,
+        )
+
+    async def inspect(self, request: DraftPreviewRequest) -> PromptInspection:
+        """Compile current editor values without saving presets, sessions, or preview rows."""
+        config = await self.repository.config()
+        if config.revision != request.config_revision:
+            raise AppError("revision_conflict", "Reload the latest settings.", 409)
+        history = []
+        project_id = request.project_id
+        if request.session_id:
+            session = await self.repository.session(request.session_id)
+            if session["revision"] != request.expected_session_revision:
+                raise AppError("revision_conflict", "Reload the latest conversation.", 409)
+            history = session["messages"]
+            project_id = session["project_id"]
+        inspection, _ = await self._prepare(
+            request.preset,
+            config,
+            history,
+            request.input,
+            request.variables,
+            request.skills,
+            await self.workspace_registry(project_id),
+        )
+        return inspection
 
     async def preview(self, request: PreviewRequest) -> Preview:
         """Validate revisions and persist the immutable input that execution will consume."""
@@ -85,31 +196,19 @@ class Studio:
             raise AppError(
                 "revision_conflict", "Reload the latest preset, settings, and session.", 409
             )
-        tools = self.registry.selected(config)
-        encoded_tools = [tool.model_dump() for tool in tools]
-        # Shell variables also start with $. Only catalogued names are implicit skill mentions;
-        # explicit UI selections still fail clearly when a skill is unavailable.
-        catalog, _ = await asyncio.to_thread(self.registry.files.skills)
-        known_skills = {skill["name"] for skill in catalog}
-        mentions = re.findall(r"(?<!\S)\$([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$|[.,!?])", request.input)
-        selected_skills = request.skills + [name for name in mentions if name in known_skills]
-        workspace_context = await asyncio.to_thread(self.registry.files.context, selected_skills)
-        compiled = compile_prompt(
+        registry = await self.workspace_registry(session["project_id"])
+        inspection, workspace_context = await self._prepare(
             preset,
             config,
-            [Message.model_validate(item) for item in session["messages"]],
+            session["messages"],
             request.input,
             request.variables,
-            encoded_tools,
-            workspace_context=workspace_context,
+            request.skills,
+            registry,
         )
-        prepared = prepare(config.provider, compiled, encoded_tools)
         preview = Preview(
+            **inspection.model_dump(),
             id=uid(),
-            input_hash=compiled.input_hash,
-            compiled=compiled,
-            prepared_request=prepared,
-            tools=tools,
             expires_at=(datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
         )
         snapshot = {
@@ -119,12 +218,13 @@ class Studio:
             "history": session["messages"],
             "input": request.input,
             "variables": request.variables,
-            "tools": encoded_tools,
+            "tools": [tool.model_dump() for tool in inspection.tools],
             "session_id": session["id"],
             "session_revision": session["revision"],
-            "workspace_root": str(self.registry.workspace),
+            "workspace_root": str(registry.workspace),
+            "project_id": session["project_id"],
             "workspace_context": [message.model_dump() for message in workspace_context],
-            "prepared_request": prepared,
+            "prepared_request": inspection.prepared_request,
         }
         await self.repository.put_preview(
             preview.id, {**preview.model_dump(), "snapshot": snapshot}
@@ -178,6 +278,7 @@ class Studio:
         }
         values.update(
             input=run["snapshot"]["input"],
+            workspace_root=run["snapshot"]["workspace_root"],
             preset_name=run["snapshot"]["preset"]["name"],
             provider=run["snapshot"]["config"]["provider"]["adapter"],
             unknown_calls=[

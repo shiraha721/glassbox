@@ -10,6 +10,7 @@ copyFileSync(
   path.join(root, 'tests', 'fixtures', 'README.md'),
   path.join(workspaceRoot, 'README.md'),
 );
+copyFileSync(path.join(root, 'AGENTS.md'), path.join(workspaceRoot, 'AGENTS.md'));
 
 export default defineConfig({
   testDir: './e2e',

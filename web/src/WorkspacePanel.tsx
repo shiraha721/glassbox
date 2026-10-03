@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Plus, RefreshCw, X } from 'lucide-react';
 import {
   request,
+  workspacePath,
   errorMessage,
   type WorkspaceView,
   type SkillDocument,
@@ -11,27 +12,32 @@ import {
 
 /** Inspect the real sandbox and edit ordinary workspace files without a separate settings system. */
 export function WorkspacePanel({
+  projectId,
   selected,
   onSelect,
   onClose,
   onChanged,
 }: {
+  projectId: string;
   selected: string[];
   onSelect: (names: string[]) => void;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const query = useQuery({
-    queryKey: ['workspace'],
-    queryFn: () => request<WorkspaceView>('/workspace'),
+    queryKey: ['workspace', projectId],
+    queryFn: () => request<WorkspaceView>(workspacePath('', projectId)),
     refetchOnWindowFocus: false,
   });
   const [tab, setTab] = useState<'memory' | 'skills'>('memory');
   const [skill, setSkill] = useState<SkillDocument | null | undefined>();
   const [error, setError] = useState('');
-  const changed = async () => {
+  const [notice, setNotice] = useState('');
+  const changed = async (message: string) => {
     onChanged();
     await query.refetch();
+    // Hash-keyed editors remount after a save, so keep success feedback in their parent.
+    setNotice(message);
   };
   return (
     <aside className="panel workspace-panel" aria-label="Workspace files">
@@ -66,7 +72,7 @@ export function WorkspacePanel({
             <button
               className="text-button"
               onClick={() =>
-                void request('/workspace?refresh=true')
+                void request(workspacePath('?refresh=true', projectId))
                   .then(() => query.refetch())
                   .catch((caught) => setError(errorMessage(caught)))
               }
@@ -92,9 +98,10 @@ export function WorkspacePanel({
           </div>
           {tab === 'memory' ? (
             <MemoryEditor
+              projectId={projectId}
               key={query.data.memory.hash}
               memory={query.data.memory}
-              onSaved={changed}
+              onSaved={() => changed('Memory saved. New runs will use it.')}
             />
           ) : (
             <>
@@ -119,7 +126,7 @@ export function WorkspacePanel({
                     className="text-button"
                     title={item.description}
                     onClick={() =>
-                      void request<SkillDocument>(`/workspace/skills/${item.name}`)
+                      void request<SkillDocument>(workspacePath(`/skills/${item.name}`, projectId))
                         .then(setSkill)
                         .catch((caught) => setError(errorMessage(caught)))
                     }
@@ -140,14 +147,20 @@ export function WorkspacePanel({
               {skill !== undefined && (
                 <SkillEditor
                   key={skill?.hash || 'new'}
+                  projectId={projectId}
                   skill={skill}
                   onSaved={async (saved) => {
                     setSkill(saved);
-                    await changed();
+                    await changed('Skill saved. New runs will discover it.');
                   }}
                 />
               )}
             </>
+          )}
+          {notice && (
+            <p role="status" className="subtle">
+              {notice}
+            </p>
           )}
         </div>
       )}
@@ -157,9 +170,11 @@ export function WorkspacePanel({
 
 /** Use the last-read hash so saving notes cannot silently erase another run's update. */
 function MemoryEditor({
+  projectId,
   memory,
   onSaved,
 }: {
+  projectId: string;
   memory: MemoryDocument;
   onSaved: () => Promise<void>;
 }) {
@@ -170,9 +185,11 @@ function MemoryEditor({
     setBusy(true);
     setNotice('');
     try {
-      await request('/workspace/memory', 'PUT', { content, expected_hash: memory.hash });
+      await request(workspacePath('/memory', projectId), 'PUT', {
+        content,
+        expected_hash: memory.hash,
+      });
       await onSaved();
-      setNotice('Memory saved. New runs will use it.');
     } catch (caught) {
       setNotice(errorMessage(caught));
     } finally {
@@ -209,9 +226,11 @@ function MemoryEditor({
 
 /** Save only the skill fields the file format needs; bundled instructions remain inspectable. */
 function SkillEditor({
+  projectId,
   skill,
   onSaved,
 }: {
+  projectId: string;
   skill: SkillDocument | null;
   onSaved: (saved: SkillDocument) => Promise<void>;
 }) {
@@ -226,7 +245,7 @@ function SkillEditor({
     setBusy(true);
     setError('');
     try {
-      const saved = await request<SkillDocument>('/workspace/skills', 'PUT', {
+      const saved = await request<SkillDocument>(workspacePath('/skills', projectId), 'PUT', {
         name,
         description,
         instructions,

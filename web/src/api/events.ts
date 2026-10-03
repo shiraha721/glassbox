@@ -40,7 +40,11 @@ export function useRunEvents(runId: string | undefined, enabled: boolean): void 
       cursor = event.seq;
       // Coalesce token events into state reads instead of racing one request per token.
       timer ??= setTimeout(refresh, 80);
-      if (['run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) source.close();
+      if (['run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
+        // Tool writes can change memory and the skill catalog for the next turn.
+        void cache.invalidateQueries({ queryKey: ['workspace'] });
+        source.close();
+      }
     };
     eventTypes.forEach((type) => source.addEventListener(type, receive as EventListener));
     return () => {

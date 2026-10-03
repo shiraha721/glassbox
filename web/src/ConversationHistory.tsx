@@ -16,10 +16,17 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { request, type Folder, type Run, type Session, type SessionUpdate } from './api/client';
+import {
+  request,
+  type Folder,
+  type Project,
+  type Run,
+  type Session,
+  type SessionUpdate,
+} from './api/client';
 
 type Dialog =
-  | { kind: 'rename' | 'move' | 'delete' | 'fork'; session: Session }
+  | { kind: 'rename' | 'move' | 'project' | 'delete' | 'fork'; session: Session }
   | { kind: 'new-folder' }
   | { kind: 'rename-folder' | 'delete-folder'; folder: Folder };
 type Menu = { x: number; y: number } & ({ session: Session } | { folder: Folder });
@@ -28,6 +35,7 @@ type Menu = { x: number; y: number } & ({ session: Session } | { folder: Folder 
 export function ConversationHistory({
   sessions,
   folders,
+  projects,
   selected,
   busy,
   error,
@@ -38,10 +46,11 @@ export function ConversationHistory({
 }: {
   sessions: Session[];
   folders: Folder[];
+  projects: Project[];
   selected?: string;
   busy: boolean;
   error?: string;
-  onChoose: (id: string) => void;
+  onChoose: (id: string, projectId?: string) => void;
   onUpdated: () => Promise<void>;
   onRemoved: (id: string) => void;
   onAction: (operation: () => Promise<void>) => Promise<void>;
@@ -117,13 +126,17 @@ export function ConversationHistory({
       else await request(`/folders/${dialog.folder.id}`, 'DELETE');
     } else if (dialog.kind === 'rename') await update(dialog.session, { title: value.trim() });
     else if (dialog.kind === 'move') await update(dialog.session, { folder_id: value || null });
-    else if (dialog.kind === 'delete') {
+    else if (dialog.kind === 'project') {
+      await update(dialog.session, { project_id: value || null });
+      await onUpdated();
+      onChoose(dialog.session.id, value);
+    } else if (dialog.kind === 'delete') {
       await request(`/sessions/${dialog.session.id}`, 'DELETE');
       onRemoved(dialog.session.id);
     } else if (dialog.kind === 'fork') {
       await copy(dialog.session, 'fork', value || forkTurns.at(-1)?.id);
     }
-    if (dialog.kind !== 'fork') await onUpdated();
+    if (!['fork', 'project'].includes(dialog.kind)) await onUpdated();
     setDialog(null);
   };
   const rows = (items: Session[]) =>
@@ -156,15 +169,17 @@ export function ConversationHistory({
       ? 'Rename conversation'
       : dialog?.kind === 'move'
         ? 'Move to folder'
-        : dialog?.kind === 'delete'
-          ? 'Delete conversation'
-          : dialog?.kind === 'fork'
-            ? 'Fork conversation'
-            : dialog?.kind === 'rename-folder'
-              ? 'Rename folder'
-              : dialog?.kind === 'delete-folder'
-                ? 'Delete folder'
-                : 'New folder';
+        : dialog?.kind === 'project'
+          ? 'Change workspace'
+          : dialog?.kind === 'delete'
+            ? 'Delete conversation'
+            : dialog?.kind === 'fork'
+              ? 'Fork conversation'
+              : dialog?.kind === 'rename-folder'
+                ? 'Rename folder'
+                : dialog?.kind === 'delete-folder'
+                  ? 'Delete folder'
+                  : 'New folder';
   const destructive = dialog?.kind === 'delete' || dialog?.kind === 'delete-folder';
   const needsName =
     dialog?.kind === 'rename' || dialog?.kind === 'new-folder' || dialog?.kind === 'rename-folder';
@@ -307,6 +322,18 @@ export function ConversationHistory({
                   <button
                     role="menuitem"
                     disabled={!!menu.session.active_run_id}
+                    onClick={() =>
+                      openDialog(
+                        { kind: 'project', session: menu.session },
+                        menu.session.project_id || '',
+                      )
+                    }
+                  >
+                    <FolderInput size={15} /> Change workspace
+                  </button>
+                  <button
+                    role="menuitem"
+                    disabled={!!menu.session.active_run_id}
                     onClick={() => {
                       const source = menu.session;
                       setMenu(null);
@@ -415,6 +442,31 @@ export function ConversationHistory({
                     ))}
                   </select>
                 </label>
+              )}
+              {dialog.kind === 'project' && (
+                <>
+                  <label>
+                    Project
+                    <select
+                      aria-label="Conversation project"
+                      autoFocus
+                      value={value}
+                      onChange={(event) => setValue(event.target.value)}
+                      disabled={busy}
+                    >
+                      <option value="">Default workspace</option>
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="subtle">
+                    Future Runs use this project's folder. Saved Runs retain their original
+                    workspace and evidence.
+                  </p>
+                </>
               )}
               {dialog.kind === 'fork' && (
                 <>

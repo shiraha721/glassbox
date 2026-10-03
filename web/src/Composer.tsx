@@ -11,7 +11,17 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { errorMessage, type Block, type Preset } from './api/client';
+import { useQuery } from '@tanstack/react-query';
+import {
+  errorMessage,
+  request,
+  workspacePath,
+  type Block,
+  type Preset,
+  type WorkspaceView,
+  type SkillInfo,
+  type SkillDocument,
+} from './api/client';
 
 type Props = {
   preset: Preset;
@@ -27,6 +37,14 @@ type Props = {
   onDiscard?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  projectId: string;
+  workspace?: WorkspaceView;
+  workspaceError?: string;
+  selectedSkills: string[];
+  input: string;
+  onSkills: (names: string[]) => void;
+  onWorkspace: () => void;
+  onRefreshContext: () => void;
 };
 
 /** Keep visual ordering aligned with the compiler's two insertion slots. */
@@ -36,7 +54,7 @@ function ordered(blocks: Block[]): Block[] {
     .map((block, index) => ({ ...block, order: (index + 1) * 10 }));
 }
 
-/** Edit an embedded preset; every edit invalidates the parent workspace's preview. */
+/** Edit preset blocks beside the file context in the compiler's actual message order. */
 export function Composer({
   preset,
   presets,
@@ -51,6 +69,14 @@ export function Composer({
   onDiscard,
   canUndo,
   canRedo,
+  projectId,
+  workspace,
+  workspaceError,
+  selectedSkills,
+  input,
+  onSkills,
+  onWorkspace,
+  onRefreshContext,
 }: Props) {
   const [renamingId, setRenamingId] = useState('');
   const update = (blocks: Block[]) => onChange({ ...preset, blocks: ordered(blocks) });
@@ -214,7 +240,7 @@ export function Composer({
               </div>
               <p className="subtle slot-description">
                 {placement === 'before_history'
-                  ? 'Persistent instructions, followed by conversation history.'
+                  ? 'Preset instructions, followed by workspace files and conversation history.'
                   : 'Additional context, followed by your next message.'}
               </p>
               {preset.blocks.map(
@@ -250,7 +276,106 @@ export function Composer({
                 <div className="slot-empty">No blocks in this position</div>
               )}
               {placement === 'before_history' && (
-                <div className="history-boundary">Conversation history</div>
+                <>
+                  <section className="prompt-context" aria-label="Workspace prompt context">
+                    <div className="slot-heading">
+                      <h3>Workspace context</h3>
+                      <button className="text-button" onClick={onRefreshContext}>
+                        Refresh files
+                      </button>
+                    </div>
+                    <p className="subtle">
+                      File sources · captured once for each Run · system messages
+                    </p>
+                    {workspaceError && (
+                      <p role="alert" className="error-text">
+                        {workspaceError}
+                      </p>
+                    )}
+                    {!workspace && !workspaceError && (
+                      <p className="subtle">Loading workspace files…</p>
+                    )}
+                    {workspace && (
+                      <>
+                        <details className="context-file">
+                          <summary>
+                            <strong>AGENTS.md</strong>
+                            <span className="badge">
+                              {workspace.instructions ? 'Included' : 'Not found'}
+                            </span>
+                          </summary>
+                          <div className="context-file-body">
+                            <p className="subtle">
+                              workspace:AGENTS.md · root instructions · literal file content
+                            </p>
+                            {workspace.instructions ? (
+                              <pre>{workspace.instructions.content || '(Empty file)'}</pre>
+                            ) : (
+                              <p className="subtle">
+                                Create AGENTS.md in the workspace root to add project instructions.
+                              </p>
+                            )}
+                          </div>
+                        </details>
+                        <details className="context-file">
+                          <summary>
+                            <strong>Workspace memory</strong>
+                            <span className="badge">
+                              {workspace.memory.content ? 'Included' : 'Empty'}
+                            </span>
+                          </summary>
+                          <div className="context-file-body">
+                            <p className="subtle">workspace:memory · {workspace.memory.path}</p>
+                            <pre>{workspace.memory.content || '(No saved notes)'}</pre>
+                            <button className="text-button" onClick={onWorkspace}>
+                              Edit memory in Workspace
+                            </button>
+                          </div>
+                        </details>
+                        <details className="context-file" open>
+                          <summary>
+                            <strong>Skill catalog</strong>
+                            <span className="badge">{workspace.skills.length} available</span>
+                          </summary>
+                          <div className="context-file-body">
+                            <p className="subtle">
+                              workspace:skills · descriptions are included; bodies load when
+                              selected, mentioned, or requested by the agent.
+                            </p>
+                            {workspace.skills.map((skill) => (
+                              <SkillPrompt
+                                key={skill.name}
+                                projectId={projectId}
+                                skill={skill}
+                                selected={selectedSkills.includes(skill.name)}
+                                mentioned={new RegExp(
+                                  `(^|\\s)\\$${skill.name}(?=\\s|$|[.,!?])`,
+                                ).test(input)}
+                                busy={busy}
+                                onSelect={(checked) =>
+                                  onSkills(
+                                    checked
+                                      ? [...selectedSkills, skill.name]
+                                      : selectedSkills.filter((name) => name !== skill.name),
+                                  )
+                                }
+                              />
+                            ))}
+                            {Object.entries(workspace.skill_errors).map(([name, message]) => (
+                              <p className="error-text" key={name}>
+                                {name}: {message}
+                              </p>
+                            ))}
+                            <button className="text-button" onClick={onWorkspace}>
+                              Create or edit Skills in Workspace
+                            </button>
+                          </div>
+                        </details>
+                      </>
+                    )}
+                  </section>
+                  <div className="history-boundary">Conversation history</div>
+                </>
               )}
             </section>
           ))}
@@ -258,6 +383,7 @@ export function Composer({
             <Plus size={15} />
             Add message block
           </button>
+          <div className="history-boundary">Your message · inserted once</div>
         </div>
         <div className="panel-footer">
           <button className="button" disabled={!dirty || busy} onClick={onDiscard}>
@@ -274,6 +400,60 @@ export function Composer({
         </div>
       </div>
     </aside>
+  );
+}
+
+/** Select a file-backed skill and load its body only when included or opened for inspection. */
+function SkillPrompt({
+  projectId,
+  skill,
+  selected,
+  mentioned,
+  busy,
+  onSelect,
+}: {
+  projectId: string;
+  skill: SkillInfo;
+  selected: boolean;
+  mentioned: boolean;
+  busy: boolean;
+  onSelect: (checked: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const query = useQuery({
+    queryKey: ['skill', projectId, skill.name, skill.hash],
+    queryFn: () => request<SkillDocument>(workspacePath(`/skills/${skill.name}`, projectId)),
+    enabled: open || selected || mentioned,
+  });
+  return (
+    <div className="prompt-skill">
+      <div className="row-between">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            aria-label={`Include ${skill.name} in prompt`}
+            checked={selected || mentioned}
+            disabled={busy || mentioned}
+            onChange={(event) => onSelect(event.target.checked)}
+          />
+          {skill.name}
+        </label>
+        <span className="subtle">
+          {mentioned ? 'Mentioned in task' : selected ? 'Body included' : 'On demand'}
+        </span>
+      </div>
+      <p className="subtle">{skill.description}</p>
+      <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+        <summary>{skill.path} · view source</summary>
+        {query.isPending && <p className="subtle">Loading skill…</p>}
+        {query.isError && (
+          <p role="alert" className="error-text">
+            {query.error.message}
+          </p>
+        )}
+        {query.data && <pre>{query.data.content}</pre>}
+      </details>
+    </div>
   );
 }
 

@@ -171,6 +171,7 @@ class ToolRegistry:
         """Bind local tools to one resolved workspace and seed the native catalog."""
         self.workspace = workspace.resolve()
         self.files = Workspace(self.workspace, data_dir)
+        self.workspaces: dict[Path, ToolRegistry] = {}
         if os.name == "nt":
             from rtagent.windows_sandbox import WindowsSandbox
 
@@ -180,6 +181,17 @@ class ToolRegistry:
         self.catalog: dict[str, ToolDefinition] = {}
         self.errors: dict[str, str] = {}
         self.reset()
+
+    def for_workspace(self, root: Path) -> "ToolRegistry":
+        """Bind native tools to a chosen root while sharing current stateless MCP discovery."""
+        root = root.resolve()
+        if root == self.workspace:
+            return self
+        if root not in self.workspaces:
+            self.workspaces[root] = ToolRegistry(root, self.files.data_dir)
+        registry = self.workspaces[root]
+        registry.catalog, registry.errors = self.catalog, self.errors
+        return registry
 
     def reset(self) -> None:
         """Discard discovered schemas when connection configuration changes."""

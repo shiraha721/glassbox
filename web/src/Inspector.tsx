@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download, X } from 'lucide-react';
-import { request, type Preview, type Run, type Trace } from './api/client';
+import { request, type PromptInspection, type Run, type Trace } from './api/client';
 
 /** Render structured evidence as text; provider and tool payloads never become executable HTML. */
 export function Json({ value }: { value: unknown }) {
@@ -11,12 +11,16 @@ export function Json({ value }: { value: unknown }) {
 /** Inspect preview provenance or the saved evidence for every model and tool invocation. */
 export function Inspector({
   preview,
+  previewUpdating,
+  previewError,
   run,
   tab,
   onTab,
   onClose,
 }: {
-  preview: Preview | null;
+  preview: PromptInspection | null;
+  previewUpdating: boolean;
+  previewError: string;
   run?: Run;
   tab: 'preview' | 'trace';
   onTab: (tab: 'preview' | 'trace') => void;
@@ -45,6 +49,19 @@ export function Inspector({
         </button>
       </div>
       <div className="inspector-content">
+        {tab === 'preview' && (
+          <div className="preview-state" role="status" aria-live="polite">
+            {previewError ? (
+              <p role="alert" className="error-text">
+                {previewError} {preview && 'Showing the last valid preview.'}
+              </p>
+            ) : previewUpdating ? (
+              <span>Updating preview… {preview && 'Showing the previous draft.'}</span>
+            ) : preview ? (
+              <span>Live preview · updates as you edit · Run captures current input</span>
+            ) : null}
+          </div>
+        )}
         {tab === 'preview' &&
           (preview ? (
             <>
@@ -68,7 +85,9 @@ export function Inspector({
               </p>
               <div className="hash">
                 <span>{preview.input_hash.slice(0, 20)}</span>
-                <span className="badge">Frozen</span>
+                <span className="badge">
+                  {previewUpdating || previewError ? 'Previous draft' : 'Live draft'}
+                </span>
               </div>
               <h3>Final message sequence</h3>
               {preview.compiled.messages.map((message, index) => (
@@ -84,7 +103,14 @@ export function Inspector({
                       {message.source}
                     </span>
                   </summary>
-                  <pre>{message.content || '(Tool call)'}</pre>
+                  <pre>
+                    {message.content ||
+                      (message.tool_calls.length
+                        ? '(Tool call)'
+                        : message.source === 'current_input'
+                          ? '(No task input)'
+                          : '(Empty message)')}
+                  </pre>
                   {message.tool_calls.length > 0 && <Json value={message.tool_calls} />}
                 </details>
               ))}
@@ -131,6 +157,7 @@ export function Inspector({
               <p className="subtle">
                 Run {run.id.slice(0, 8)} · {new Date(run.created_at).toLocaleString()}
               </p>
+              <p className="workspace-path">Run workspace: {run.workspace_root}</p>
               <div className="metric-grid">
                 <div>
                   <strong>{String(run.usage.input_tokens ?? '—')}</strong>

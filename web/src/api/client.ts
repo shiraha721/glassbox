@@ -4,9 +4,13 @@ export type Preset = components['schemas']['Preset-Output'];
 export type Block = components['schemas']['Block-Output'];
 export type Config = components['schemas']['StudioConfig-Output'];
 export type Preview = components['schemas']['Preview'];
+export type PromptInspection = components['schemas']['PromptInspection'];
+export type DraftPreviewRequest = components['schemas']['DraftPreviewRequest'];
+export type SkillInfo = components['schemas']['SkillInfo'];
 export type Run = components['schemas']['RunView'];
 export type Session = components['schemas']['SessionView'];
 export type Folder = components['schemas']['FolderView'];
+export type Project = components['schemas']['ProjectView'];
 export type SessionUpdate = components['schemas']['SessionUpdate'];
 export type SessionCopy = components['schemas']['SessionCopy'];
 export type Bootstrap = components['schemas']['Bootstrap'];
@@ -35,8 +39,10 @@ export async function request<T>(
   method = 'GET',
   body?: unknown,
   key?: string,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
+    signal,
     method,
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
@@ -62,6 +68,11 @@ export async function request<T>(
 /** Convert arbitrary caught failures into an actionable display string. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The operation could not be completed.';
+}
+
+/** Address ordinary files in the selected project, retaining any explicit query options. */
+export function workspacePath(path: string, projectId: string): string {
+  return `/workspace${path}${projectId ? `${path.includes('?') ? '&' : '?'}project_id=${encodeURIComponent(projectId)}` : ''}`;
 }
 
 /** Check execution states shared by controls, polling, and event-stream cleanup. */

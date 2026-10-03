@@ -90,7 +90,7 @@ Dependency declarations are [pyproject.toml](../../pyproject.toml) and [web/pack
 | [alembic.ini](../../alembic.ini) | Migration script location and default database URL. | Startup/CLI share one app-schema upgrade path. |
 | [web/package.json](../../web/package.json) / [package-lock.json](../../web/package-lock.json) | npm scripts/declarations/resolved graph. | Build/lint/typecheck/test/API generation are supported actual commands. |
 | [vite.config.ts](../../web/vite.config.ts) | React plugin, /api proxy to port 8001, jsdom test inclusion. | Vite dev UI uses the same backend transport boundary as the production SPA. |
-| [playwright.config.ts](../../web/playwright.config.ts) | Creates a unique var/e2e-* workspace/data root, copies safe fixture README, runs one fake-model server at 8765 and one worker. | Real browser checks cannot alter the user's workspace/history or accidentally call a model. |
+| [playwright.config.ts](../../web/playwright.config.ts) | Creates a unique var/e2e-* workspace/data root, copies safe fixture README and literal AGENTS.md, runs one fake-model server at 8765 and one worker. | Real browser checks cannot alter the user's workspace/history or accidentally call a model. |
 | [eslint.config.js](../../web/eslint.config.js) | Flat recommended JS/TS/hook rules with generated/dist/dependency/report ignores. | Generated contracts and bundles are not hand-authored source lint targets. |
 | [tsconfig.json](../../web/tsconfig.json) | One strict noEmit configuration for src, e2e, and root TypeScript config; browser/Node/Vitest types and unused-symbol checks. | The existing app/test/tooling files share explicit compiler rules without fabricated project-reference files. |
 | [.prettierrc.json](../../web/.prettierrc.json) | Frontend formatter choices. | Consistent source/config output independent of backend formatters. |
@@ -278,20 +278,22 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`start`](../../tests/test_api.py#L7) | Create session, inspect Preview, and submit a Run for a case. | Read bootstrap revisions, POST session/preview, consume its hash with session ID as key, assert 200/202, return Run/body/session/Preview. | Cases share correct public setup while direct-submission behavior is tested separately. |
-| [`wait_state`](../../tests/test_api.py#L34) | Await an expected Run state without silent failure. | Poll up to 150 times at 30 ms; return expected state or pytest.fail on unexpected failed/cancelled/timeout. | Async graph cases assert completed behavior instead of racing state reads. |
-| [`test_preview_run_trace_and_idempotency`](../../tests/test_api.py#L46) | Protect optional inspection/execution identity and saved events. | Resubmit same key, inspect exact prepared body/no fake wire body, committed single input/revision, event sequences/replay and ahead-cursor 410. | One accepted task must produce one Run and explainable saved evidence through reconnect. |
-| [`test_native_file_tool_returns_to_model`](../../tests/test_api.py#L68) | Protect tool result pairing and second model step. | Submit /read, assert assistant/tool/assistant sequence, original call ID, real file content, and two model receipts. | File execution completes the vertical loop rather than stopping at a displayed tool intent. |
-| [`test_direct_run_retries_and_frozen_memory`](../../tests/test_api.py#L80) | Protect direct task submission and immutable initial context. | Edit notes, run /echo through approval, change memory while waiting, reject stale hash/different-key input, retry unchanged task, inspect original note in every model receipt. | Active/final Run inputs cannot drift with subsequent file edits and Preview is optional. |
-| [`test_approval_stops_before_execution`](../../tests/test_api.py#L130) | Protect both approve and reject boundaries. | Parameterize decision, wait for approval, assert no successful tool effect yet, submit choice, inspect real success or tool_denied paired message. | Prompt requests cannot execute ask tools before a human decision and denial still returns a protocol-valid result. |
-| [`test_cancel_and_redacted_export`](../../tests/test_api.py#L152) | Protect Stop/history isolation and outward masking. | Cancel /slow, assert idle revision-0 session, execute synthetic secret task, inspect redacted export without token. | Cancelled text is not committed history; exported review copies do not expose common credential patterns. |
-| [`test_access_boundary_and_stale_preview`](../../tests/test_api.py#L167) | Protect local browser boundary and versioned consumption. | Reject foreign Origin/cross-site Host, assert direct headerless access/no cookies, reject old preview after history change, delete idle conversation and verify Run removal. | Local simplicity retains concrete origin/ownership/version checks without a login mechanism. |
-| [`test_approval_checkpoint_survives_runner_restart`](../../tests/test_api.py#L196) | Protect durable approval continuation. | Wait/checkpoint, close Runner, reopen same stores, approve through API, assert completed recorded result, close replacement. | User approval survives process-owned worker replacement without creating a new task or losing the paused graph position. |
+| [`start`](../../tests/test_api.py#L52) | Create session, inspect Preview, and submit a Run for a case. | Read bootstrap revisions, POST session/preview, consume its hash with session ID as key, assert 200/202, return Run/body/session/Preview. | Cases share correct public setup while direct-submission behavior is tested separately. |
+| [`wait_state`](../../tests/test_api.py#L79) | Await an expected Run state without silent failure. | Poll up to 150 times at 30 ms; return expected state or pytest.fail on unexpected failed/cancelled/timeout. | Async graph cases assert completed behavior instead of racing state reads. |
+| [`test_draft_inspection_is_live_and_does_not_persist`](../../tests/test_api.py#L10) | Protect live unsaved compilation and file provenance. | Change inline block/variables/input/selected skill, check missing-variable failure, unchanged saved preset/session counts and zero preview rows. | Inspection must not autosave, create Runs, or lose the source of workspace instructions. |
+| [`test_preview_run_trace_and_idempotency`](../../tests/test_api.py#L91) | Protect optional inspection/execution identity and saved events. | Resubmit same key, inspect exact prepared body/no fake wire body, committed single input/revision, event sequences/replay and ahead-cursor 410. | One accepted task must produce one Run and explainable saved evidence through reconnect. |
+| [`test_native_file_tool_returns_to_model`](../../tests/test_api.py#L113) | Protect tool result pairing and second model step. | Submit /read, assert assistant/tool/assistant sequence, original call ID, real file content, and two model receipts. | File execution completes the vertical loop rather than stopping at a displayed tool intent. |
+| [`test_direct_run_retries_and_frozen_memory`](../../tests/test_api.py#L125) | Protect direct task submission and immutable initial context. | Edit notes, run /echo through approval, change memory while waiting, reject stale hash/different-key input, retry unchanged task, inspect original note in every model receipt. | Active/final Run inputs cannot drift with subsequent file edits and Preview is optional. |
+| [`test_approval_stops_before_execution`](../../tests/test_api.py#L175) | Protect both approve and reject boundaries. | Parameterize decision, wait for approval, assert no successful tool effect yet, submit choice, inspect real success or tool_denied paired message. | Prompt requests cannot execute ask tools before a human decision and denial still returns a protocol-valid result. |
+| [`test_cancel_and_redacted_export`](../../tests/test_api.py#L197) | Protect Stop/history isolation and outward masking. | Cancel /slow, assert idle revision-0 session, execute synthetic secret task, inspect redacted export without token. | Cancelled text is not committed history; exported review copies do not expose common credential patterns. |
+| [`test_access_boundary_and_stale_preview`](../../tests/test_api.py#L212) | Protect local browser boundary and versioned consumption. | Reject foreign Origin/cross-site Host, assert direct headerless access/no cookies, reject old preview after history change, delete idle conversation and verify Run removal. | Local simplicity retains concrete origin/ownership/version checks without a login mechanism. |
+| [`test_approval_checkpoint_survives_runner_restart`](../../tests/test_api.py#L241) | Protect durable approval continuation. | Wait/checkpoint, close Runner, reopen same stores, approve through API, assert completed recorded result, close replacement. | User approval survives process-owned worker replacement without creating a new task or losing the paused graph position. |
 
 <details>
 <summary>Source signatures (including private and nested functions)</summary>
 
 ```python
+async def test_draft_inspection_is_live_and_does_not_persist(studio_client)
 async def start(client, text='Hello')
 async def wait_state(client, run_id, expected)
 async def test_preview_run_trace_and_idempotency(studio_client)
@@ -465,6 +467,7 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
+| [`test_starter_upgrade_is_idempotent_and_preserves_user_text`](../../tests/test_storage.py#L28) | Protect safe starter upgrades. | Store recognized old text with normalized disabled order, restart twice, then restart after a user edit and compare content/revisions. | Better defaults cannot overwrite user instructions or generate a new revision on every startup. |
 | [`test_migration_persistence_and_revision_conflict`](../../tests/test_storage.py#L7) | Protect durable schema/seed/data and stale-write rejection. | Initialize, advance config revision, reject old revision, verify seeded preset, save a session, close/reopen, and assert retained values. | Database lifecycle must preserve user edits rather than reseed/reset data on each startup. |
 
 <details>
@@ -472,6 +475,7 @@ Every function below belongs to the layer named above. The last column identifie
 
 ```python
 async def test_migration_persistence_and_revision_conflict(tmp_path)
+async def test_starter_upgrade_is_idempotent_and_preserves_user_text(tmp_path)
 ```
 
 These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
@@ -542,9 +546,9 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`openWorkspace`](../../web/e2e/studio.spec.ts#L5) | Open the app and create fresh conversation. | Navigate /, assert workspace attached, open responsive sidebar if needed, create history, and assert Preview disabled with no task. | Every case starts through real local UI without login or accidental prior task input. |
-| [`startTask`](../../web/e2e/studio.spec.ts#L15) | Submit one task directly. | Fill Task and click Run, without clicking Preview. | Browser acceptance protects the direct operational workflow the product promises. |
-| [`actions`](../../web/e2e/studio.spec.ts#L208) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
+| [`openWorkspace`](../../web/e2e/studio.spec.ts#L6) | Open the app and create fresh conversation. | Navigate /, assert workspace attached, open responsive sidebar if needed, create history, and assert Preview disabled with no task. | Every case starts through real local UI without login or accidental prior task input. |
+| [`startTask`](../../web/e2e/studio.spec.ts#L17) | Submit one task directly. | Fill Task and click Run, without clicking Preview. | Browser acceptance protects the direct operational workflow the product promises. |
+| [`actions`](../../web/e2e/studio.spec.ts#L323) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
 
 ### Registered frontend verification callbacks
 
@@ -567,3 +571,92 @@ Each row describes a concrete anonymous `test`/`it` function. Nested interaction
 ## What these checks establish
 
 Pure compiler cases establish deterministic local computation. Mocked provider transport establishes application-level serialization/normalization, not a remote server's behavior. ASGI cases establish HTTP/use-case/SQLite/checkpoint logic without a listening socket. Smoke scripts establish listening HTTP plus actual native OS tools and files. Browser cases establish visible workflows with the built SPA. All use explicit fake decisions or mocked/local endpoints. Substantial live-model coding/analysis and stateful specialized MCP acceptance remain required before later delivery stages can be declared complete.
+
+## migrations/versions/0004_projects.py
+
+**Layer: Engineering / application schema migration.** Adds named workspace roots and nullable conversation membership.
+
+**Connections and effects:** Alembic changes application tables only; root snapshots and third-party checkpoints remain untouched.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`upgrade`](../../migrations/versions/0004_projects.py#L12) | Add project storage and conversation linkage. | Create projects with unique root, then ALTER TABLE sessions ADD COLUMN with an inline FK. | In-place alteration avoids rebuilding sessions and cascade-deleting owned Runs under SQLite foreign-key enforcement; existing sessions keep null/default membership. |
+| [`downgrade`](../../migrations/versions/0004_projects.py#L25) | Remove project selection while preserving history. | Drop the nullable membership column in place, then the projects table. | Metadata rollback does not modify immutable Run evidence or checkpoint internals. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def upgrade() -> None
+def downgrade() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/acceptance_stage2.py
+
+**Layer: Engineering / opt-in external acceptance.** Checks a real model working in a registered Windows project folder.
+
+**Connections and effects:** Requires --live, reads the running service provider references, uses isolated HTTP port 8768/data/files, preserves evidence under ignored var, and restarts its owned server.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`api`](../../scripts/acceptance_stage2.py#L80) | Send one acceptance request. | Use actual HTTP with per-Run idempotency keys and fail on application errors. | Successful object construction alone cannot establish a working Web/API execution path. |
+| [`start_server`](../../scripts/acceptance_stage2.py#L90) | Open an isolated acceptance lifecycle. | Start Uvicorn on 8768, wait for readiness with a bounded deadline, and return server/task ownership. | Acceptance cannot mutate the user database and can verify restart persistence. |
+| [`run_task`](../../scripts/acceptance_stage2.py#L105) | Execute one real task and audit its evidence. | Create a project-bound session, submit directly, await success, check wire/prepared equality and canonical source/tool-ID pairing, and return safe summary plus local trace. | A fluent final answer or simulated tool decision is insufficient acceptance evidence. |
+| [`verify_invoice`](../../scripts/acceptance_stage2.py#L174) | Independently check the fixed behavior. | Run immutable check.ps1 through the selected project registry and OS sandbox, asserting exit/output. | The model cannot pass by claiming success or weakening the acceptance check. |
+| [`exercise`](../../scripts/acceptance_stage2.py#L189) | Accept coding, memory, Skill creation and analysis. | Ask for multi-file repairs and failing/passing checks, verify unchanged user fixtures, guarded memory writes, saved/reloaded Skill and a concrete path-boundary finding. | Representative work demonstrates a local agent beyond a single echo command. |
+| [`main`](../../scripts/acceptance_stage2.py#L261) | Own opt-in setup, project registration, restart and final report. | Validate a real configured provider, create sibling default/project/data folders, run cases, restart and reuse memory/Skill in a fresh conversation, then close resources. | Saved ordinary files and registered roots must survive an application lifecycle without replaying old effects. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def api(client: httpx.AsyncClient, method: str, path: str, body: Any=None) -> Any
+async def start_server(settings: Settings) -> tuple[uvicorn.Server, asyncio.Task]
+async def run_task(client: httpx.AsyncClient, title: str, task: str, project_id: str | None=None) -> tuple[dict, dict]
+async def verify_invoice(server: uvicorn.Server, project_id: str) -> None
+async def exercise(client: httpx.AsyncClient, server: uvicorn.Server, workspace: Path, project_id: str) -> list[dict]
+async def main() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/smoke_projects.py
+
+**Layer: Engineering / offline live HTTP acceptance.** Checks sibling workspace isolation and conversation moves with simulated model decisions and real tools.
+
+**Connections and effects:** Owns temporary files/data and server port 8769; no external model requests or selected user workspace edits occur.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`exercise`](../../scripts/smoke_projects.py#L17) | Verify scoped data/tools and immutable historical roots. | Register two roots, run file/native commands, save distinct memory/Skills, inspect sources, move idle history, fork, and reject a busy move. | Project metadata must bind the full vertical workflow rather than only relabel a sidebar. |
+| [`exercise.api`](../../scripts/smoke_projects.py#L20) | Submit a local acceptance request. | Send HTTP JSON/idempotency header and require a success status. | Each assertion covers the actual API path. |
+| [`exercise.start`](../../scripts/smoke_projects.py#L45) | Start a current project-bound task. | Read its latest revision and post direct Run input. | No Preview prerequisite or browser-only workspace selection is accepted. |
+| [`exercise.finish`](../../scripts/smoke_projects.py#L62) | Wait for real execution completion. | Poll within a 30-second limit and require succeeded. | Async creation is not evidence of completed tools. |
+| [`main`](../../scripts/smoke_projects.py#L170) | Own isolated sibling roots and the server. | Create temporary default/project/data directories, start 8769, exercise, check default notes untouched and close the lifecycle. | Offline verification is repeatable without contaminating private project records. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def exercise(client: httpx.AsyncClient, roots: list[Path]) -> None
+async def exercise.api(method: str, path: str, body=None)
+async def exercise.start(session_id: str, text: str)
+async def exercise.finish(run)
+async def main() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>

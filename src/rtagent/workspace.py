@@ -243,16 +243,20 @@ class Workspace:
             expected_hash,
         )
 
+    def instructions(self) -> dict[str, str] | None:
+        """Read root AGENTS.md for both composition and execution, retaining its fingerprint."""
+        return self.read("AGENTS.md") if self.path("AGENTS.md").exists() else None
+
     def context(self, selected: list[str]) -> list[Message]:
         """Capture literal workspace context once, outside the pure prompt compiler."""
         messages = []
-        instructions = self.path("AGENTS.md")
-        if instructions.exists():
+        instructions = self.instructions()
+        if instructions:
             messages.append(
                 Message(
                     role="system",
                     source="workspace:AGENTS.md",
-                    content=self.read_path(instructions),
+                    content=instructions["content"],
                 )
             )
         memory = self.memory()["content"]

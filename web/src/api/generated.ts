@@ -204,6 +204,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Project
+         * @description Register a named workspace folder for new and idle conversations.
+         */
+        post: operations["create_project_api_v1_projects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{session_id}": {
         parameters: {
             query?: never;
@@ -310,6 +330,26 @@ export interface paths {
         get: operations["session_runs_api_v1_sessions__session_id__runs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/prompts/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inspect Prompt
+         * @description Inspect a live draft without persistence or provider execution.
+         */
+        post: operations["inspect_prompt_api_v1_prompts_inspect_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -609,6 +649,8 @@ export interface components {
             sessions: components["schemas"]["SessionView"][];
             /** Folders */
             folders: components["schemas"]["FolderView"][];
+            /** Projects */
+            projects: components["schemas"]["ProjectView"][];
             /** Tools */
             tools: components["schemas"]["ToolDefinition"][];
             /** Tool Errors */
@@ -659,6 +701,32 @@ export interface components {
             budget_status: string;
             /** Input Hash */
             input_hash: string;
+        };
+        /**
+         * DraftPreviewRequest
+         * @description Inspect an unsaved preset without creating a conversation or a saved preview.
+         */
+        DraftPreviewRequest: {
+            preset: components["schemas"]["Preset-Input"];
+            /** Config Revision */
+            config_revision: number;
+            /** Session Id */
+            session_id?: string | null;
+            /** Project Id */
+            project_id?: string | null;
+            /** Expected Session Revision */
+            expected_session_revision?: number | null;
+            /**
+             * Input
+             * @default
+             */
+            input: string;
+            /** Variables */
+            variables?: {
+                [key: string]: unknown;
+            };
+            /** Skills */
+            skills?: string[];
         };
         /**
          * FolderCreate
@@ -858,11 +926,9 @@ export interface components {
         };
         /**
          * Preview
-         * @description An expiring compiled input and the exact prepared provider payload.
+         * @description An expiring, persisted input that can be consumed by Run.
          */
         Preview: {
-            /** Id */
-            id: string;
             /** Input Hash */
             input_hash: string;
             compiled: components["schemas"]["CompiledPrompt"];
@@ -872,6 +938,8 @@ export interface components {
             };
             /** Tools */
             tools: components["schemas"]["ToolDefinition"][];
+            /** Id */
+            id: string;
             /** Expires At */
             expires_at: string;
         };
@@ -898,6 +966,45 @@ export interface components {
             };
             /** Skills */
             skills?: string[];
+        };
+        /**
+         * ProjectCreate
+         * @description Register an existing local folder as a conversation workspace.
+         */
+        ProjectCreate: {
+            /** Name */
+            name: string;
+            /** Workspace Root */
+            workspace_root: string;
+        };
+        /**
+         * ProjectView
+         * @description A named workspace folder; tool policy remains in the shared settings aggregate.
+         */
+        ProjectView: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Workspace Root */
+            workspace_root: string;
+            /** Created At */
+            created_at: string;
+        };
+        /**
+         * PromptInspection
+         * @description The compiled draft and prepared payload, with no persisted execution identity.
+         */
+        PromptInspection: {
+            /** Input Hash */
+            input_hash: string;
+            compiled: components["schemas"]["CompiledPrompt"];
+            /** Prepared Request */
+            prepared_request: {
+                [key: string]: unknown;
+            };
+            /** Tools */
+            tools: components["schemas"]["ToolDefinition"][];
         };
         /**
          * ProviderConfig
@@ -1014,6 +1121,8 @@ export interface components {
             session_id: string;
             /** Input */
             input: string;
+            /** Workspace Root */
+            workspace_root: string;
             /** Status */
             status: string;
             /** Stop Reason */
@@ -1088,6 +1197,8 @@ export interface components {
              * @default New investigation
              */
             title: string;
+            /** Project Id */
+            project_id?: string | null;
         };
         /**
          * SessionUpdate
@@ -1102,6 +1213,8 @@ export interface components {
             archived?: boolean | null;
             /** Folder Id */
             folder_id?: string | null;
+            /** Project Id */
+            project_id?: string | null;
         };
         /**
          * SessionView
@@ -1122,6 +1235,8 @@ export interface components {
             created_at: string;
             /** Folder Id */
             folder_id: string | null;
+            /** Project Id */
+            project_id: string | null;
             /**
              * Archived
              * @default false
@@ -1389,6 +1504,7 @@ export interface components {
             /** Root */
             root: string;
             sandbox: components["schemas"]["SandboxStatus"];
+            instructions: components["schemas"]["MemoryDocument"] | null;
             memory: components["schemas"]["MemoryDocument"];
             /** Skills */
             skills: components["schemas"]["SkillInfo"][];
@@ -1508,6 +1624,7 @@ export interface operations {
         parameters: {
             query?: {
                 refresh?: boolean;
+                project_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -1537,7 +1654,9 @@ export interface operations {
     };
     save_memory_api_v1_workspace_memory_put: {
         parameters: {
-            query?: never;
+            query?: {
+                project_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1570,7 +1689,9 @@ export interface operations {
     };
     skill_api_v1_workspace_skills__name__get: {
         parameters: {
-            query?: never;
+            query?: {
+                project_id?: string | null;
+            };
             header?: never;
             path: {
                 name: string;
@@ -1601,7 +1722,9 @@ export interface operations {
     };
     save_skill_api_v1_workspace_skills_put: {
         parameters: {
-            query?: never;
+            query?: {
+                project_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1707,6 +1830,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_api_v1_projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectView"];
                 };
             };
             /** @description Validation Error */
@@ -1965,6 +2121,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_prompt_api_v1_prompts_inspect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptInspection"];
                 };
             };
             /** @description Validation Error */

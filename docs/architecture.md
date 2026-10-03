@@ -1,6 +1,6 @@
 # Architecture and Design
 
-Last updated: 2026-10-03. This describes implemented behavior. Future work is defined in the [delivery stages](README.md#delivery-stages).
+Last updated: 2026-10-04. This describes implemented behavior. Future work is defined in the [delivery stages](README.md#delivery-stages).
 
 ## Read from the whole system to individual functions
 
@@ -49,6 +49,8 @@ web/src/                       React presentation and local editor state
   main.tsx, App.tsx            Browser bootstrap and workspace coordination
   Composer.tsx                 Prompt block controls and rule drafts
   usePresetDrafts.ts           Independent bounded undo/redo histories
+  useLivePreview.ts            Debounced draft compilation and stale-response handling
+  Projects.tsx                 Named workspace registration and navigation
   ConversationHistory.tsx     History groups, menus, and copy/metadata dialogs
   Inspector.tsx                Preview versus actual call evidence
   Settings.tsx                 Versioned execution configuration editor
@@ -87,6 +89,8 @@ These are responsibility layers, not a promise of a strict dependency-inverted f
 | Process settings | Settings, environment/.env | Paths and startup overrides for one service process; not model-editable. |
 | Current execution settings | settings row, StudioConfig revision | Edited explicitly; new Runs freeze a copy. Contains references, not actual secrets. |
 | Current preset | presets row, embedded Block values/revision | Editable aggregate; old Run copies never follow later edits. |
+| Project registration | projects and sessions.project_id | One existing absolute folder per Project; null sessions use the process default. Future Runs bind to session membership. |
+| Live draft inspection | useLivePreview and POST /prompts/inspect | No preset/session/preview writes; retain previous valid output and abort superseded requests. |
 | Successful history | sessions.messages | Only succeeded turns become subsequent model input; all other turns remain inspectable separately. |
 | Prepared input | previews JSON with 15-minute expiry | Same compiler path for optional inspection and direct Run; one consumption per preview. |
 | Run snapshot | runs.snapshot | Original configuration/history/task/schema/context/root/body, immutable through the Run and recovery. |
@@ -108,7 +112,7 @@ The application does not claim atomicity across model services, workspace edits,
 
 ## Application shape
 
-One local FastAPI process owns one LangGraph worker, SQLite persistence, concrete workspace tools, and the React Web UI. Each responsibility is a module, without generic service interfaces, brokers, or a plugin runtime.
+One local FastAPI process owns one LangGraph worker, SQLite persistence, root-bound concrete workspace tools, and the React Web UI. Each responsibility is a module, without generic service interfaces, brokers, or a plugin runtime.
 
 ```mermaid
 flowchart TD
@@ -174,7 +178,7 @@ sequenceDiagram
     API-->>UI: Numbered SSE and current projections
 ```
 
-HTTP acceptance is separate from completion. The background graph uses the saved Run even if the browser closes. UI start keeps a submission key only until it has an accepted response; a lost response can be retried unchanged. An optional Preview uses `Studio.preview` and later `StartRun`; it shares the compiler/consumption path shown above without being a mandatory preceding request.
+HTTP acceptance is separate from completion. The background graph uses the saved Run even if the browser closes. UI start keeps a submission key only until it has an accepted response; a lost response can be retried unchanged. Browser Preview uses `Studio.inspect` with an inline unsaved preset and optional project/session references. `Studio._prepare` shares file capture, compilation, and provider preparation with execution; inspection never creates persistent input records. The API also retains `Studio.preview` / `StartRun` for clients explicitly consuming a saved immutable preview. Direct Run always captures current saved input independently.
 
 ### Each model/tool cycle
 
@@ -270,11 +274,13 @@ Estimates use serialized bytes divided by four. A configured context window rese
 
 ## Workspace context, memory, and Skills
 
-STUDIO_WORKSPACE_ROOT is process configuration, not model-controlled. Root AGENTS.md and .rtagent/MEMORY.md are captured with sources workspace:AGENTS.md and workspace:memory. The catalog source is workspace:skills; selected bodies use skill:<name>. Context is frozen once per Run and is not persisted as repeated conversation turns.
+STUDIO_WORKSPACE_ROOT is the default process root. A trusted user can register an existing absolute folder as a Project; sessions store nullable project_id. Studio resolves that ID for inspection and new Runs, captures the root and project ID, and uses ToolRegistry.for_workspace to bind native file adapters and OS sandboxes. Runner dispatches from the frozen Run root, including after restart or a conversation move. Current catalog/error discovery is shared; explicit MCP transports remain outside native command isolation. Project roots are fixed registrations, not model-editable tool parameters. Changing an idle session’s Project advances its revision; active moves fail. Historical snapshots and copied wire evidence do not change.
+
+Within the selected root, root AGENTS.md and .rtagent/MEMORY.md are captured with sources workspace:AGENTS.md and workspace:memory. The catalog source is workspace:skills; selected bodies use skill:<name>. Context is frozen once per Run and is not persisted as repeated conversation turns.
 
 Memory is explicit Markdown, not hidden summarization. Reads return text/hash; save_memory requires that hash. Atomic replacement avoids partial files; stale hashes reject concurrent native edits. Shell/external edits are outside this lock, so this is not a transaction across host processes. Changes become initial context on the next Run; a current Run can read updated files explicitly and record the tool result.
 
-Skills are discovered under .agents/skills/<name>/SKILL.md plus the packaged skill-creator. YAML frontmatter requires a matching lowercase hyphenated name and a description. Only metadata enters the catalog. load_skill, explicit Workspace selection, or $skill-name loads the body. Invalid entries are reported; discovery is bounded to 100 entries. Workspace skills cannot shadow bundled skills.
+Skills are discovered under .agents/skills/<name>/SKILL.md plus the packaged skill-creator. YAML frontmatter requires a matching lowercase hyphenated name and a description. Only metadata enters the catalog. load_skill, explicit Prompt/Workspace selection, or $skill-name loads the body. Invalid entries are reported; discovery is bounded to 100 entries. Workspace skills cannot shadow bundled skills.
 
 save_skill writes validated frontmatter and Markdown instructions; updates require the current hash. The bundled creator uses those tools to author and verify a focused reusable workflow. Supporting resources remain ordinary files. Skills cannot grant permissions, load host plugins, or bypass the sandbox.
 
@@ -318,13 +324,14 @@ Actual routes under /api/v1:
 
 | Group | Behavior |
 | --- | --- |
-| /health, /bootstrap | Availability, saved config/presets/sessions/folders, tool catalog |
+| /health, /bootstrap | Availability, saved config/presets/sessions/folders/projects, tool catalog |
 | /config, /presets/{id}, /tools/refresh | Versioned edits and explicit discovery |
-| /workspace, /workspace/memory, /workspace/skills | Sandbox status, memory/skill edits; /workspace/skills/{name} loads a body |
+| /workspace, /workspace/memory, /workspace/skills | Selected-project sandbox/instructions/memory/Skills through optional project_id; /workspace/skills/{name} loads a body |
+| /projects | Register an existing named absolute workspace folder; membership is part of session metadata |
 | /sessions, /sessions/{id}, /sessions/{id}/runs | Conversations, versioned metadata edits, deletion, and saved Run history |
 | /sessions/{id}/copy | Duplicate all completed records or fork through a successful Run |
 | /folders, /folders/{id} | Create, rename, or delete flat conversation folders |
-| /prompts/preview, /runs | Optional inspection or direct execution |
+| /prompts/inspect, /prompts/preview, /runs | Nonpersisting live draft inspection, optional saved preview, or direct execution |
 | /runs/{id} subresources | State, cancel, approval, recovery, events, trace, export |
 
 Generated /openapi.json and frontend types define exact contracts. The UI opens Prompt, Inspector, and Workspace only when needed. Run is enabled for nonempty input without a preview. Draft changes invalidate optional previews. File editor saves use hashes.
@@ -344,3 +351,7 @@ Run the service and check actual behavior before growing tests. scripts/smoke_wo
 scripts/smoke_conversations.py checks management through a separate real HTTP server: copy boundaries, trace provenance, stale revisions, archive/restore, folder operations, and continuation after source deletion. Browser checks exercise preset switching/undo and the complete conversation-menu workflow.
 
 A basic live-model/native-PowerShell loop has passed on Windows; substantial coding/analysis acceptance is still required. Next stages add long-session context handling, diff review and command/process usability, then CLI/RPC/SDK and focused extension hooks. Specialized security integrations and evaluation follow real workflows. Multi-agent orchestration, more workers, PostgreSQL, and remote teams are not prerequisites for a useful local harness.
+
+## Stage 2 acceptance
+
+The Windows local-agent boundary is accepted through substantial real-model work in a registered project, native sandbox checks, per-project context/file checks, browser workflows, and existing-data migration checks. See [Stage 2 Acceptance](acceptance-stage2.md) for tasks, recorded call counts, verification commands, and unimplemented later-stage scope. This is not a claim that excluded host runtimes or network dependencies are available inside AppContainer.

@@ -1483,6 +1483,99 @@ summary::marker {
   background: #edf1f7;
   font-size: 11px;
 }
+
+/* File-backed context occupies its real compiler position inside the scrolling block list. */
+.prompt-context {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid #ced9e8;
+  border-radius: 8px;
+  background: #edf2f8;
+}
+.context-file {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+.context-file > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.context-file-body {
+  padding: 0 10px 10px;
+}
+.context-file pre,
+.prompt-skill pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.prompt-skill + .prompt-skill {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.prompt-skill summary {
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.preview-state {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.projects {
+  padding: 0 0 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.project-list {
+  max-height: 140px;
+  overflow-y: auto;
+}
+.project-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 12px;
+}
+.project-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-item[aria-pressed='true'] {
+  color: #385a85;
+  background: #e5edf8;
+}
+.workspace-caption {
+  font-size: 10px;
+  color: var(--muted);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation-heading {
+  min-width: 0;
+  flex: 1;
+}
 .composer-slot:last-of-type {
   margin-bottom: 14px;
 }

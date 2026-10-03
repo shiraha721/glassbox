@@ -25,8 +25,8 @@ Every function below belongs to the layer named above. The last column identifie
 | [`MCPServer.credential_name`](../../src/rtagent/domain.py#L142) | Validate the optional MCP bearer reference. | Delegate to the same reference validator as providers. | MCP authentication follows the same server-side secret boundary. |
 | [`MCPServer.safe_url`](../../src/rtagent/domain.py#L148) | Validate an optional MCP endpoint independently of transport. | Delegate to `endpoint_url`; an empty value is legal for stdio. | A single connection contract supports both transports without putting their lifecycle in the domain. |
 | [`MCPServer.environment_references`](../../src/rtagent/domain.py#L154) | Validate child-variable to server-variable mappings. | Require both sides to be nonempty ASCII identifiers and return the mapping. | Stdio environment values describe references, and only the transport adapter resolves their actual values. |
-| [`FolderCreate.nonempty_name`](../../src/rtagent/domain.py#L368) | Normalize a folder display name. | Reject whitespace-only text and strip surrounding whitespace after length validation. | Flat folder names remain meaningful and comparable rather than becoming invisible navigation entries. |
-| [`SessionUpdate.nonempty_title`](../../src/rtagent/domain.py#L391) | Normalize an explicitly supplied conversation title. | Preserve `None`, reject whitespace-only values, and strip valid text. | Optional metadata patches distinguish no rename from an intentional visible title. |
+| [`FolderCreate.nonempty_name`](../../src/rtagent/domain.py#L387) | Normalize a folder display name. | Reject whitespace-only text and strip surrounding whitespace after length validation. | Flat folder names remain meaningful and comparable rather than becoming invisible navigation entries. |
+| [`SessionUpdate.nonempty_title`](../../src/rtagent/domain.py#L426) | Normalize an explicitly supplied conversation title. | Preserve `None`, reject whitespace-only values, and strip valid text. | Optional metadata patches distinguish no rename from an intentional visible title. |
 
 ### Types and ownership
 
@@ -45,28 +45,32 @@ Every function below belongs to the layer named above. The last column identifie
 | [`Message`](../../src/rtagent/domain.py#L210) | Canonical model conversation item. | Explicit role/content/source, assistant tool calls, and tool-result `tool_call_id`. | SDK-independent messages retain ordering, provenance, and call/result pairing across compilation and storage. |
 | [`CompiledPrompt`](../../src/rtagent/domain.py#L220) | Pure compiler result. | Final messages, activation report, source map, estimate/budget status, and input hash. | Inspection and execution share the same evidence rather than two prompt renderers. |
 | [`PreviewRequest`](../../src/rtagent/domain.py#L231) | Direct task submission or optional inspection request. | Session/config/preset revision references, nonempty input, variables, and at most 20 explicitly selected skills. | The application can freeze actual inputs without requiring a separate Preview UI step. |
-| [`MemoryDocument`](../../src/rtagent/domain.py#L244) | Last-read workspace note. | Relative path, content, and canonical text hash. | The editor and model tool can detect a stale replacement without a memory database. |
-| [`MemorySave`](../../src/rtagent/domain.py#L252) | Explicit memory replacement command. | Bounded content and mandatory expected hash. | An edit acknowledges the exact prior document instead of silently overwriting another Run's notes. |
-| [`SkillInfo`](../../src/rtagent/domain.py#L259) | Catalog metadata for a discovered procedure. | Name/description/path, built-in flag, and source hash; no body. | Default model context stays small and the UI can select/inspect a source. |
-| [`SkillDocument`](../../src/rtagent/domain.py#L269) | Loaded procedure source. | Inherits metadata and adds full SKILL.md text. | Full instructions enter context only through selection or load_skill; provenance stays attached. |
-| [`SkillSave`](../../src/rtagent/domain.py#L275) | Skill authoring command. | Name, short description, Markdown instructions, optional expected hash. | The file adapter owns frontmatter serialization and protected updates, rather than accepting arbitrary filesystem destinations. |
-| [`SandboxStatus`](../../src/rtagent/domain.py#L284) | OS isolation probe result. | Backend label, readiness, network label, and diagnostic detail. | UI can report a real failed sandbox without making app startup or model configuration unavailable. |
-| [`WorkspaceView`](../../src/rtagent/domain.py#L293) | Editable context projection. | Root, sandbox status, memory document, skill metadata, and invalid-skill diagnostics. | File inspection is a distinct application use case, not another settings store. |
-| [`Preview`](../../src/rtagent/domain.py#L303) | Expiring frozen first input. | ID/hash, compiled prompt, prepared provider body, tool definitions, and expiry. | It is optional inspection evidence and a consumable execution input, not an authorization gate. |
-| [`StartRun`](../../src/rtagent/domain.py#L314) | Saved-preview consumption command. | Preview ID/hash and observed session revision only. | Clients cannot replace the frozen tools, settings, or prompt at execution time. |
-| [`ApprovalDecision`](../../src/rtagent/domain.py#L322) | Human decision for one pending tool call. | Literal approve/reject value; approval ID comes from the URL. | A model cannot approve a call through its generated text. |
-| [`RecoveryDecision`](../../src/rtagent/domain.py#L328) | User reconciliation of one uncertain effect. | Explicit retry or record action plus a result string. | External effects are not treated as exactly-once; callers choose whether repetition is acceptable. |
-| [`ResumeRequest`](../../src/rtagent/domain.py#L335) | Reconciliation set for a paused Run. | Mapping from application receipt IDs to RecoveryDecision. | The application requires every unknown receipt to be resolved before graph recovery. |
-| [`RunEvent`](../../src/rtagent/domain.py#L341) | Persisted browser event envelope. | Schema version, Run ID, sequence, event type, UTC timestamp, and payload. | Reconnection has a durable cursor rather than an in-memory streaming offset. |
-| [`FolderView`](../../src/rtagent/domain.py#L352) | Stored flat folder projection. | ID/name/revision/creation timestamp. | Folders organize conversations, not workspace filesystem paths. |
-| [`FolderCreate`](../../src/rtagent/domain.py#L361) | Folder creation input. | Bounded nonempty name plus normalization validator. | A minimal contract avoids nested trees or separate folder settings. |
-| [`FolderUpdate`](../../src/rtagent/domain.py#L375) | Version-bound folder rename. | Inherits creation name and adds nonnegative expected revision. | Optimistic concurrency rejects edits based on stale sidebar state. |
-| [`SessionUpdate`](../../src/rtagent/domain.py#L381) | Partial conversation metadata command. | Expected revision plus optional title/archive/folder; `model_fields_set` distinguishes omitted folder from explicit null. | Removing membership and leaving membership unchanged are different operations. |
-| [`SessionCopy`](../../src/rtagent/domain.py#L398) | Duplicate/fork command. | Revision, operation, and optional successful Run boundary. | One evidence-copy use case covers both operations without replay or checkpoint cloning. |
-| [`SessionView`](../../src/rtagent/domain.py#L406) | Public conversation projection. | ID/title/revision, active Run reference, successful committed messages, folder/archive state, and copy origin. | History for future tasks is distinct from the complete inspection list of failed/cancelled Runs. |
-| [`RunView`](../../src/rtagent/domain.py#L420) | Browser execution projection. | Input/status/messages/partial output/events/approval/error/usage/timestamps, preset/provider labels, copy source, and unknown receipts. | UI sees operational state without receiving the private execution configuration aggregate. |
-| [`CallView`](../../src/rtagent/domain.py#L442) | One durable model/tool receipt. | Application call ID, Run ID, kind/status, structured evidence, and optional result. | A receipt survives a graph-node replay and separately identifies uncertain external outcomes. |
-| [`TraceView`](../../src/rtagent/domain.py#L453) | Labeled collection of receipts. | Schema version, explicit redacted flag, and CallView list. | Sanitized evidence cannot be mistaken for an exact original request body. |
+| [`DraftPreviewRequest`](../../src/rtagent/domain.py#L244) | Nonpersisting editor inspection input. | Inline Preset, saved settings revision, optional session/project references, possibly empty task, variables and selected skills. | Unsaved composition can be inspected without saving presets, creating history, or acquiring an execution identity. |
+| [`PromptInspection`](../../src/rtagent/domain.py#L317) | Compiled draft projection. | Hash, canonical compiler result, prepared body, and selected schemas. | Inspection preserves the last valid result in the UI but is not an immutable or consumable Run snapshot. |
+| [`MemoryDocument`](../../src/rtagent/domain.py#L257) | Last-read workspace note. | Relative path, content, and canonical text hash. | The editor and model tool can detect a stale replacement without a memory database. |
+| [`MemorySave`](../../src/rtagent/domain.py#L265) | Explicit memory replacement command. | Bounded content and mandatory expected hash. | An edit acknowledges the exact prior document instead of silently overwriting another Run's notes. |
+| [`SkillInfo`](../../src/rtagent/domain.py#L272) | Catalog metadata for a discovered procedure. | Name/description/path, built-in flag, and source hash; no body. | Default model context stays small and the UI can select/inspect a source. |
+| [`SkillDocument`](../../src/rtagent/domain.py#L282) | Loaded procedure source. | Inherits metadata and adds full SKILL.md text. | Full instructions enter context only through selection or load_skill; provenance stays attached. |
+| [`SkillSave`](../../src/rtagent/domain.py#L288) | Skill authoring command. | Name, short description, Markdown instructions, optional expected hash. | The file adapter owns frontmatter serialization and protected updates, rather than accepting arbitrary filesystem destinations. |
+| [`SandboxStatus`](../../src/rtagent/domain.py#L297) | OS isolation probe result. | Backend label, readiness, network label, and diagnostic detail. | UI can report a real failed sandbox without making app startup or model configuration unavailable. |
+| [`WorkspaceView`](../../src/rtagent/domain.py#L306) | Editable project context projection. | Root, sandbox status, literal AGENTS.md document/hash, memory, skill metadata, and invalid-skill diagnostics. | Prompt composition and file editing expose the same root-bound sources without a second configuration store. |
+| [`Preview`](../../src/rtagent/domain.py#L326) | Expiring frozen first input. | Extends PromptInspection with a saved ID and expiry. | API clients may consume this immutable record; browser live drafts instead use side-effect-free inspection and direct Run. |
+| [`StartRun`](../../src/rtagent/domain.py#L333) | Saved-preview consumption command. | Preview ID/hash and observed session revision only. | Clients cannot replace the frozen tools, settings, or prompt at execution time. |
+| [`ApprovalDecision`](../../src/rtagent/domain.py#L341) | Human decision for one pending tool call. | Literal approve/reject value; approval ID comes from the URL. | A model cannot approve a call through its generated text. |
+| [`RecoveryDecision`](../../src/rtagent/domain.py#L347) | User reconciliation of one uncertain effect. | Explicit retry or record action plus a result string. | External effects are not treated as exactly-once; callers choose whether repetition is acceptable. |
+| [`ResumeRequest`](../../src/rtagent/domain.py#L354) | Reconciliation set for a paused Run. | Mapping from application receipt IDs to RecoveryDecision. | The application requires every unknown receipt to be resolved before graph recovery. |
+| [`RunEvent`](../../src/rtagent/domain.py#L360) | Persisted browser event envelope. | Schema version, Run ID, sequence, event type, UTC timestamp, and payload. | Reconnection has a durable cursor rather than an in-memory streaming offset. |
+| [`FolderView`](../../src/rtagent/domain.py#L371) | Stored flat folder projection. | ID/name/revision/creation timestamp. | Folders organize conversations, not workspace filesystem paths. |
+| [`FolderCreate`](../../src/rtagent/domain.py#L380) | Folder creation input. | Bounded nonempty name plus normalization validator. | A minimal contract avoids nested trees or separate folder settings. |
+| [`FolderUpdate`](../../src/rtagent/domain.py#L394) | Version-bound folder rename. | Inherits creation name and adds nonnegative expected revision. | Optimistic concurrency rejects edits based on stale sidebar state. |
+| [`ProjectCreate`](../../src/rtagent/domain.py#L400) | Register a local workspace folder. | Inherit nonempty display-name validation and accept an absolute folder string checked by Studio. | Registration is a trusted user action; the model cannot alter its root through tool arguments. |
+| [`ProjectView`](../../src/rtagent/domain.py#L406) | Stored named folder projection. | Stable ID, name, canonical workspace_root and creation timestamp. | Root selection is separate from chat-organization folders and the one shared permission/config aggregate. |
+| [`SessionUpdate`](../../src/rtagent/domain.py#L415) | Partial conversation metadata command. | Expected revision plus optional title/archive/folder/project; fields_set distinguishes omission from explicit null. | Idle workspace moves affect future Runs while saved snapshots retain their original roots. |
+| [`SessionCopy`](../../src/rtagent/domain.py#L433) | Duplicate/fork command. | Revision, operation, and optional successful Run boundary. | One evidence-copy use case covers both operations without replay or checkpoint cloning. |
+| [`SessionView`](../../src/rtagent/domain.py#L441) | Committed conversation projection. | History, active Run, metadata/provenance, and nullable project membership. | Null retains the default root; a project binds future turns to its saved folder. |
+| [`RunView`](../../src/rtagent/domain.py#L456) | Public execution projection. | Status/messages/approval/unknown receipts/usage plus the frozen workspace_root. | Inspection can distinguish historical execution roots from a conversation moved to another project. |
+| [`CallView`](../../src/rtagent/domain.py#L479) | One durable model/tool receipt. | Application call ID, Run ID, kind/status, structured evidence, and optional result. | A receipt survives a graph-node replay and separately identifies uncertain external outcomes. |
+| [`TraceView`](../../src/rtagent/domain.py#L490) | Labeled collection of receipts. | Schema version, explicit redacted flag, and CallView list. | Sanitized evidence cannot be mistaken for an exact original request body. |
 
 ### Contract field definitions
 
@@ -198,6 +202,19 @@ variables: dict[str, Any] = Field(default_factory=dict)
 skills: list[str] = Field(default_factory=list, max_length=20)
 ```
 
+**DraftPreviewRequest**
+
+```python
+preset: Preset
+config_revision: int
+session_id: str | None = None
+project_id: str | None = None
+expected_session_revision: int | None = None
+input: str = Field(default='', max_length=100000)
+variables: dict[str, Any] = Field(default_factory=dict)
+skills: list[str] = Field(default_factory=list, max_length=20)
+```
+
 **MemoryDocument**
 
 ```python
@@ -252,19 +269,25 @@ detail: str
 ```python
 root: str
 sandbox: SandboxStatus
+instructions: MemoryDocument | None
 memory: MemoryDocument
 skills: list[SkillInfo]
 skill_errors: dict[str, str]
+```
+
+**PromptInspection**
+
+```python
+input_hash: str
+compiled: CompiledPrompt
+prepared_request: dict[str, Any]
+tools: list[ToolDefinition]
 ```
 
 **Preview**
 
 ```python
 id: str
-input_hash: str
-compiled: CompiledPrompt
-prepared_request: dict[str, Any]
-tools: list[ToolDefinition]
 expires_at: str
 ```
 
@@ -327,6 +350,21 @@ name: str = Field(min_length=1, max_length=120)
 expected_revision: int = Field(ge=0)
 ```
 
+**ProjectCreate**
+
+```python
+workspace_root: str = Field(min_length=1, max_length=4096)
+```
+
+**ProjectView**
+
+```python
+id: str
+name: str
+workspace_root: str
+created_at: str
+```
+
 **SessionUpdate**
 
 ```python
@@ -334,6 +372,7 @@ expected_revision: int = Field(ge=0)
 title: str | None = Field(default=None, min_length=1, max_length=120)
 archived: bool | None = None
 folder_id: str | None = None
+project_id: str | None = None
 ```
 
 **SessionCopy**
@@ -354,6 +393,7 @@ active_run_id: str | None
 messages: list[Message]
 created_at: str
 folder_id: str | None = None
+project_id: str | None = None
 archived: bool = False
 copied_from_session_id: str | None = None
 ```
@@ -364,6 +404,7 @@ copied_from_session_id: str | None = None
 id: str
 session_id: str
 input: str
+workspace_root: str
 status: str
 stop_reason: str | None
 messages: list[Message]
@@ -461,15 +502,17 @@ These are signature listings; qualified names identify ownership and are not exe
 
 **Layer: Domain computation / prompt compilation.** Turns frozen preset/config/history/workspace data into one deterministic canonical sequence.
 
-**Connections and effects:** Studio.preview and Runner.model_node call the same functions. Only domain contracts and Python computation are imported. No repository reads, model requests, file reads, or secret resolution occur here.
+**Connections and effects:** Studio._prepare (inspection and execution) and Runner.model_node call the same compiler. Only domain contracts and Python computation are imported. No repository reads, model requests, file reads, or secret resolution occur here.
 
 Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`condition_value`](../../src/rtagent/prompts.py#L13) | Evaluate a structured condition to a boolean or an explainable AppError. | Recursively evaluate all/any/not to depth 12; permit eq/in/exists on provider/model/task_type/tools or one-level variables.NAME. Validate shapes and missing comparison fields before evaluation. | A restricted data grammar avoids eval/template code execution. Missing fields and malformed operators must not silently disable instructions; all/any evaluate their whole list, so invalid sibling conditions remain visible. |
-| [`compile_prompt`](../../src/rtagent/prompts.py#L57) | Produce CompiledPrompt from frozen inputs, with optional Run delta/context. | Check unique IDs and per-placement orders, evaluate filters/conditions, substitute declared literals, construct the six sequence segments, estimate serialized bytes/4, enforce output reservation, and hash all inputs. | This is the sole renderer for Preview and every model step. Current task and Run delta are inserted once; activation reasons/source indices explain included and excluded blocks, and overflow is explicit rather than silently trimmed. |
-| [`compile_prompt.replace`](../../src/rtagent/prompts.py#L111) | Resolve one template regex match against the current block. | Find its declaration, use supplied value or default, enforce required/type rules, and return text or JSON scalar spelling. Reject undeclared/missing/wrong-type values. | A single regex pass does not recursively interpret text supplied by the user, preserving literal data and eliminating arbitrary template execution. |
+| [`default_preset`](../../src/rtagent/prompts.py#L13) | Build practical editable starter instructions. | Create six ordered system blocks for identity, boundaries, inspect/implement/verify, native tools, memory/Skills, and response evidence. | The operational baseline is visible configuration rather than an unrecorded runtime prompt. |
+| [`is_legacy_default`](../../src/rtagent/prompts.py#L92) | Recognize the old unmodified seed for safe upgrade. | Compare IDs, names, roles, templates, conditions and fields; tolerate only normalized order on the disabled format block. | A startup upgrade must preserve user edits and old Run snapshots. |
+| [`condition_value`](../../src/rtagent/prompts.py#L127) | Evaluate a structured condition to a boolean or an explainable AppError. | Recursively evaluate all/any/not to depth 12; permit eq/in/exists on provider/model/task_type/tools or one-level variables.NAME. Validate shapes and missing comparison fields before evaluation. | A restricted data grammar avoids eval/template code execution. Missing fields and malformed operators must not silently disable instructions; all/any evaluate their whole list, so invalid sibling conditions remain visible. |
+| [`compile_prompt`](../../src/rtagent/prompts.py#L171) | Produce CompiledPrompt from frozen inputs, with optional Run delta/context. | Check unique IDs and per-placement orders, evaluate filters/conditions, substitute declared literals, construct the six sequence segments, estimate serialized bytes/4, enforce output reservation, and hash all inputs. | This is the sole renderer for Preview and every model step. Current task and Run delta are inserted once; activation reasons/source indices explain included and excluded blocks, and overflow is explicit rather than silently trimmed. |
+| [`compile_prompt.replace`](../../src/rtagent/prompts.py#L225) | Resolve one template regex match against the current block. | Find its declaration, use supplied value or default, enforce required/type rules, and return text or JSON scalar spelling. Reject undeclared/missing/wrong-type values. | A single regex pass does not recursively interpret text supplied by the user, preserving literal data and eliminating arbitrary template execution. |
 
 ### Compilation algorithm and failure boundaries
 
@@ -481,6 +524,8 @@ Only `{{ identifier }}` placeholders are legal. Unrecognized braces fail; defaul
 <summary>Source signatures (including private and nested functions)</summary>
 
 ```python
+def default_preset(revision: int=1) -> Preset
+def is_legacy_default(preset: Preset) -> bool
 def condition_value(condition: dict[str, Any], context: dict[str, Any], depth: int=0) -> bool
 def compile_prompt(preset: Preset, config: StudioConfig, history: list[Message], user_input: str, variables: dict[str, Any], tools: list[dict[str, Any]], delta: list[Message] | None=None, workspace_context: list[Message] | None=None) -> CompiledPrompt
 def compile_prompt.replace(match: re.Match[str], current=block) -> str
