@@ -11,7 +11,7 @@ As of 2026-10-03, Stage 1 is implemented and the first Stage 2 workspace capabil
 - Direct **Run**, streaming replies, persistent conversations, cancellation, approval, and checkpoint recovery. Preview is optional.
 - Prompt blocks with roles, ordering, conditions, variables, and source mapping; immutable Run inputs.
 - OpenAI-compatible Chat Completions with configurable Base URL, model, and server-side API key. The real adapter is the default; a missing model produces a configuration error.
-- Actual Bash execution in bubblewrap (through WSL on Windows), plus list/read/write/edit file tools.
+- Native Windows PowerShell execution in AppContainer, or Linux Bash in bubblewrap, plus list/read/write/edit file tools.
 - Workspace instructions, persistent Markdown memory, on-demand Skills, and a bundled skill-creator that saves reusable procedures.
 - Stateless stdio/Streamable HTTP MCP, per-tool permissions, captured requests, tool results, usage, and redacted exports.
 
@@ -39,7 +39,6 @@ STUDIO_PROVIDER=openai
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=
 OPENAI_API_KEY=
-STUDIO_WSL_DISTRO=
 ```
 
 Start with `uv run rtagent` and open **http://127.0.0.1:8001**. Enter a task and click **Run**, or press **Ctrl+Enter / Cmd+Enter**. Open **Prompt** to edit the preset and **Inspector** to examine requests. **Preview** inspects the frozen first request without calling a model; it is never a prerequisite for Run.
@@ -48,32 +47,33 @@ The app opens directly without login or a workspace access token. Startup applie
 
 For a keyless local endpoint, leave the credential reference in Settings empty. The adapter requires streaming Chat Completions and tool calls. It does not silently rewrite roles, retry requests, or fall back to simulation.
 
-## Bash and workspace tools
+## Commands and workspace tools
 
-On Linux, install Bash, bubblewrap, and util-linux. On Windows, install them in a WSL distribution and set STUDIO_WSL_DISTRO if it is not the default distribution. In Debian/Ubuntu or its WSL shell:
+**Windows uses native AppContainer isolation and Windows PowerShell**, included in Windows 10/11. It does not require WSL, a Linux distribution, a VM, an administrator setup, or a separate local account. The model receives a `powershell` tool with PowerShell syntax; Bash scripts are not silently translated. Git Bash's MSYS runtime is not supported inside this AppContainer.
+
+**Linux uses Bash and bubblewrap.** On Debian/Ubuntu, install the dependencies:
 
 ```bash
 sudo apt-get update
 sudo apt-get install bash bubblewrap util-linux
 ```
 
-**Workspace** shows whether an actual sandbox probe succeeds. The app can start without these dependencies; Bash reports an actionable error if isolation is unavailable. There is no unrestricted fallback to Git Bash, PowerShell, or the host shell.
+**Workspace** checks the actual backend by executing a command in the sandbox. An unavailable sandbox reports an error; commands never fall back to unrestricted host execution.
 
-The boundary follows the separation between OS isolation and approval policy described in [Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing):
+- On Windows, commands run in a unique AppContainer with no network capabilities. A private workspace copy has read/write or read-only ACLs. PowerShell starts at `Workspace:\`; `$env:RTAGENT_WORKSPACE` gives the native directory. A Job Object limits the process tree to 32 processes and terminates descendants on completion, timeout, Stop, or server exit. Original project and system ACLs are not modified.
+- On Linux, private mount/process/network namespaces expose the project at /workspace, read-only system binaries/libraries, and scratch storage. The host home and network are not mounted into that environment.
+- Server credential variables and the host PATH are not forwarded. Existing .env files, Git metadata, runtime databases, the configured data directory, and dependency/cache directories are excluded. .env.example remains readable. AppContainer retains access to Windows resources normally readable by sandboxed applications; it is not a VM or a claim that every public host file is hidden.
+- Network access is disabled, including local host services and downloads. Windows uses AppContainer enforcement; Linux uses a private network namespace.
+- **Settings → Workspace sandbox** selects workspace-write or read-only. Read-only also removes native file/memory/skill mutation tools from model exposure. Scratch storage remains writable.
+- Command deadlines, bounded stdout/stderr, and process-tree cleanup apply. Timeout/cancellation can leave partial project edits; inspect those files before repeating a write.
 
-- Commands see the project at /workspace, read-only system binaries/libraries, a private process namespace, and temporary scratch space. Host home directories and Windows drives are not mounted.
-- The environment is cleared. Server credential variables are not forwarded. Existing .env files, Git metadata, runtime databases, the configured data directory, and dependency/cache directories are masked. .env.example remains readable.
-- Network access is disabled, including host services and downloads. WSL linked paths/junctions cause a clear refusal instead of traversal through DrvFS.
-- **Settings → Bash sandbox** selects workspace-write or read-only. Read-only also removes native file/memory/skill mutation tools from model exposure. Scratch storage remains writable.
-- Tool deadlines, bounded stdout/stderr, and process-tree cleanup apply. Timeout/cancellation can leave partial project edits; inspect those files before repeating a write.
+On Windows, changed files are copied back after all command processes stop, with checks against concurrent host edits. Edits appear after the call completes. The copy is limited to 64 MiB and 10,000 entries in each direction, excluding dependencies and runtime data. Links, aliases, unsupported files, and conflicting edits fail explicitly. Copy-back is not an atomic multi-file transaction. Linux uses a direct workspace mount.
 
-On Windows/WSL, each Bash call uses a filtered copy on a private Linux filesystem. This prevents case aliases such as .ENV from bypassing a .env mask on a Windows drive. Changed files are copied back after the command stops, with checks for concurrent host edits; live edits appear after the call completes. The copy is limited to 64 MiB of files and 10,000 entries in each direction, excluding dependencies and runtime data. Unsupported links, case collisions, or conflicting edits fail explicitly. Native Linux uses a direct workspace mount.
+Windows commands can use built-in PowerShell and permitted executables; arbitrary host development environments are not imported. Network allowlists, interactive terminals, persistent background jobs, and disk quotas remain future work. The boundary assumes the workspace is not concurrently modified by a hostile host process. See [Microsoft's AppContainer documentation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer) for the Windows security model.
 
-This is Linux/WSL isolation, not Codex's native Windows sandbox. Network allowlists, interactive terminals, persistent background jobs, and disk quotas are not implemented. The boundary assumes the workspace is not concurrently modified by a hostile host process.
+Native file tools use relative paths, reject traversal/links, and bound UTF-8 files to 64 KiB. read_text returns content and a hash; write_text requires that hash before replacing a file. edit_text requires exactly one literal match. File tools use application path checks; command tools use OS isolation.
 
-Native file tools use relative paths, reject traversal/links, and bound UTF-8 files to 64 KiB. read_text returns content and a hash; write_text requires that hash before replacing a file. edit_text requires exactly one literal match. File tools use application path checks; Bash uses OS isolation.
-
-MCP servers run **outside the Bash sandbox**, under their configured transports and permissions. Add a stdio executable and arguments or Streamable HTTP URL in Settings, select **Save & discover**, then enable individual tools. New MCP tools default to Disabled. Connections are stateless; IDA/Ghidra workflows need separate integration acceptance.
+MCP servers run **outside the command sandbox**, under their configured transports and permissions. Add a stdio executable and arguments or Streamable HTTP URL in Settings, select **Save & discover**, then enable individual tools. New MCP tools default to Disabled. Connections are stateless; IDA/Ghidra workflows need separate integration acceptance.
 
 ## Memory and Skills
 
@@ -119,9 +119,9 @@ Validate changed behavior against the running service first. A repeatable check 
 uv run python scripts/smoke_workspace.py
 ```
 
-It temporarily binds port 8766, uses a disposable workspace and an explicitly simulated model, and requires working Linux/WSL bubblewrap. It verifies direct Run retry identity, actual file/Bash operations, hidden host paths, network isolation, memory/Skills, context provenance, read-only enforcement, and cancellation cleanup. It does not call a model service or modify the selected user workspace.
+It temporarily binds port 8766 and uses a disposable workspace with an explicitly simulated model. It exercises Windows AppContainer/PowerShell or Linux bubblewrap/Bash. It verifies direct Run retry identity, actual command/file operations, hidden host paths, network isolation, memory/Skills, context provenance, read-only enforcement, and cancellation cleanup. It does not call a model service or modify the selected user workspace.
 
-For manual offline checks, explicitly select **Simulated model** in Settings or set STUDIO_PROVIDER=fake. Commands such as `/read README.md`, `/echo hello`, and `/tool bash {"command":"pwd"}` use simulated decisions with real tools. `/slow` exercises Stop. Simulation is a development aid, not the default provider.
+For manual offline checks, explicitly select **Simulated model** in Settings or set STUDIO_PROVIDER=fake. Commands such as `/read README.md`, `/echo hello`, and `/tool powershell {"command":"Get-Location"}` (Windows) or `/tool bash {"command":"pwd"}` (Linux) use simulated decisions with real tools. `/slow` exercises Stop. Simulation is a development aid, not the default provider.
 
 ```powershell
 uv run pytest
@@ -144,7 +144,7 @@ The previous foundation/compiler/conversation/tools/recovery milestones are all 
 | Stage | Scope | Exit criteria / status |
 | --- | --- | --- |
 | **1 — Inspectable execution foundation** | Web workspace, prompt blocks, provider boundary, single-agent loop, MCP, traces, persistence, approvals, recovery | Implemented locally. Live-provider acceptance remains pending endpoint configuration. |
-| **2 — Working local agent** | Direct Run, Bash/read/write/edit, OS workspace sandbox, instructions, persistent memory, Skills and skill creation | Implemented in this increment and exercised through real local requests. Complete real-model coding/analysis acceptance before declaring the stage complete. |
+| **2 — Working local agent** | Direct Run, native commands/read/write/edit, OS workspace sandbox, instructions, persistent memory, Skills and skill creation | Implemented in this increment and exercised through real local requests. Complete real-model coding/analysis acceptance before declaring the stage complete. |
 | **3 — Daily agent use** | Explicit context compaction, context accounting, session branching, diff review, command output streaming, interactive/background process lifecycle, practical dependency/network policies | Complete substantial multi-file tasks across stop/restart/resume with reliable context and no stray processes; verify resource/permission boundaries. |
 | **4 — Extensible harness** | Stable programmatic run interface, CLI/JSON/RPC, focused lifecycle/tool hooks, reusable prompt/skill packages, more providers | Use the same loop through Web, CLI, and embedding; add integrations without patching the core. Derive hooks from real use cases. |
 | **5 — Security analysis workflows** | Stateful MCP, accepted IDA/Ghidra/debugger/browser integrations, evidence/artifacts, reusable analysis skills | Complete representative authorized reverse-engineering, debugging, and CTF tasks with real tools and inspectable evidence. |

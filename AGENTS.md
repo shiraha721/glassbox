@@ -69,9 +69,9 @@ docs/              Architecture and necessary decision records
 
 ### Agents, Tools, and Recovery
 
-- Bash uses actual bubblewrap isolation on Linux or WSL. Never replace it with unrestricted host execution or present a cwd check as an OS sandbox. Preserve no-network behavior, hidden credentials/runtime paths, bounded output, and child-process cleanup.
+- Use native Windows AppContainer with PowerShell on Windows and bubblewrap with Bash on Linux. Do not require WSL for Windows execution. Never replace it with unrestricted host execution or present a cwd check as an OS sandbox. Preserve no-network behavior, hidden credentials/runtime paths, bounded output, and child-process cleanup.
 - Memory and Skills use ordinary files. Snapshot initial AGENTS.md, memory, and selected skill content with source mapping. Load skill bodies on demand; no vector store or plugin framework is needed.
-- Writes use content hashes or unambiguous exact edits. Skills and memory cannot grant permissions or bypass isolation. Explicitly configured MCP servers remain outside the Bash sandbox.
+- Writes use content hashes or unambiguous exact edits. Skills and memory cannot grant permissions or bypass isolation. Explicitly configured MCP servers remain outside the command sandbox.
 
 - Implement a bounded `model -> policy -> tools -> model` loop for the first release. Finish when there are no tool calls.
 - Preserve the original `tool_call_id` for every model tool call. Supply a matching success or error result for each before calling the model again.

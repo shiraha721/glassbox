@@ -59,7 +59,7 @@ export function WorkspacePanel({
           <div className="workspace-path">{query.data.root}</div>
           <details className="sandbox-status">
             <summary>
-              Bash · {query.data.sandbox.ready ? query.data.sandbox.backend : 'unavailable'} ·
+              Sandbox · {query.data.sandbox.ready ? query.data.sandbox.backend : 'unavailable'} ·
               network off
             </summary>
             <p className="subtle">{query.data.sandbox.detail}</p>

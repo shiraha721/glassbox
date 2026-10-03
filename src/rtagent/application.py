@@ -83,10 +83,12 @@ class Studio:
             )
         tools = self.registry.selected(config)
         encoded_tools = [tool.model_dump() for tool in tools]
-        # Explicit mentions load a skill body; ordinary runs receive only the small catalog.
-        selected_skills = request.skills + re.findall(
-            r"(?<!\S)\$([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$|[.,!?])", request.input
-        )
+        # Shell variables also start with $. Only catalogued names are implicit skill mentions;
+        # explicit UI selections still fail clearly when a skill is unavailable.
+        catalog, _ = await asyncio.to_thread(self.registry.files.skills)
+        known_skills = {skill["name"] for skill in catalog}
+        mentions = re.findall(r"(?<!\S)\$([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$|[.,!?])", request.input)
+        selected_skills = request.skills + [name for name in mentions if name in known_skills]
         workspace_context = await asyncio.to_thread(self.registry.files.context, selected_skills)
         compiled = compile_prompt(
             preset,

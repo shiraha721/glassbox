@@ -46,7 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         configured = settings.apply_provider(config)
         if configured != config:
             await repository.save_config(configured)
-        registry = ToolRegistry(settings.workspace_root, settings.data_dir, settings.wsl_distro)
+        registry = ToolRegistry(settings.workspace_root, settings.data_dir)
         runner = Runner(repository, registry, str(settings.data_dir / "checkpoints.db"))
         app.state.settings = settings
         app.state.studio = Studio(repository, registry, runner)

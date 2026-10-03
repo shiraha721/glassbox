@@ -17,7 +17,7 @@ flowchart TD
     RUN --> MODEL[Chat Completions adapter]
     RUN --> POLICY[Schema and permission checks]
     POLICY --> TOOLS[Native tools / MCP]
-    TOOLS --> BASH[Bash in bubblewrap / WSL]
+    TOOLS --> SHELL[Windows AppContainer / Linux bubblewrap]
     TOOLS --> FILES
     APP --> DB[(SQLite)]
     RUN --> DB
@@ -33,7 +33,7 @@ flowchart TD
 | providers.py | Canonical mapping, prepared requests, wire capture, real or explicit simulated streaming |
 | runtime.py | Bounded graph, checkpoints, receipts, interrupts and recovery |
 | policies.py, tools.py | Frozen schemas/permissions, native dispatch, stateless MCP lifecycle |
-| workspace.py, sandbox.py, sandbox_files.py | File context, memory, Skills, guarded edits, Linux/WSL isolation and Windows file reconciliation |
+| workspace.py, sandbox.py, windows_sandbox.py, sandbox_files.py | File context, memory, Skills, guarded edits, native Windows/Linux isolation and Windows file reconciliation |
 | storage.py, tracing.py | Transactions, revisions, events, traces, redaction and export |
 | web/src/ | Conversation, Prompt, Inspector, Workspace and Settings, generated API types |
 
@@ -97,21 +97,21 @@ save_skill writes validated frontmatter and Markdown instructions; updates requi
 
 The model receives frozen schemas selected from the configured permission map and available catalog. Read-only mode excludes native mutation tools. Each call is JSON-schema checked and evaluated as allow, ask, or deny before effects occur. Prompt, memory, Skill, and tool-result text cannot broaden permissions.
 
-Native tools: list_files, read_text, write_text, edit_text, bash, read_memory, save_memory, load_skill, save_skill, and the side-effect-free approval check echo.
+Native tools: list_files, read_text, write_text, edit_text, powershell (Windows) or bash (Linux), read_memory, save_memory, load_skill, save_skill, and the side-effect-free approval check echo.
 
 File tools require relative paths and reject traversal, links/junctions, credential paths, Git metadata, runtime data, and dependency directories. UTF-8 files and serialized outputs are bounded. Replacement uses a content hash; edits require one exact match. These application checks assume a non-hostile concurrent host environment.
 
-BashSandbox launches bubblewrap on Linux or through WSL on Windows. It creates private mount/process/network namespaces; binds the project at /workspace; exposes read-only system binaries/libraries and private scratch storage; clears the environment; and excludes credential/runtime files. Workspace-write or read-only determines the project mount. Host network and Windows drives are unavailable.
+WindowsSandbox launches the built-in Windows PowerShell in a new AppContainer for each call. CreateProcessW receives SECURITY_CAPABILITIES with no capabilities, so Windows denies network access. An explicit inherited-handle list contains only stdin/stdout/stderr. The process starts suspended, is assigned to a kill-on-close Job Object with a 32-process limit, then resumes. Completion, timeout, and cancellation terminate the whole Job; the server waits for zero active processes before copying results back. Blocking Windows calls run in a worker thread, with cancellation signalled by an event and cleanup awaited by the runtime.
 
-Windows/WSL uses a filtered, private Linux copy instead of binding DrvFS: a Windows case alias can bypass a Linux mount on one filename. After process cleanup, only changed files are copied back, with preflight content-hash checks against concurrent host edits. This is not a multi-file atomic transaction. Links, special files, case collisions, and unsafe paths are rejected. Copying is bounded to 64 MiB and 10,000 entries each way; excluded data never enters the copy. Native Linux binds the workspace directly and masks excluded paths. WSL does not expose ongoing edits until a Bash call finishes.
+A filtered private Windows workspace copy receives the AppContainer SID's read/execute or modify ACL. Scratch space is writable. Original project, user, and system ACLs remain unchanged. Excluded credentials never enter the copy, so filename case aliases cannot expose them. After cleanup, changed files are copied back with preflight content-hash checks against concurrent host edits. This is not a multi-file atomic transaction. Copies are bounded to 64 MiB and 10,000 entries; links, hard links, aliases, and special files are rejected. PowerShell gets a Workspace: drive rooted at the copy; this avoids granting directory traversal/listing rights on host drive roots. AppContainer retains normal access to shared Windows resources; it is not a VM or a promise to hide every public file. Git Bash's MSYS runtime is not supported in this AppContainer; Windows commands use PowerShell syntax.
 
-Host launches use argument arrays. Only the command argument to Bash -c is shell code. A trusted setsid driver reports its Linux process group before untrusted output. Timeout/Stop kills that group through WSL when necessary, rather than merely terminating wsl.exe. Bubblewrap's parent-death behavior cleans up namespace children. Pipes are drained with bounded retained output, including JSON escaping; cleanup has a short allowance beyond the command deadline.
+BashSandbox runs only on Linux. Bubblewrap creates private mount/process/network namespaces, binds the project at /workspace, exposes read-only system binaries/libraries and private scratch storage, clears the environment, and masks excluded files. A trusted setsid driver reports its process group before untrusted output. Timeout/Stop kills that group; bubblewrap's parent-death behavior cleans up namespace children.
 
-Results include stdout/stderr, exit code, timeout/truncation, and sandbox metadata. Timeout can leave partial edits. Missing dependencies fail clearly without unrestricted fallback, while the rest of the application remains usable. Native Windows restricted-user isolation, network allowlists, interactive terminals, background jobs, and disk quotas are future work.
+Both paths use explicit host process arguments, bounded retained output, no inherited credentials, and cleanup before returning a result. Only the command supplied to the chosen shell is executable script. Results include stdout/stderr, exit code, timeout/truncation, and sandbox metadata. Timeout can leave partial edits. Missing OS support fails without unrestricted fallback. Startup upgrades the old Windows bash permission to powershell, preserving allow/ask/deny and creating a new settings revision; existing Run snapshots are unchanged. Resuming an old Bash call on Windows reports that its tool is unavailable.
 
-This follows [Codex's separation of isolation and approvals](https://learn.chatgpt.com/docs/sandboxing), without claiming an identical Windows implementation.
+Network allowlists, interactive terminals, background jobs, disk quotas, and automatic import of host development toolchains remain future work. See [AppContainer isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer) for the Windows boundary.
 
-MCP is outside the Bash sandbox: explicitly configured host processes or HTTP services use fresh SDK sessions per discovery/call. Namespaced schema hashes are checked before execution. Changed schemas stop the call, credentials use environment references, and new tools default to denied. Stateful analysis sessions are deferred.
+MCP is outside the command sandbox: explicitly configured host processes or HTTP services use fresh SDK sessions per discovery/call. Namespaced schema hashes are checked before execution. Changed schemas stop the call, credentials use environment references, and new tools default to denied. Stateful analysis sessions are deferred.
 
 ## Runtime, recovery, and provider requests
 

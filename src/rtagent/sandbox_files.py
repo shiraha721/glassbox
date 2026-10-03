@@ -1,19 +1,9 @@
-"""Copy Windows workspaces into a private Linux filesystem and reconcile changed files.
+"""Stage a filtered Windows workspace and copy back edits after its processes stop."""
 
-DrvFS is case-insensitive: a bind mask on .env can be bypassed by opening .ENV.
-Never expose that filesystem directly to an untrusted WSL command. Only filtered
-files cross this boundary; normal Linux workspaces do not need the copy step.
-"""
-
-import asyncio
 import hashlib
-import io
 import os
-import tarfile
-from collections.abc import Awaitable, Callable
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from uuid import uuid4
 
 from rtagent.domain import AppError
 from rtagent.workspace import Workspace, excluded_name
@@ -23,141 +13,69 @@ MAX_FILES = 10_000
 
 
 class SandboxFiles:
-    """Own one disposable Linux copy, with conflict checks before copying edits back."""
+    """Keep credentials out of the sandbox without modifying the original project's ACLs."""
 
-    def __init__(
-        self, workspace: Workspace, spawn: Callable[..., Awaitable[asyncio.subprocess.Process]]
-    ) -> None:
-        """Remember original file fingerprints without retaining credentials or excluded files."""
-        self.workspace, self.spawn = workspace, spawn
-        self.path: str | None = None
+    def __init__(self, workspace: Workspace, destination: Path) -> None:
+        """Bind one disposable directory and remember original file fingerprints."""
+        self.workspace, self.path = workspace, destination
         self.before: dict[str, str] = {}
         self.directories: set[str] = set()
-        self.ready = False
 
-    def _pack(self) -> bytes:
-        buffer = io.BytesIO()
-        total = 0
-        with tarfile.open(fileobj=buffer, mode="w") as archive:
-            for directory, dirs, files in os.walk(self.workspace.root, followlinks=False):
-                for name in [*dirs, *files]:
-                    path = Path(directory) / name
-                    if excluded_name(name) or path == self.workspace.data_dir:
-                        if name in dirs:
-                            dirs.remove(name)
-                        continue
-                    relative = path.relative_to(self.workspace.root).as_posix()
-                    checked = self.workspace.path(relative)
-                    info = tarfile.TarInfo(relative)
-                    info.mode = 0o755 if os.name == "nt" else checked.stat().st_mode & 0o777
-                    if checked.is_dir():
-                        self.directories.add(relative)
-                        info.type = tarfile.DIRTYPE
-                        archive.addfile(info)
-                    else:
-                        with checked.open("rb") as handle:
-                            data = handle.read(MAX_BYTES - total + 1)
-                        total += len(data)
-                        if total > MAX_BYTES:
-                            raise AppError(
-                                "sandbox_workspace_limit",
-                                "WSL sandbox input exceeds 64 MiB; select a smaller workspace.",
-                            )
-                        self.before[relative] = hashlib.sha256(data).hexdigest()
-                        info.size = len(data)
-                        archive.addfile(info, io.BytesIO(data))
-                    if len(self.before) + len(self.directories) > MAX_FILES:
-                        raise AppError(
-                            "sandbox_workspace_limit", "WSL sandbox input exceeds 10,000 entries."
-                        )
-        return buffer.getvalue()
+    def _collect(self, root: Path) -> tuple[dict[str, bytes], set[str], list[str]]:
+        def fail_walk(error: OSError) -> None:
+            # An unreadable directory must not look like deleted files during reconciliation.
+            raise error
 
-    async def _command(self, args: list[str], data: bytes | None = None) -> bytes:
-        process = await self.spawn(args, pipe_input=data is not None)
-        try:
-            async with asyncio.timeout(15):
-                output, _ = await process.communicate(data)
-        finally:
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
-        if process.returncode != 0:
-            raise AppError(
-                "sandbox_workspace", "Could not prepare or clean up the private WSL workspace."
-            )
-        return output
-
-    async def open(self) -> str:
-        """Stage only allowed files on Linux, where case aliases cannot bypass exclusions."""
-        data = await asyncio.to_thread(self._pack)
-        # Assign the exact owned path before awaiting creation so cancellation can always remove it.
-        self.path = "/tmp/rtagent-" + uuid4().hex
-        await self._command(["/bin/mkdir", "--mode=700", "--", self.path])
-        await self._command(["/usr/bin/tar", "-xf", "-", "--no-same-owner", "-C", self.path], data)
-        self.ready = True
-        return self.path
-
-    async def _export(self) -> bytes:
-        process = await self.spawn(["/usr/bin/tar", "-cf", "-", "-C", self.path, "."])
-        chunks, size = [], 0
-        try:
-            async with asyncio.timeout(15):
-                while chunk := await process.stdout.read(65_536):
-                    chunks.append(chunk)
-                    size += len(chunk)
-                    if size > MAX_BYTES + MAX_FILES * 1536:
-                        raise AppError(
-                            "sandbox_workspace_limit",
-                            "WSL sandbox output exceeds the copy-back limit.",
-                        )
-                await process.wait()
-        finally:
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
-        if process.returncode != 0:
-            raise AppError(
-                "sandbox_workspace", "Could not collect sandbox edits; host files were not updated."
-            )
-        return b"".join(chunks)
-
-    def _reconcile(self, data: bytes) -> dict:
-        files, directories, targets = {}, set(), set()
-        ignored = []
-        size = 0
-        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
-            for count, member in enumerate(archive):
-                if count > MAX_FILES:
-                    raise AppError(
-                        "sandbox_workspace_limit", "Sandbox output exceeds 10,000 entries."
-                    )
-                name = member.name.removeprefix("./")
-                if name in {"", "."}:
-                    continue
-                if any(excluded_name(part) for part in Path(name).parts):
+        files, directories, targets, ignored = {}, set(), set(), []
+        total, count = 0, 0
+        for directory, dirs, names in os.walk(root, followlinks=False, onerror=fail_walk):
+            for name in [*dirs, *names]:
+                path = Path(directory) / name
+                relative = path.relative_to(root).as_posix()
+                if excluded_name(name) or path in {self.workspace.data_dir, self.path.parent}:
+                    if name in dirs:
+                        dirs.remove(name)
                     if len(ignored) < 20:
-                        ignored.append(name)
+                        ignored.append(relative)
                     continue
-                target = str(self.workspace.path(name)).casefold()
-                if target in targets:
+                # Resolve host destinations before any writes, rejecting aliases and traversal.
+                target = str(self.workspace.path(relative)).casefold()
+                if path.is_symlink() or path.is_junction() or target in targets:
                     raise AppError(
-                        "sandbox_path", "Case-colliding sandbox paths cannot be copied to Windows."
+                        "sandbox_path", f"Unsupported linked or aliased path: {relative}"
                     )
                 targets.add(target)
-                if member.isdir():
-                    directories.add(name)
-                elif member.isfile() and not member.issparse():
-                    size += member.size
-                    if size > MAX_BYTES:
-                        raise AppError(
-                            "sandbox_workspace_limit", "Sandbox output files exceed 64 MiB."
-                        )
-                    files[name] = archive.extractfile(member).read()
+                count += 1
+                if count > MAX_FILES:
+                    raise AppError("sandbox_workspace_limit", "Sandbox exceeds 10,000 entries.")
+                if path.is_dir():
+                    directories.add(relative)
+                elif path.is_file() and path.stat().st_nlink == 1:
+                    with path.open("rb") as handle:
+                        data = handle.read(MAX_BYTES - total + 1)
+                    total += len(data)
+                    if total > MAX_BYTES:
+                        raise AppError("sandbox_workspace_limit", "Sandbox files exceed 64 MiB.")
+                    files[relative] = data
                 else:
                     raise AppError(
-                        "sandbox_path",
-                        "Sandbox links and special files cannot be copied into the Windows workspace.",
+                        "sandbox_path", f"Unsupported special or hard-linked file: {relative}"
                     )
+        return files, directories, ignored
+
+    def open(self) -> None:
+        """Copy bounded ordinary files, without importing host permissions or excluded paths."""
+        files, self.directories, _ = self._collect(self.workspace.root)
+        self.path.mkdir()
+        for name in sorted(self.directories, key=lambda item: item.count("/")):
+            (self.path / name).mkdir(parents=True, exist_ok=True)
+        for name, data in files.items():
+            (self.path / name).write_bytes(data)
+            self.before[name] = hashlib.sha256(data).hexdigest()
+
+    def reconcile(self) -> dict:
+        """Preflight concurrent edits before copying changes back; this is not a transaction."""
+        files, directories, ignored = self._collect(self.path)
         changed = {
             name
             for name in self.before.keys() | files.keys()
@@ -173,10 +91,9 @@ class SandboxFiles:
                 if current != self.before.get(name):
                     raise AppError(
                         "file_conflict",
-                        f"Host file changed during Bash execution: {name}. Sandbox edits were not copied back.",
+                        f"Host file changed during command execution: {name}. Sandbox edits were not copied back.",
                         409,
                     )
-            # Remove old files before making directories, so a file-to-directory edit works.
             for name in changed - files.keys():
                 self.workspace.path(name).unlink()
             for name in sorted(self.directories - directories, key=lambda item: -item.count("/")):
@@ -197,14 +114,3 @@ class SandboxFiles:
                 finally:
                     temporary.unlink(missing_ok=True)
         return {"changed_files": len(changed), "ignored_paths": ignored}
-
-    async def close(self, writable: bool) -> dict | None:
-        """Copy permitted changes back after process cleanup, then remove only our temporary root."""
-        if self.path is None:
-            return
-        try:
-            if self.ready and writable:
-                return await asyncio.to_thread(self._reconcile, await self._export())
-        finally:
-            # Only the exact /tmp/rtagent-<UUID> directory created above is removed.
-            await self._command(["/bin/rm", "--recursive", "--force", "--", self.path])

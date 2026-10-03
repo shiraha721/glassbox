@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     provider: Literal["openai", "fake"] | None = None
     openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
     openai_model: str | None = Field(default=None, validation_alias="OPENAI_MODEL")
-    wsl_distro: str = ""
     allowed_origins: list[str] = [
         "http://127.0.0.1:8001",
         "http://localhost:8001",
@@ -49,6 +48,11 @@ class Settings(BaseSettings):
     def apply_provider(self, config: StudioConfig) -> StudioConfig:
         """Apply explicit environment values on startup; later UI edits remain usable."""
         values = config.model_dump()
+        # Preserve the previous shell permission when upgrading the Windows backend.
+        # Only current settings change; stored Run snapshots keep their original tool names.
+        if os.name == "nt" and "bash" in values["tools"]:
+            permission = values["tools"].pop("bash")
+            values["tools"].setdefault("powershell", permission)
         overrides = {
             "adapter": self.provider,
             "base_url": self.openai_base_url,

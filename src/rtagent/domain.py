@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -182,7 +183,7 @@ class StudioConfig(Contract):
             "list_files": "allow",
             "write_text": "allow",
             "edit_text": "allow",
-            "bash": "allow",
+            "powershell" if os.name == "nt" else "bash": "allow",
             "read_memory": "allow",
             "save_memory": "allow",
             "load_skill": "allow",

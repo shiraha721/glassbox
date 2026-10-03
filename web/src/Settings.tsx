@@ -155,7 +155,7 @@ export function Settings({
               </div>
             </section>
             <section>
-              <h3>Bash sandbox</h3>
+              <h3>Workspace sandbox</h3>
               <label>
                 Workspace access
                 <select
@@ -172,9 +172,8 @@ export function Settings({
                 </select>
               </label>
               <p className="subtle">
-                Bash uses bubblewrap on Linux or WSL. Network access is disabled. Check availability
-                in Workspace. MCP servers have their own permissions and run outside this Bash
-                sandbox.
+                Commands use native Windows AppContainer or Linux bubblewrap. Network access is
+                disabled. Check availability in Workspace. MCP servers run outside this sandbox.
               </p>
             </section>
             <section>

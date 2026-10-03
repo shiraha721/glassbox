@@ -80,7 +80,7 @@ async def save_config(body: StudioConfig, request: Request) -> StudioConfig:
 
 @router.get("/workspace", response_model=WorkspaceView)
 async def workspace(request: Request, refresh: bool = False) -> WorkspaceView:
-    """Inspect project memory, skills, and the actual Bash sandbox status."""
+    """Inspect project memory, skills, and the native OS sandbox status."""
     return await request.app.state.studio.workspace(refresh)
 
 

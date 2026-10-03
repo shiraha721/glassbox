@@ -1,12 +1,14 @@
 """Exercise a real local HTTP server and OS tools in a disposable workspace.
 
 Run with `uv run python scripts/smoke_workspace.py`. Model decisions are simulated;
-HTTP, SQLite, the tool loop, Bash isolation, and filesystem effects are real.
-Requires the configured Linux/WSL bubblewrap installation. No credentials are used.
+HTTP, SQLite, the tool loop, OS isolation, and filesystem effects are real.
+Uses native Windows AppContainer/PowerShell or Linux bubblewrap/Bash. No keys are used.
 """
 
 import asyncio
+import base64
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -17,6 +19,35 @@ import uvicorn
 from rtagent.config import Settings
 from rtagent.main import create_app
 
+COMMAND_TOOL = "powershell" if os.name == "nt" else "bash"
+
+
+def command(windows: str, linux: str) -> str:
+    """Use the host's native command syntax without translating model-generated code."""
+    return windows if os.name == "nt" else linux
+
+
+def assert_windows_process_stopped(pid: int) -> None:
+    """Check the real child handle; output alone cannot prove process-tree cleanup."""
+    import ctypes as C
+
+    kernel = C.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes, kernel.OpenProcess.restype = [
+        C.c_ulong,
+        C.c_int,
+        C.c_ulong,
+    ], C.c_void_p
+    kernel.WaitForSingleObject.argtypes = [C.c_void_p, C.c_ulong]
+    kernel.CloseHandle.argtypes = [C.c_void_p]
+    handle = kernel.OpenProcess(0x100000, False, pid)
+    if not handle:
+        assert C.get_last_error() == 87, "The child must be gone, not merely inaccessible."
+        return
+    try:
+        assert kernel.WaitForSingleObject(handle, 0) == 0, "A sandbox child is still running."
+    finally:
+        kernel.CloseHandle(handle)
+
 
 async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
     """Submit direct Runs and check persistent results through public HTTP endpoints."""
@@ -25,7 +56,7 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
         response = await client.request(
             method, path, json=body, headers={"Idempotency-Key": key} if key else {}
         )
-        response.raise_for_status()
+        assert response.is_success, f"{response.status_code}: {response.text}"
         return response.json()
 
     state = await api("GET", "/bootstrap")
@@ -66,21 +97,67 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
         return run, json.loads(result)
 
     _, result = await tool(
-        "bash",
+        COMMAND_TOOL,
         {
-            "command": "printf live-bash > evidence.txt; cat evidence.txt; test ! -e /mnt/c; test ! -e /mnt/d; test ! -s .env; test ! -s .ENV"
+            "command": command(
+                "Set-Content -Encoding Ascii -NoNewline -LiteralPath evidence.txt -Value live-command; "
+                "[Console]::Write((Get-Content -Raw evidence.txt)); "
+                "if ((Test-Path .env) -or (Test-Path .ENV)) { exit 1 }",
+                "printf live-command > evidence.txt; cat evidence.txt; test ! -s .env; test ! -s .ENV",
+            )
         },
     )
-    assert result["exit_code"] == 0 and result["stdout"] == "live-bash", result
-    assert (workspace / "evidence.txt").read_text() == "live-bash"
-    # A real host TCP listener must be unreachable from the private network namespace.
+    assert result["exit_code"] == 0 and result["stdout"] == "live-command", result
+    assert (workspace / "evidence.txt").read_text() == "live-command"
+    if os.name == "nt":
+        # Probe original absolute Windows paths, not merely paths missing from the private copy.
+        original = str(workspace).replace("'", "''")
+        outside = str(workspace.parent).replace("'", "''")
+        _, result = await tool(
+            COMMAND_TOOL,
+            {
+                "command": (
+                    f"foreach ($name in @('{original}\\.env', '{original}\\.ENV', '{outside}\\host-only.txt')) {{ "
+                    "try { $f = [IO.File]::OpenRead($name); $f.Dispose(); exit 11 } catch {} }; "
+                    f"try {{ [IO.File]::WriteAllText('{outside}\\outside-write.txt', 'leak'); exit 12 }} catch {{}}; "
+                    "if ($env:RTAGENT_SMOKE_SECRET) { exit 13 }; [Console]::Write('host-blocked')"
+                )
+            },
+        )
+        assert result["exit_code"] == 0 and result["stdout"] == "host-blocked", result
+        assert not (workspace.parent / "outside-write.txt").exists()
+    # The HTTP server is a real reachable host TCP listener; connect attempts must fail inside.
     _, result = await tool(
-        "bash",
+        COMMAND_TOOL,
         {
-            "command": "if (echo probe > /dev/tcp/127.0.0.1/8766) 2>/dev/null; then exit 1; else echo network-blocked; fi"
+            "command": command(
+                "$tcp = [Net.Sockets.TcpClient]::new(); try { "
+                "$pending = $tcp.BeginConnect('127.0.0.1', 8766, $null, $null); "
+                "$null = $pending.AsyncWaitHandle.WaitOne(2000); "
+                "if ($tcp.Connected) { exit 1 }; [Console]::Write('network-blocked') "
+                "} finally { $tcp.Dispose() }",
+                "if (echo probe > /dev/tcp/127.0.0.1/8766) 2>/dev/null; then exit 1; else echo network-blocked; fi",
+            )
         },
     )
-    assert result["stdout"].strip() == "network-blocked"
+    assert result["exit_code"] == 0 and result["stdout"].strip() == "network-blocked", result
+    if os.name == "nt":
+        child_code = base64.b64encode("Start-Sleep -Seconds 30".encode("utf-16-le")).decode()
+        _, result = await tool(
+            COMMAND_TOOL,
+            {
+                "command": (
+                    "$child = [Diagnostics.ProcessStartInfo]::new(); "
+                    "$child.FileName = $env:SystemRoot + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'; "
+                    "$child.WorkingDirectory = $env:RTAGENT_WORKSPACE; "
+                    "$child.UseShellExecute = $false; $child.CreateNoWindow = $true; "
+                    f"$child.Arguments = '-NoProfile -NonInteractive -EncodedCommand {child_code}'; "
+                    "$process = [Diagnostics.Process]::Start($child); [Console]::Write($process.Id)"
+                )
+            },
+        )
+        assert result["exit_code"] == 0, result
+        assert_windows_process_stopped(int(result["stdout"]))
     _, result = await tool("read_text", {"path": "evidence.txt"})
     await tool(
         "write_text",
@@ -89,7 +166,7 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
     await tool("edit_text", {"path": "evidence.txt", "old_text": "updated", "new_text": "edited"})
     assert (workspace / "evidence.txt").read_text() == "edited"
     print(
-        "PASS direct Run, idempotent retry, actual Bash/file tools, hidden host files, network isolation"
+        "PASS direct Run, retry identity, native commands/files, host/network isolation, child termination"
     )
 
     _, memory = await tool("read_memory", {})
@@ -117,9 +194,24 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
         "PASS memory persistence, skill-creator selection, skill save/load, recorded context provenance"
     )
 
-    _, result = await tool("bash", {"command": "sleep 3; touch timeout-leak", "timeout": 0.8})
+    _, result = await tool(
+        COMMAND_TOOL,
+        {
+            "command": command(
+                "Start-Sleep -Seconds 3; Set-Content -LiteralPath timeout-leak -Value leak",
+                "sleep 3; touch timeout-leak",
+            ),
+            "timeout": 1.2,
+        },
+    )
     assert result["timed_out"]
-    run = await start('/tool bash {"command":"sleep 3; touch cancellation-leak"}')
+    cancel_args = {
+        "command": command(
+            "Start-Sleep -Seconds 3; Set-Content -LiteralPath cancellation-leak -Value leak",
+            "sleep 3; touch cancellation-leak",
+        )
+    }
+    run = await start(f"/tool {COMMAND_TOOL} {json.dumps(cancel_args)}")
     async with asyncio.timeout(15):
         while True:
             trace = await api("GET", f'/runs/{run["id"]}/trace')
@@ -128,7 +220,7 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
             ):
                 break
             await asyncio.sleep(0.05)
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1)
     cancelled = await api("POST", f'/runs/{run["id"]}/cancel')
     assert cancelled["status"] == "cancelled"
     await asyncio.sleep(3)
@@ -137,9 +229,16 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
     )
     state["config"]["sandbox_mode"] = "read-only"
     state["config"] = await api("PUT", "/config", state["config"])
-    _, result = await tool("bash", {"command": "touch readonly-leak"})
+    _, result = await tool(
+        COMMAND_TOOL,
+        {
+            "command": command(
+                "Set-Content -LiteralPath readonly-leak -Value leak", "touch readonly-leak"
+            )
+        },
+    )
     assert result["exit_code"] != 0 and not (workspace / "readonly-leak").exists()
-    print("PASS Bash timeout, cancellation process cleanup, and read-only mount enforcement")
+    print("PASS command timeout, cancellation cleanup, and OS read-only enforcement")
 
 
 async def main() -> None:
@@ -150,18 +249,20 @@ async def main() -> None:
         workspace = root / "workspace"
         workspace.mkdir()
         (workspace / ".env").write_text("CANARY=not-for-the-agent\n", encoding="utf-8")
+        (root / "host-only.txt").write_text("outside-canary", encoding="utf-8")
         (workspace / "AGENTS.md").write_text("Report evidence accurately.\n", encoding="utf-8")
         settings = Settings(
             data_dir=root / "data",
             workspace_root=workspace,
             provider="fake",
             _env_file=None,
-            wsl_distro=Settings().wsl_distro,
         )
         server = uvicorn.Server(
             uvicorn.Config(create_app(settings), host="127.0.0.1", port=8766, log_level="warning")
         )
         serving = asyncio.create_task(server.serve())
+        previous_canary = os.environ.get("RTAGENT_SMOKE_SECRET")
+        os.environ["RTAGENT_SMOKE_SECRET"] = "not-forwarded-to-commands"
         try:
             async with asyncio.timeout(15):
                 while not server.started:
@@ -175,6 +276,10 @@ async def main() -> None:
         finally:
             server.should_exit = True
             await serving
+            if previous_canary is None:
+                os.environ.pop("RTAGENT_SMOKE_SECRET", None)
+            else:
+                os.environ["RTAGENT_SMOKE_SECRET"] = previous_canary
 
 
 if __name__ == "__main__":

@@ -405,7 +405,11 @@ class Runner:
                     run_id, "tool.started", {"call_id": call_id, "name": call.name}, approval=None
                 )
                 # Bash owns its command deadline; allow its process-tree cleanup to finish.
-                deadline = config.tool_timeout + 35 if call.name == "bash" else config.tool_timeout
+                deadline = (
+                    config.tool_timeout + 35
+                    if call.name in {"bash", "powershell"}
+                    else config.tool_timeout
+                )
                 async with asyncio.timeout(deadline):
                     content = await self.registry.execute(definition, call.args, config)
             except GraphInterrupt:

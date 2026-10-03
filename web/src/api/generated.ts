@@ -73,7 +73,7 @@ export interface paths {
         };
         /**
          * Workspace
-         * @description Inspect project memory, skills, and the actual Bash sandbox status.
+         * @description Inspect project memory, skills, and the native OS sandbox status.
          */
         get: operations["workspace_api_v1_workspace_get"];
         put?: never;

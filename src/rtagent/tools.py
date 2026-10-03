@@ -57,8 +57,15 @@ def native_tools() -> list[ToolDefinition]:
             ["path", "old_text", "new_text"],
         ),
         tool(
-            "bash",
-            "Run Bash in the workspace sandbox. Only /workspace and temporary scratch space are writable; host network is disabled. Host credentials, runtime data, Git metadata, and dependency folders are hidden. Returns exit code, stdout, stderr, and timeout status.",
+            "powershell" if os.name == "nt" else "bash",
+            (
+                "Run Windows PowerShell in a native Windows AppContainer. Use PowerShell syntax, "
+                "relative paths or Workspace:\\; $env:RTAGENT_WORKSPACE is the native directory. "
+                "Changes are copied back after the command stops. "
+                if os.name == "nt"
+                else "Run Bash inside the Linux workspace sandbox at /workspace. "
+            )
+            + "Network access is disabled. Credentials, runtime data, Git metadata, and dependency folders are excluded. Returns exit code, stdout, stderr, and timeout status.",
             {
                 "command": {"type": "string", "minLength": 1, "maxLength": 16000},
                 "cwd": string,
@@ -160,11 +167,16 @@ async def mcp_session(server: MCPServer):
 class ToolRegistry:
     """Discover tools and execute schemas pinned to a Run snapshot."""
 
-    def __init__(self, workspace: Path, data_dir: Path | None = None, wsl_distro: str = ""):
+    def __init__(self, workspace: Path, data_dir: Path | None = None):
         """Bind local tools to one resolved workspace and seed the native catalog."""
         self.workspace = workspace.resolve()
         self.files = Workspace(self.workspace, data_dir)
-        self.sandbox = BashSandbox(self.files, wsl_distro)
+        if os.name == "nt":
+            from rtagent.windows_sandbox import WindowsSandbox
+
+            self.sandbox = WindowsSandbox(self.files)
+        else:
+            self.sandbox = BashSandbox(self.files)
         self.catalog: dict[str, ToolDefinition] = {}
         self.errors: dict[str, str] = {}
         self.reset()
@@ -241,7 +253,11 @@ class ToolRegistry:
         name = definition.name
         if config.sandbox_mode == "read-only" and name in WRITE_TOOLS:
             raise AppError("tool_denied", "The workspace is read-only.", 403)
-        if name == "bash":
+        if name in {"bash", "powershell"}:
+            if name != ("powershell" if os.name == "nt" else "bash"):
+                raise AppError(
+                    "tool_unavailable", "This command tool belongs to a different operating system."
+                )
             timeout = min(args.get("timeout", config.tool_timeout), config.tool_timeout)
             return await self.sandbox.execute(
                 args["command"], args.get("cwd", "."), config.sandbox_mode, timeout
