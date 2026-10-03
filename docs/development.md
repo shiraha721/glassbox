@@ -23,6 +23,8 @@ Read in this order:
 2. [architecture.md](architecture.md): module boundaries, data models, interfaces, and acceptance criteria.
 3. The relevant modules, tests, and project configuration. Use commands supported by the configuration that actually exists.
 
+The [Architecture Reference](reference/README.md) maps every implemented module, class, function, callback, and dependency to its purpose, mechanism, design reason, architectural layer, and source location. Keep the corresponding entry and source link synchronized when changing behavior.
+
 ## Target Structure and Dependency Direction
 
 The baseline uses single modules (`api.py`, `application.py`, `runtime.py`, and so on) for these responsibilities. Split a module only when its size or a concrete extension warrants it. Presets own embedded blocks; one versioned settings aggregate owns provider, MCP, permission, and limit configuration. Preserve immutable Run snapshots without adding a generic persistence or plugin framework.

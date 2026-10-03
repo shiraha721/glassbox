@@ -18,7 +18,7 @@ As of 2026-10-03, Stage 1 is implemented and the first Stage 2 workspace capabil
 
 Local HTTP checks exercise actual tools, sandbox boundaries, memory, Skills, cancellation, and conversation management. A basic live OpenAI-compatible model → native Windows PowerShell → model loop has also completed, with both outbound requests captured. Substantial coding/analysis acceptance remains ahead; simulated decisions do not establish real model quality.
 
-See [Architecture](architecture.md) for the implemented design and the [Development Guide](development.md) for repository conventions. [AGENTS.md](../AGENTS.md) is the root entry point for coding agents.
+See [Architecture](architecture.md) for the whole-system design and the [Architecture Reference](reference/README.md) for every module, class, function, callback, and dependency role. The [Development Guide](development.md) defines repository conventions. [AGENTS.md](../AGENTS.md) is the root entry point for coding agents.
 
 ## Start the application
 

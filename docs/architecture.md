@@ -2,6 +2,110 @@
 
 Last updated: 2026-10-03. This describes implemented behavior. Future work is defined in the [delivery stages](README.md#delivery-stages).
 
+## Read from the whole system to individual functions
+
+This page explains the system's shape, resource ownership, data flow, and design choices. The [Architecture Reference](reference/README.md) follows those boundaries down to **every implemented module, class, named function/method, nested helper, and anonymous callback**. Each entry explains purpose, mechanism, reason, layer, architectural role, and source location. [Engineering](reference/engineering.md) also explains every declared dependency package, migration, script, and supporting test function.
+
+| Detail to inspect | Reference |
+| --- | --- |
+| Data contracts, process settings, compilation, policy, redaction | [Backend core](reference/backend-core.md) |
+| Composition root, Studio actions, exact HTTP/SSE handlers | [Application and transport](reference/backend-application.md) |
+| Model serialization/capture, graph nodes, budgets, receipts, recovery | [Execution](reference/backend-execution.md) |
+| Tables, version checks, transactions, history copies/deletion | [Storage](reference/backend-storage.md) |
+| File context, memory, Skills, tool schemas/dispatch, native OS isolation | [Workspace and tools](reference/backend-workspace.md) |
+| Components, query state, drafts, handlers, responsive layouts | [Frontend](reference/frontend.md) |
+| Dependencies, tooling, schema upgrades, verification functions | [Engineering](reference/engineering.md) |
+| Local predicates, effects, state updaters, and event closures | [Callbacks](reference/callbacks.md) |
+
+## What the application owns
+
+The product takes a task, composes its initial model input from visible configuration and workspace context, executes one bounded agent loop, and preserves the evidence. A conversation organizes turns; each new turn creates a Run with its own immutable input and graph thread. Prompt editing is one way to control those inputs. It does not replace the task-to-execution workflow.
+
+The system has four concrete external boundaries: the browser talks to local HTTP/SSE; a model adapter talks to an explicitly configured endpoint; native command tools execute inside an OS sandbox; MCP talks to explicitly configured external processes/services. SQLite and ordinary context files are local persistence. Those boundaries have different permissions and lifetimes, so treating them as one universal plugin or sandbox would misdescribe the implementation.
+
+### Actual repository layout
+
+```text
+src/rtagent/                    One installable Python package
+  __init__.py                  Package version; no worker
+  main.py                      Composition root, lifespan, local browser boundary, SPA
+  config.py                    Process environment/paths and secret references
+  api.py                       HTTP routes, validated contracts, SSE serialization
+  application.py               Studio use cases and Run command coordination
+  domain.py                    Strict data contracts and canonical utility values
+  prompts.py                   Pure compilation, conditions, variables, source mapping
+  policies.py                  Frozen-schema argument validation and allow/ask/deny
+  runtime.py                   Explicit LangGraph loop, tasks, budgets, receipts/reentry
+  providers.py                 LangChain adapter, prepared/captured requests, fake stream
+  tools.py                     Native schemas, stateless MCP lifecycle, one-call dispatch
+  workspace.py                 Guarded files and file-backed instructions/memory/Skills
+  sandbox.py                   Linux bubblewrap/Bash and process-group cleanup
+  windows_sandbox.py           Win32 AppContainer/PowerShell/Job Object lifecycle
+  sandbox_files.py             Windows filtered copy and conflict-checked reconciliation
+  storage.py                   SQLAlchemy Core tables/transactions/events/copies
+  tracing.py                   Sanitized evidence copies
+  skills/skill-creator/         Packaged SKILL.md resource
+web/src/                       React presentation and local editor state
+  main.tsx, App.tsx            Browser bootstrap and workspace coordination
+  Composer.tsx                 Prompt block controls and rule drafts
+  usePresetDrafts.ts           Independent bounded undo/redo histories
+  ConversationHistory.tsx     History groups, menus, and copy/metadata dialogs
+  Inspector.tsx                Preview versus actual call evidence
+  Settings.tsx                 Versioned execution configuration editor
+  WorkspacePanel.tsx           Memory/skill editors and sandbox inspection
+  api/client.ts                Same-origin JSON transport and generated type aliases
+  api/events.ts                Persistent event subscription/query invalidation
+  api/generated.ts             Generated type-only OpenAPI contract
+  style.css                    Visual hierarchy, fixed/scroll areas, responsive behavior
+migrations/                    Application schema history, separate from checkpoints
+scripts/                       Contract export and isolated real-HTTP smoke checks
+tests/, web/e2e/               Backend/component/browser verification
+docs/                          Project guide, system design, development/reference
+```
+
+This is the current layout. Responsibilities are modules, not all separate packages. Splitting them further requires a concrete need; the design does not assume microservices, a plugin marketplace, a vector store, or a second persistence backend.
+
+### Layers and reasons for the boundaries
+
+| Layer | Concrete owner | What it does / how it connects | Why this boundary exists |
+| --- | --- | --- | --- |
+| Presentation and local UI state | React components, usePresetDrafts, style.css | Displays saved projections and collects explicit task/editor/action input. | Drafts/selection/layout are browser concerns; authorization and effects are server concerns. |
+| Transport | api.py, browser client/events | Validates/serializes HTTP contracts and reads persistent SSE; delegates actions. | Opening/reconnecting UI is a read operation, not implicit model execution. |
+| Application use cases | Studio | Resolves revisions/context, freezes input, starts/approves/resumes/stops, coordinates checkpoint deletion. | Multi-step behavior has one owner independent of route rendering and graph-node internals. |
+| Domain computation and policy | domain.py, prompts.py, policies.py | Represents values, deterministically compiles, validates frozen arguments, returns a configured decision. | No network/database/model SDK can make pure composition or authorization depend on hidden effects. |
+| Runtime orchestration | Runner / LangGraph | Orders model/tool steps, checkpoints progress, enforces budgets, persists receipts and interrupts. | One explicit loop makes control flow and recovery visible; model adapters do not nest another loop. |
+| Concrete infrastructure | providers/tools/workspace/sandboxes/config | Talks to SDKs/OS/files/transports and resolves credential references at their boundary. | The external system decides execution mechanics; the model cannot select an unrestricted host implementation. |
+| Persistence and evidence | Repository, AsyncSqliteSaver, tracing | Stores application ownership/projections/receipts and separate graph progress; creates redacted copies. | Durable evidence and progress are different facts, and sanitizing a view must not rewrite originals. |
+| Composition and engineering | main, migrations, export/smoke/tests/config | Owns lifetime, migrations, contract generation, and validation. | Resource startup/cleanup and development tooling do not belong in task prompts or frontend flows. |
+
+These are responsibility layers, not a promise of a strict dependency-inverted framework. Studio directly calls the concrete Runner/Repository/ToolRegistry and provider preparation functions. Simple metadata routes delegate to Repository when no additional use case is needed; complicated execution/deletion goes through Studio. Domain/compiler/policy depend only on validated data and local computation. The entry point wires implementations and owns their lifetime. Detailed references identify the actual imports/effects, including these practical cross-layer calls.
+
+### State and authority
+
+| State | Authority / location | Lifetime and architectural role |
+| --- | --- | --- |
+| Process settings | Settings, environment/.env | Paths and startup overrides for one service process; not model-editable. |
+| Current execution settings | settings row, StudioConfig revision | Edited explicitly; new Runs freeze a copy. Contains references, not actual secrets. |
+| Current preset | presets row, embedded Block values/revision | Editable aggregate; old Run copies never follow later edits. |
+| Successful history | sessions.messages | Only succeeded turns become subsequent model input; all other turns remain inspectable separately. |
+| Prepared input | previews JSON with 15-minute expiry | Same compiler path for optional inspection and direct Run; one consumption per preview. |
+| Run snapshot | runs.snapshot | Original configuration/history/task/schema/context/root/body, immutable through the Run and recovery. |
+| Runtime projection | runs messages/status/approval/usage/partial output | Browser-visible current state; updated alongside numbered events. |
+| Effect receipts | calls table | Intent/result/uncertainty survives node replay and separately records what is known about dispatch. |
+| Graph position | checkpoints.db, thread_id=run_id | LangGraph's node state; original Run only, never cloned by duplicate/fork. |
+| Instructions/memory/Skills | Ordinary workspace/package files | Initial text is snapshotted; later explicit reads/writes are new recorded tool effects. |
+| UI drafts/navigation | Component state and selected session ID | Page-local editing/selection; not execution authority or durable model history. |
+
+The model can propose a ToolCall, not change this ownership. File/tool/model text is data. The server matches its original ID, validates against frozen schemas, enforces local allow/ask/deny and adapter boundaries, then returns matching evidence. An ask decision is a persisted human action for one invocation. Credential references are frozen, while their actual environment values resolve when the provider/MCP call executes; snapshots do not preserve old secret values.
+
+### Resource lifetime and concurrency
+
+`main.create_app` registers behavior without opening runtime stores. Its lifespan resolves directories, migrates/seeds Repository, applies explicit startup overrides, constructs ToolRegistry and Studio/Runner, then opens the checkpoint saver/graph and classifies queued/stranded work. Normal shutdown stops/gathers Run tasks before closing checkpoints, then disposes application connections.
+
+Studio's command lock sequences start/approval/resume/cancel/deletion commands within this process. Repository's writer lock protects short SQLite transactions; it is not held across model/tool execution. Runner's semaphore allows one graph invocation at a time, across conversations. A waiting approval ends that invocation and releases the slot, while its conversation remains reserved by active_run_id. Workspace's RLock serializes native guarded file replacements and Windows reconciliation, separate from database locks. Linux subprocesses use async I/O; blocking file/Win32 operations run off the event loop. One Uvicorn worker is the supported ownership model.
+
+The application does not claim atomicity across model services, workspace edits, app.db, and checkpoints.db. Receipts/checkpoint reuse and explicit uncertainty are how it recovers when those boundaries cannot commit together. Stop awaits local cleanup; it cannot undo a completed file write or remote effect.
+
 ## Application shape
 
 One local FastAPI process owns one LangGraph worker, SQLite persistence, concrete workspace tools, and the React Web UI. Each responsibility is a module, without generic service interfaces, brokers, or a plugin runtime.
@@ -22,7 +126,7 @@ flowchart TD
     APP --> DB[(SQLite)]
     RUN --> DB
     RUN --> CP[(Checkpoints)]
-    DB -->|Numbered events and saved state| UI
+    DB -->|Numbered events and saved state| API
 ```
 
 | Module | Responsibility |
@@ -38,6 +142,87 @@ flowchart TD
 | web/src/ | Conversation, Prompt, Inspector, Workspace and Settings, generated API types |
 
 Domain/compiler/policy logic does not depend on HTTP or storage. The application reads workspace files before pure compilation. Blocking file operations run in a worker thread; model/MCP/subprocess calls use async I/O. The entry point closes tasks, checkpoints, and database resources.
+
+## One task through the concrete functions
+
+```mermaid
+sequenceDiagram
+    participant UI as Workspace.start
+    participant API as api.start_run
+    participant APP as Studio
+    participant DB as Repository
+    participant FILES as Workspace files
+    participant COMP as Compiler/provider preparation
+    participant RUN as Runner
+    UI->>API: Direct PreviewRequest + Idempotency-Key
+    API->>APP: start(request, key)
+    APP->>DB: submitted_run(key, original submission)
+    alt Identical accepted retry
+        DB-->>APP: Original Run
+    else New direct submission
+        APP->>DB: Read session/preset/config revisions
+        APP->>FILES: Capture instructions/memory/catalog/selected skills
+        APP->>COMP: compile_prompt + prepare (no model request)
+        APP->>DB: put_preview + create_run (validate and reserve)
+        DB-->>APP: Queued Run and event sequence 1
+    end
+    APP->>RUN: start(run_id) if queued
+    APP-->>API: view(run_id)
+    API-->>UI: 202 RunView
+    RUN->>DB: Model/tool receipts + projection/events
+    UI->>API: GET events and saved Run/trace state
+    API-->>UI: Numbered SSE and current projections
+```
+
+HTTP acceptance is separate from completion. The background graph uses the saved Run even if the browser closes. UI start keeps a submission key only until it has an accepted response; a lost response can be retried unchanged. An optional Preview uses `Studio.preview` and later `StartRun`; it shares the compiler/consumption path shown above without being a mandatory preceding request.
+
+### Each model/tool cycle
+
+| Step | Concrete functions | State/effect and reason |
+| --- | --- | --- |
+| Reconstruct model input | Runner.model_node → compile_prompt → prepare | Frozen history/context/config plus current Run delta; first body must equal saved input. |
+| Record/send one request | Repository.save_call → generate/capture → on_wire | Persist intent and application body before transmission; no SDK retry. |
+| Stream/save response | Repository.delta / save_call / emit | Partial text is persistent; full response/call IDs/usage are recorded before graph progress. |
+| Choose graph route | Runner.open conditional callbacks | No pending tools means completion; otherwise execute the pending batch in order. |
+| Check one intent | Runner.tool_node → decide | Frozen schema/permission; invalid/denied calls receive matching errors instead of unauthorized effects. |
+| Pause if required | interrupt → Studio.approve → Runner resume | Human decision precedes dispatch and survives restart/reentry. |
+| Dispatch real tool | save_call(executing) → ToolRegistry.execute | File adapter/native OS boundary/MCP schema check owns the concrete effect. |
+| Preserve outcome | save_call(result) → paired tool Message → emit | Matching original tool_call_id, reusable receipt, or explicit outcome_unknown before any retry. |
+| Commit successful turn | Runner.drive → Repository.finish | Append one task plus delta to history and release session in one transaction. |
+
+### Run states and user actions
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued: accepted input
+    queued --> running: worker slot
+    running --> waiting_approval: ask before effect
+    waiting_approval --> queued: explicit approve or reject
+    running --> interrupted: restart or unknown outcome
+    interrupted --> queued: explicit reconciliation/resume
+    running --> succeeded: model returns no calls
+    running --> failed: known failure or budget
+    queued --> cancelled: Stop
+    running --> cancelling: Stop
+    cancelling --> cancelled: local cleanup awaited
+    waiting_approval --> cancelled: Stop
+    interrupted --> cancelled: Stop
+```
+
+Terminal means succeeded, failed, or cancelled. Waiting/interrupted keeps the conversation active and prevents archive/copy/delete until resolved or cancelled. A denied tool can still lead to a succeeded Run because the model receives a paired error and chooses a final response; tool permission outcome and Run completion are different facts. Shutdown keeps pending human approvals; abandoned dispatched calls become uncertain. Reading history or reconnecting events makes no state transition in this diagram.
+
+### Other vertical workflows
+
+| User action | Concrete path | Result / design reason |
+| --- | --- | --- |
+| Edit and save a preset | Composer → usePresetDrafts → Workspace.savePreset → save_preset | Local undoable content becomes a new aggregate revision; snapshots remain immutable. |
+| Change settings/discover MCP | Settings.save → Studio.save_config / ToolRegistry.discover | New config revision, explicit fresh discovery, tools still disabled until allowed/asked. |
+| Save note/procedure | MemoryEditor/SkillEditor → Studio → Workspace.write/save_skill | Same hash/file-format checks as model tools, with Preview invalidated. |
+| Duplicate/fork | History.copy or turn fork → Repository.copy_session | New owned evidence IDs/provenance, successful prefix history, zero model/tool replay. |
+| Rename/move/archive | History.update → Repository.update_session | Revisioned metadata; archive requires idle, execution requires restoration. |
+| Delete folder | History.submit → Repository.delete_folder | Members become Unfiled and their revisions advance; history remains. |
+| Delete conversation | History.submit → Studio.delete_session → checkpointer/Repository | Idle-only owned checkpoint/evidence cleanup; independent copies remain. |
+| Inspect/export | Inspector → trace/export handlers → redact | Canonical/prepared/wire/results are distinct; original local view is explicit, export is labeled non-replayable. |
 
 ## Direct Run and optional Preview
 
@@ -77,7 +262,7 @@ Message order:
 5. Current user input exactly once.
 6. This Run's assistant/tool messages.
 
-Duplicate block IDs/orders within a placement fail. Every block retains its inclusion/exclusion reason; every message has a source. Workspace text is literal, not a template.
+Duplicate block IDs anywhere in a preset and duplicate orders within a placement fail. Every block retains its inclusion/exclusion reason; every message has a source. Workspace text is literal, not a template.
 
 Variables use declared names such as {{task_type}}, with string/number/boolean types and explicit defaults. No code evaluation, attribute access, filesystem access, or arbitrary template execution occurs. Conditions support all/any/not and field/op/value with eq/in/exists. Fields are provider, model, task_type, tools, or one variables.name. Invalid or missing operands fail.
 
