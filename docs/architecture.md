@@ -1,6 +1,6 @@
 # Architecture and Design
 
-Last updated: 2026-10-03. This describes implemented behavior. Future work is defined in the [README delivery stages](../README.md#delivery-stages).
+Last updated: 2026-10-03. This describes implemented behavior. Future work is defined in the [delivery stages](README.md#delivery-stages).
 
 ## Application shape
 
