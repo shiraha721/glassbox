@@ -7,7 +7,7 @@ This guide applies to the entire repository and defines project constraints and 
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-04, Stage 1, the Windows Stage 2 local-agent workflow, and Stage 3 conversation organization/branching are implemented. Real-model coding/analysis, project binding, memory/Skill reuse after restart, and native Windows boundary checks passed; see [Stage 2 acceptance](acceptance-stage2.md). Linux sandbox acceptance requires a Linux host. The target is an extensible everyday agent harness; the original MVP is only the first stage. Consult README delivery stages and actual source files.
+As of 2026-10-04, Stage 1, the Windows Stage 2 local-agent workflow, and Stage 3 conversation organization/branching, guarded patch previews and recorded plans are implemented. Real-model coding/analysis, project binding, memory/Skill reuse and native Windows checks passed; see [Stage 2 acceptance](acceptance-stage2.md) and the subsequent [Codex capability review](codex-gap-review.md). Linux acceptance requires a Linux host. The target is an everyday agent harness; consult delivery stages and actual source files.
 Inspect the actual files before starting work. Do not report the target directories, commands, or APIs below as implemented capabilities.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
@@ -64,6 +64,7 @@ docs/              Project documentation, architecture, and development conventi
 - Sort by the placement and order rules in the design document. Report duplicate ordering, missing variables, and invalid conditions explicitly.
 - Use restricted structured expressions for conditions and substitute only declared variable names. Prohibit `eval`, `exec`, and arbitrary template code execution.
 - Preserve message roles, sources, and exclusion reasons. Never silently drop blocks, change roles, move blocks, or add unrecorded system instructions.
+- Record actual root, command language, configured isolation and exposed capabilities in the visible runtime:environment source. Preset focus changes behavior, not permission. Upgrade only exactly recognized unchanged built-in starter text.
 - Provider-required system field extraction, merging, and serialization changes must remain visible. Reject requests that cannot be adapted without loss.
 - Preview and execution share the same compilation path. Runs bind to immutable configuration, tool schemas, and session versions.
 - Insert the current user input exactly once. Do not repeatedly write rendered system blocks into conversation history.
@@ -73,8 +74,10 @@ docs/              Project documentation, architecture, and development conventi
 
 - Use native Windows AppContainer with PowerShell on Windows and bubblewrap with Bash on Linux. Do not require WSL for Windows execution. Never replace it with unrestricted host execution or present a cwd check as an OS sandbox. Preserve no-network behavior, hidden credentials/runtime paths, bounded output, and child-process cleanup.
 - Projects register one existing local folder; sessions bind to stable project IDs and Runs freeze their absolute root. Idle workspace moves affect future Runs only. Native tools and context are resolved from that root; the model cannot select a different project.
-- Memory and Skills use ordinary files. Snapshot initial AGENTS.md, memory, and selected skill content with source mapping. Load skill bodies on demand; no vector store or plugin framework is needed.
+- Memory and Skills use ordinary files. Snapshot the first nonempty root AGENTS.override.md or AGENTS.md, memory and selected Skill content with source mapping. Load nested root-to-leaf instructions and Skill bodies explicitly; retain bounds and override precedence. No vector store or plugin framework is needed.
 - Writes use content hashes or unambiguous exact edits. Skills and memory cannot grant permissions or bypass isolation. Explicitly configured MCP servers remain outside the command sandbox.
+- Search shares native path exclusions and reports skipped/truncated results. Ranged reads return the complete file hash even when content is partial. Patch preflight validates every operation before effects; each replacement is atomic, but later failures must retain completed paths rather than claim cross-file rollback.
+- Plans are validated paired update_plan receipts projected from Run messages. Do not add duplicate plan storage or treat completed labels as verification evidence.
 
 - Implement a bounded `model -> policy -> tools -> model` loop for the first release. Finish when there are no tool calls.
 - Preserve the original `tool_call_id` for every model tool call. Supply a matching success or error result for each before calling the model again.
@@ -127,6 +130,7 @@ uv run uvicorn rtagent.main:create_app --factory --reload --host 127.0.0.1 --por
 uv run python scripts/smoke_workspace.py
 uv run python scripts/smoke_conversations.py
 uv run python scripts/smoke_projects.py
+uv run python scripts/smoke_agent_tools.py
 uv run pytest
 uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations
@@ -150,6 +154,8 @@ npm run test:e2e
 During initial setup, use `uv lock` and `npm install` to create lockfiles, then install from those lockfiles on subsequent runs.
 Before running browser tests for the first time, install the browsers required by the Playwright configuration.
 Build the frontend before browser tests; their isolated backend serves `web/dist`. Regenerate API types with `uv run python scripts/export_api.py`, then `npm --prefix web run generate:api`. Commit `web/src/api/generated.ts`; the intermediate schema is ignored.
+
+With a configured real provider and the local service running, `uv run python scripts/acceptance_stage2.py --live` and `uv run python scripts/acceptance_agent_tools.py --live` provide opt-in external acceptance. Run them separately: both own isolated port 8768 and retain evidence under ignored var. The latter independently checks guarded Coding repairs and read-only Code review findings; default tests never make these model requests.
 
 Tests should cover the actual behavior affected by a change:
 

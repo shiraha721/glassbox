@@ -4,6 +4,8 @@ import json
 import os
 import re
 import threading
+from difflib import unified_diff
+from fnmatch import fnmatchcase
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -11,8 +13,10 @@ from typing import Any
 import yaml
 
 from rtagent.domain import AppError, Message, digest
+from rtagent.patches import apply_hunks, parse_patch
 
 FILE_LIMIT = 65_536
+TEXT_FILE_LIMIT = 2 * 1024 * 1024
 MEMORY_PATH = ".rtagent/MEMORY.md"
 SKILL_ROOT = ".agents/skills"
 SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -65,13 +69,15 @@ class Workspace:
         return resolved
 
     @staticmethod
-    def read_path(path: Path) -> str:
+    def read_path(path: Path, limit: int = FILE_LIMIT) -> str:
         """Decode bounded UTF-8 text without allocating an arbitrarily large file."""
         try:
             with path.open("rb") as handle:
-                content = handle.read(FILE_LIMIT + 1)
-            if len(content) > FILE_LIMIT:
-                raise AppError("tool_output_limit", "File exceeds the 64 KiB text limit.")
+                content = handle.read(limit + 1)
+            if len(content) > limit:
+                raise AppError(
+                    "tool_output_limit", f"File exceeds the {limit // 1024} KiB text limit."
+                )
             return content.decode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise AppError(
@@ -83,13 +89,259 @@ class Workspace:
         content = self.read_path(self.path(path))
         return {"path": path, "content": content, "hash": digest(content)}
 
+    def read_lines(self, path: str, start_line: int = 1, line_count: int = 200) -> dict[str, Any]:
+        """Read a bounded line range with the full-file hash, allowing navigation through larger files."""
+        if start_line < 1 or not 1 <= line_count <= 500:
+            raise AppError("invalid_tool_arguments", "Use a positive start_line and 1–500 lines.")
+        content = self.read_path(self.path(path), TEXT_FILE_LIMIT)
+        lines = content.splitlines(keepends=True)
+        selected, size = [], 0
+        for line in lines[start_line - 1 : start_line - 1 + line_count]:
+            # Bound escaped JSON as well as raw UTF-8, leaving room for metadata.
+            encoded_size = len(json.dumps(line, ensure_ascii=False).encode())
+            if size + encoded_size > 24_000:
+                if not selected:
+                    raise AppError(
+                        "tool_output_limit", "This single line exceeds the output budget."
+                    )
+                break
+            selected.append(line)
+            size += encoded_size
+        next_line = start_line + len(selected)
+        return {
+            "path": path,
+            "content": "".join(selected),
+            "hash": digest(content),
+            "start_line": start_line,
+            "end_line": next_line - 1,
+            "total_lines": len(lines),
+            "next_line": next_line if next_line <= len(lines) else None,
+            "truncated": next_line <= len(lines),
+        }
+
+    def _walk(self, path: str) -> tuple[list[Path], bool]:
+        """Enumerate at most 10,000 entries without descending into excluded or linked directories."""
+        directory = self.path(path)
+        if not directory.is_dir():
+            raise AppError("tool_error", "The search root must be an existing workspace directory.")
+        files, pending, visited = [], [directory], 0
+        while pending:
+            children = []
+            try:
+                with os.scandir(pending.pop()) as entries:
+                    for entry in entries:
+                        visited += 1
+                        if visited > 10_000:
+                            return sorted(files), True
+                        children.append(Path(entry.path))
+            except OSError as exc:
+                raise AppError("tool_error", "A searched directory is inaccessible.") from exc
+            for child in sorted(children, reverse=True):
+                try:
+                    checked = self.path(child.relative_to(self.root).as_posix())
+                except AppError:
+                    continue
+                if checked.is_dir():
+                    pending.append(checked)
+                elif checked.is_file():
+                    files.append(checked)
+        return sorted(files), False
+
+    @staticmethod
+    def _matches(path: str, pattern: str) -> bool:
+        """Match a relative glob, including root files when the pattern starts with **/."""
+        return fnmatchcase(path, pattern) or (
+            pattern.startswith("**/") and fnmatchcase(path, pattern[3:])
+        )
+
+    def search_files(
+        self, pattern: str = "**/*", path: str = ".", limit: int = 100
+    ) -> dict[str, Any]:
+        """Find workspace files by glob with explicit traversal and result truncation."""
+        files, truncated = self._walk(path)
+        found, size = [], 0
+        for file in files:
+            relative = file.relative_to(self.root).as_posix()
+            if not self._matches(relative, pattern):
+                continue
+            size += len(json.dumps(relative, ensure_ascii=False).encode())
+            if len(found) >= limit or size > 24_000:
+                truncated = True
+                break
+            found.append(relative)
+        return {"files": found, "truncated": truncated, "pattern": pattern, "path": path}
+
+    def search_text(
+        self,
+        query: str,
+        path: str = ".",
+        pattern: str = "**/*",
+        case_sensitive: bool = True,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Search literal UTF-8 text with line numbers, bounded scanning, and explicit skipped files."""
+        if not query:
+            raise AppError("invalid_tool_arguments", "Enter nonempty literal search text.")
+        files, truncated = self._walk(path)
+        matches, skipped, scanned, used, size = [], 0, 0, 0, 0
+        needle = query if case_sensitive else query.casefold()
+        for file in files:
+            relative = file.relative_to(self.root).as_posix()
+            if not self._matches(relative, pattern):
+                continue
+            if scanned >= 1000 or used >= 8 * 1024 * 1024:
+                truncated = True
+                break
+            scanned += 1
+            try:
+                allowance = min(TEXT_FILE_LIMIT, 8 * 1024 * 1024 - used)
+                size_on_disk = file.stat().st_size
+                if size_on_disk > TEXT_FILE_LIMIT:
+                    skipped += 1
+                    continue
+                used += min(size_on_disk, allowance)
+                content = self.read_path(file, allowance)
+            except (OSError, AppError):
+                skipped += 1
+                continue
+            if "\0" in content:
+                skipped += 1
+                continue
+            for number, line in enumerate(content.splitlines(), 1):
+                if needle not in (line if case_sensitive else line.casefold()):
+                    continue
+                item = {
+                    "path": relative,
+                    "line": number,
+                    "text": line[:600],
+                    "line_truncated": len(line) > 600,
+                }
+                size += len(json.dumps(item, ensure_ascii=False).encode())
+                if len(matches) >= limit or size > 24_000:
+                    return {
+                        "matches": matches,
+                        "truncated": True,
+                        "scanned_files": scanned,
+                        "skipped_files": skipped,
+                    }
+                matches.append(item)
+        return {
+            "matches": matches,
+            "truncated": truncated,
+            "scanned_files": scanned,
+            "skipped_files": skipped,
+        }
+
+    def apply_patch(
+        self, patch: str, expected_hashes: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """Preflight all file operations and hashes before applying per-file atomic changes."""
+        operations = parse_patch(patch)
+        hashes = expected_hashes or {}
+        prepared, seen = [], set()
+        with self.lock:
+            for operation in operations:
+                target = self.path(operation.path)
+                identity = os.path.normcase(str(target))
+                if identity in seen:
+                    raise AppError("invalid_patch", "Two patch paths refer to the same file.")
+                seen.add(identity)
+                exists = target.exists()
+                if operation.action == "add":
+                    if exists:
+                        raise AppError("file_conflict", "Add File must name a new file.", 409)
+                    before, after = "", "\n".join(line[1:] for line in operation.lines)
+                    if operation.lines:
+                        after += "\n"
+                else:
+                    before = self.read_path(target, TEXT_FILE_LIMIT)
+                    if hashes.get(operation.path) != digest(before):
+                        raise AppError(
+                            "file_conflict",
+                            f"Read {operation.path} and supply its current hash before updating or deleting it.",
+                            409,
+                        )
+                    after = (
+                        apply_hunks(before, operation.lines) if operation.action == "update" else ""
+                    )
+                if len(after.encode()) > TEXT_FILE_LIMIT:
+                    raise AppError("tool_output_limit", "A patched file exceeds the 2 MiB limit.")
+                difference = "".join(
+                    unified_diff(
+                        before.splitlines(keepends=True),
+                        after.splitlines(keepends=True),
+                        fromfile=operation.path,
+                        tofile=operation.path,
+                    )
+                )
+                prepared.append((operation, before, after, difference))
+            manifest = [
+                {
+                    "path": operation.path,
+                    "operation": operation.action,
+                    "hash": digest(after) if operation.action != "delete" else None,
+                    "diff": "",
+                    "diff_truncated": False,
+                }
+                for operation, _, after, _ in prepared
+            ]
+            metadata_size = len(
+                json.dumps({"files": manifest, "atomic": False}, ensure_ascii=False).encode()
+            )
+            if metadata_size > 40_000:
+                raise AppError(
+                    "tool_output_limit", "Patch path metadata exceeds the result budget."
+                )
+            diff_budget = (48_000 - metadata_size) // len(manifest)
+            for item, (_, _, _, difference) in zip(manifest, prepared, strict=True):
+                preview = difference[:4000]
+                while len(json.dumps(preview, ensure_ascii=False).encode()) > diff_budget:
+                    preview = preview[: len(preview) // 2]
+                item.update(diff=preview, diff_truncated=len(preview) < len(difference))
+            # Bound the evidence before effects, so successful writes cannot lose their receipt
+            # merely because the subsequent serialized output is too large.
+            applied = []
+            for item, (operation, before, after, _) in zip(manifest, prepared, strict=True):
+                try:
+                    if operation.action == "delete":
+                        target = self.path(operation.path)
+                        if digest(self.read_path(target, TEXT_FILE_LIMIT)) != digest(before):
+                            raise AppError(
+                                "file_conflict", "A file changed after patch preflight.", 409
+                            )
+                        target.unlink()
+                    else:
+                        self._replace(
+                            operation.path,
+                            after,
+                            digest(before) if operation.action == "update" else None,
+                        )
+                except (OSError, AppError) as exc:
+                    raise AppError(
+                        "partial_patch",
+                        "Patch application stopped. Inspect the reported completed files before retrying.",
+                        409,
+                        {"files": applied, "failed_path": operation.path},
+                    ) from exc
+                applied.append(item)
+        return {"files": applied, "atomic": False}
+
     def write(self, path: str, content: str, expected_hash: str | None = None) -> dict[str, str]:
         """Create a file, or replace one only after the caller has read its current text."""
         if len(content.encode()) > FILE_LIMIT:
-            raise AppError("tool_output_limit", "Text exceeds the 64 KiB file limit.")
+            raise AppError(
+                "tool_output_limit",
+                "Text exceeds the 64 KiB direct-write limit; use a focused patch for larger files.",
+            )
+        return self._replace(path, content, expected_hash)
+
+    def _replace(self, path: str, content: str, expected_hash: str | None) -> dict[str, str]:
+        """Share guarded atomic replacement while allowing bounded patches to edit larger files."""
+        if len(content.encode()) > TEXT_FILE_LIMIT:
+            raise AppError("tool_output_limit", "Text exceeds the 2 MiB file limit.")
         with self.lock:
             target = self.path(path)
-            previous = self.read_path(target) if target.exists() else ""
+            previous = self.read_path(target, TEXT_FILE_LIMIT) if target.exists() else ""
             if (target.exists() and expected_hash != digest(previous)) or (
                 not target.exists() and expected_hash not in (None, digest(""))
             ):
@@ -243,9 +495,44 @@ class Workspace:
             expected_hash,
         )
 
+    def read_instructions(self, path: str = ".") -> dict[str, Any]:
+        """Read the instruction chain down to a file's parent or an existing workspace directory."""
+        target = self.path(path)
+        directory = target if target.is_dir() else target.parent
+        chain = [
+            self.root,
+            *reversed(
+                [
+                    item
+                    for item in directory.parents
+                    if item.is_relative_to(self.root) and item != self.root
+                ]
+            ),
+        ]
+        if directory != self.root:
+            chain.append(directory)
+        documents, size = [], 0
+        for parent in chain:
+            for name in ("AGENTS.override.md", "AGENTS.md"):
+                relative = (parent / name).relative_to(self.root).as_posix()
+                if self.path(relative).exists():
+                    document = self.read(relative)
+                    if not document["content"].strip():
+                        continue
+                    size += len(document["content"].encode())
+                    if size > 32_768:
+                        raise AppError(
+                            "instructions_limit",
+                            "The instruction chain exceeds 32 KiB; split or shorten it.",
+                        )
+                    documents.append(document)
+                    break
+        return {"path": path, "documents": documents, "precedence": "root_to_leaf"}
+
     def instructions(self) -> dict[str, str] | None:
-        """Read root AGENTS.md for both composition and execution, retaining its fingerprint."""
-        return self.read("AGENTS.md") if self.path("AGENTS.md").exists() else None
+        """Capture the first nonempty root override or AGENTS.md as visible initial context."""
+        documents = self.read_instructions()["documents"]
+        return documents[0] if documents else None
 
     def context(self, selected: list[str]) -> list[Message]:
         """Capture literal workspace context once, outside the pure prompt compiler."""
@@ -255,7 +542,7 @@ class Workspace:
             messages.append(
                 Message(
                     role="system",
-                    source="workspace:AGENTS.md",
+                    source="workspace:" + instructions["path"],
                     content=instructions["content"],
                 )
             )

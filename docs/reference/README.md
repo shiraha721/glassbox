@@ -19,9 +19,9 @@ This reference explains implemented code from the application down to individual
 
 ## Coverage and boundaries
 
-The reviewed source contains **184 backend functions/methods and 56 backend classes**, **56 frontend named functions/methods and 1 frontend class**, and **82 supporting named functions/methods plus 1 supporting test class**. Each has an individual entry. The callback appendix additionally lists **11 Python lambdas and 274 TypeScript anonymous callbacks**, including verification callbacks. This totals 322 named functions/methods, 285 anonymous functions, and 58 classes.
+The reviewed source contains **198 backend functions/methods and 59 backend classes**, **61 frontend named functions/methods and 1 frontend class**, and **91 supporting named functions/methods plus 1 supporting test class**. Each has an individual entry. The callback appendix additionally lists **11 Python lambdas and 292 TypeScript anonymous callbacks**, including verification callbacks. This totals 350 named functions/methods, 303 anonymous functions, and 61 classes.
 
-The actual Python package is `rtagent`; its responsibilities are currently single modules. The npm package is `security-agent-studio-web`. `scripts`, `migrations`, and `tests` are supporting source directories. `skills/skill-creator` is a packaged Markdown resource. The proposed future subpackage layout in the development guide is not an implemented directory tree.
+The actual Python package is `rtagent`; its responsibilities are currently single modules. The npm package is `security-agent-studio-web`. `scripts`, `migrations`, and `tests` are supporting source directories. `skills/skill-creator`, `skills/debugging` and `skills/code-review` are packaged Markdown resources. The proposed future subpackage layout in the development guide is not an implemented directory tree.
 
 Generated OpenAPI declarations have no first-party runtime function bodies. Win32 aliases bind operating-system functions; the Windows reference documents their role separately. Third-party internal functions and every transitive lockfile entry are outside this project's function inventory. The dependency reference covers all direct declarations and transitively supplied packages that this source directly imports.
 

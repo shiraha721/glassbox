@@ -492,9 +492,13 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`test_file_tool_boundaries`](../../tests/test_tools.py#L19) | Protect native bounded path reads. | Read known text, reject uppercase .ENV/.DB, binary and oversized files, and traversal. | File helpers cannot bypass exclusions merely through casing or alternate caller paths. |
-| [`test_mcp_discovery_and_execution`](../../tests/test_tools.py#L38) | Protect SDK session/discovery/call and stdio environment scoping. | Parameterize stdio/HTTP, launch local fixture, discover namespaced tools, call echo, verify explicit env reference present/ambient key absent, finally terminate listener. | Real transport contracts work without provider credentials, and configured references do not forward arbitrary server environment secrets. |
-| [`test_changed_mcp_schema_is_rejected`](../../tests/test_tools.py#L95) | Protect frozen advertised schema across fresh connections. | Discover fixture, change referenced schema-mode variable, execute frozen tool, and require schema-changed AppError. | A reconnect cannot invoke an interface different from the Run's advertised tool contract. |
+| [`test_file_tool_boundaries`](../../tests/test_tools.py#L20) | Protect native bounded path reads. | Read known text, reject uppercase .ENV/.DB, binary and oversized files, and traversal. | File helpers cannot bypass exclusions merely through casing or alternate caller paths. |
+| [`test_mcp_discovery_and_execution`](../../tests/test_tools.py#L39) | Protect SDK session/discovery/call and stdio environment scoping. | Parameterize stdio/HTTP, launch local fixture, discover namespaced tools, call echo, verify explicit env reference present/ambient key absent, finally terminate listener. | Real transport contracts work without provider credentials, and configured references do not forward arbitrary server environment secrets. |
+| [`test_partial_patch_reports_completed_files`](../../tests/test_tools.py#L113) | Protect evidence after a later patch write fails. | Inject a failure on the second guarded replacement; assert first file changed, second unchanged, and partial_patch identifies completed and failed paths. | A coordinated patch cannot claim workspace-wide atomicity or lose known effects during error recovery. |
+| [`test_partial_patch_reports_completed_files.fail_second`](../../tests/test_tools.py#L118) | Reproduce a deterministic second-file I/O failure. | Raise for the second.txt destination and delegate other replacements to the real writer. | The test crosses the actual per-file commit boundary without a destructive external fixture. |
+| [`test_read_only_patch_denied_before_effect`](../../tests/test_tools.py#L135) | Protect mutation policy at concrete dispatch. | Call the real registry with read-only configuration and a patch definition, require tool_denied and unchanged workspace. | Removing a schema from model exposure alone is insufficient enforcement. |
+| [`test_unicode_patch_evidence_stays_bounded`](../../tests/test_tools.py#L149) | Protect preflight output budgeting. | Apply twenty real Unicode/escaped-content additions, assert all effects/paths are reported and serialized output fits the bound with explicit truncated diffs. | Successful effects must not lose their receipt because JSON escaping makes the result too large. |
+| [`test_changed_mcp_schema_is_rejected`](../../tests/test_tools.py#L96) | Protect frozen advertised schema across fresh connections. | Discover fixture, change referenced schema-mode variable, execute frozen tool, and require schema-changed AppError. | A reconnect cannot invoke an interface different from the Run's advertised tool contract. |
 
 <details>
 <summary>Source signatures (including private and nested functions)</summary>
@@ -503,6 +507,10 @@ Every function below belongs to the layer named above. The last column identifie
 def test_file_tool_boundaries(tmp_path)
 async def test_mcp_discovery_and_execution(tmp_path, monkeypatch, transport)
 async def test_changed_mcp_schema_is_rejected(tmp_path, monkeypatch)
+def test_partial_patch_reports_completed_files(tmp_path, monkeypatch)
+def test_partial_patch_reports_completed_files.fail_second(path, content, expected_hash)
+async def test_read_only_patch_denied_before_effect(tmp_path)
+def test_unicode_patch_evidence_stays_bounded(tmp_path)
 ```
 
 These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
@@ -546,9 +554,9 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`openWorkspace`](../../web/e2e/studio.spec.ts#L6) | Open the app and create fresh conversation. | Navigate /, assert workspace attached, open responsive sidebar if needed, create history, and assert Preview disabled with no task. | Every case starts through real local UI without login or accidental prior task input. |
+| [`openWorkspace`](../../web/e2e/studio.spec.ts#L6) | Open the app and create a fresh conversation. | Navigate /, assert workspace presence, open the sidebar if needed, create history, require disabled empty Run and enabled empty Preview. | System-only prompt inspection stays usable; tests begin through the actual local UI without login or a model call. |
 | [`startTask`](../../web/e2e/studio.spec.ts#L17) | Submit one task directly. | Fill Task and click Run, without clicking Preview. | Browser acceptance protects the direct operational workflow the product promises. |
-| [`actions`](../../web/e2e/studio.spec.ts#L323) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
+| [`actions`](../../web/e2e/studio.spec.ts#L390) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
 
 ### Registered frontend verification callbacks
 
@@ -556,21 +564,24 @@ Each row describes a concrete anonymous `test`/`it` function. Nested interaction
 
 | Source / case | Mechanism | Why / architectural boundary |
 | --- | --- | --- |
-| [E2E: edit/preview/file/trace/refresh](../../web/e2e/studio.spec.ts#L20) | Edit prompt marker, compile optional Preview, run actual read_text, inspect trace/export, reload and verify one saved turn. | Rendering/compilation/tool evidence and refresh identity are one complete workflow. |
-| [E2E: approval after refresh](../../web/e2e/studio.spec.ts#L44) | Trigger ask, reload, approve once, verify one result/turn. | Browser lifetime does not own the durable approval/checkpoint. |
-| [E2E: reject and cancel](../../web/e2e/studio.spec.ts#L58) | Reject echo and inspect tool_denied, then Stop /slow. | Permission and cancellation feedback remain operational in chat. |
-| [E2E: provider references and Preview invalidation](../../web/e2e/studio.spec.ts#L70) | Save endpoint/model/reference fields, reopen Settings, check Run availability. | Configuration persistence never requires a browser key or stale Preview gate. |
-| [E2E: stdio MCP](../../web/e2e/studio.spec.ts#L92) | Add fixture executable/args, save/discover, observe default deny, explicitly allow, run call. | Discovery is separate from authorization, with real local SDK effects. |
-| [E2E: memory/skills direct Run](../../web/e2e/studio.spec.ts#L119) | Save note/procedure, select skill, direct Run, inspect both sources. | File editors, snapshots, and model input provenance work together. |
-| [E2E: narrow viewport](../../web/e2e/studio.spec.ts#L149) | Use mobile-sized page, inspect Preview and visible Run; check layout bounds. | Optional panes cannot make task controls inaccessible. |
-| [E2E: independent reversible drafts](../../web/e2e/studio.spec.ts#L168) | Duplicate/switch/edit/undo/redo/discard, verify original and draft state. | Preset selection stays usable with unsaved work; undo does not mutate saved data. |
-| [E2E: conversation organization and fork](../../web/e2e/studio.spec.ts#L198) | Two turns, rename/folder/fork/continue/duplicate/archive/restore/delete folder/delete copy. | Menu state, source-prefix evidence, shared history independence, and fixed transcript UI are vertical features. |
+| [E2E: tool/preset/plan](../../web/e2e/studio.spec.ts#L22) | Search schemas, inspect effective read-only rules, switch Coding, inspect empty context, directly run a plan and reload it. | Tool exposure, useful preset context and durable progress work through actual UI and receipts. |
+| [E2E: project selection](../../web/e2e/studio.spec.ts#L89) | Register a folder, create a bound conversation, run native file reads, save/reload memory, inspect frozen root and move idle history. | Workspace selection binds effects and sources rather than only changing a sidebar label. |
+| [E2E: live draft](../../web/e2e/studio.spec.ts#L142) | Change task/variables/preset/Skills and clear task; inspect debounced canonical updates and absence of saved drafts/history. | Current input stays inspectable without blanking valid evidence or requiring a nonempty task. |
+| [E2E: edit/preview/file/trace/refresh](../../web/e2e/studio.spec.ts#L203) | Edit a prompt marker, compile Preview, run actual read_text, inspect/export trace and reload one saved turn. | Rendering, compilation, actual tools and refresh identity form one complete workflow. |
+| [E2E: approval after refresh](../../web/e2e/studio.spec.ts#L227) | Trigger Ask, reload, approve once and verify one paired result/turn. | Browser lifetime does not own the durable approval/checkpoint. |
+| [E2E: reject and cancel](../../web/e2e/studio.spec.ts#L241) | Reject echo, inspect tool_denied, then Stop a slow turn. | Permission and cancellation feedback remain operational in chat. |
+| [E2E: provider references and live inspection](../../web/e2e/studio.spec.ts#L254) | Save endpoint/model/reference fields, inspect the current draft and reopen Settings. | Configuration persistence requires neither a browser key nor a Preview gate. |
+| [E2E: stdio MCP](../../web/e2e/studio.spec.ts#L274) | Save/discover a fixture process, inspect default deny, explicitly allow and execute its call. | Discovery is separate from authorization with real local SDK effects. |
+| [E2E: memory/Skills direct Run](../../web/e2e/studio.spec.ts#L301) | Save note/procedure, select it, directly run a task and inspect both sources. | File editors, snapshot compilation and tool evidence form one workflow. |
+| [E2E: narrow viewport](../../web/e2e/studio.spec.ts#L331) | Use a mobile-sized page, inspect Preview and visible Run, and check layout bounds. | Optional panes cannot make task controls inaccessible. |
+| [E2E: reversible drafts](../../web/e2e/studio.spec.ts#L350) | Duplicate/switch/edit/undo/redo/discard and verify original/independent draft state. | Local editor history preserves unsaved work while selection remains usable. |
+| [E2E: conversation organization](../../web/e2e/studio.spec.ts#L380) | Rename/folder/fork/continue/duplicate/archive/restore/delete through visible menus. | Saved prefix provenance, shared-file semantics and history independence are vertical features. |
 | [Component: placement reordering](../../web/src/Composer.test.tsx#L31) | Render Composer, click move, inspect emitted aggregate/order/roles/original object. | UI order normalization preserves slot/role/source semantics. |
 | [Component: malformed rule draft](../../web/src/Composer.test.tsx#L53) | Type invalid JSON, Apply rules, require no emitted aggregate and visible error. | Invalid advanced text cannot corrupt the parent's applied preset draft. |
 
 ## What these checks establish
 
-Pure compiler cases establish deterministic local computation. Mocked provider transport establishes application-level serialization/normalization, not a remote server's behavior. ASGI cases establish HTTP/use-case/SQLite/checkpoint logic without a listening socket. Smoke scripts establish listening HTTP plus actual native OS tools and files. Browser cases establish visible workflows with the built SPA. All use explicit fake decisions or mocked/local endpoints. Substantial live-model coding/analysis and stateful specialized MCP acceptance remain required before later delivery stages can be declared complete.
+Pure compiler cases establish deterministic local computation. Mocked provider transport establishes application-level serialization/normalization, not a remote server's behavior. ASGI cases establish HTTP/use-case/SQLite/checkpoint logic without a listening socket. Smoke scripts establish listening HTTP plus actual native OS tools and files. Browser cases establish visible workflows with the built SPA. Offline suites use explicit fake decisions or mocked/local endpoints. Opt-in real acceptance scripts additionally audit multi-file repairs, read-only analysis, native checks and persisted context; see [Stage 2 acceptance](../acceptance-stage2.md) and [Codex capability review](../codex-gap-review.md). Specialized stateful MCP still needs its own acceptance.
 
 ## migrations/versions/0004_projects.py
 
@@ -609,10 +620,10 @@ Every function below belongs to the layer named above. The last column identifie
 | --- | --- | --- | --- |
 | [`api`](../../scripts/acceptance_stage2.py#L80) | Send one acceptance request. | Use actual HTTP with per-Run idempotency keys and fail on application errors. | Successful object construction alone cannot establish a working Web/API execution path. |
 | [`start_server`](../../scripts/acceptance_stage2.py#L90) | Open an isolated acceptance lifecycle. | Start Uvicorn on 8768, wait for readiness with a bounded deadline, and return server/task ownership. | Acceptance cannot mutate the user database and can verify restart persistence. |
-| [`run_task`](../../scripts/acceptance_stage2.py#L105) | Execute one real task and audit its evidence. | Create a project-bound session, submit directly, await success, check wire/prepared equality and canonical source/tool-ID pairing, and return safe summary plus local trace. | A fluent final answer or simulated tool decision is insufficient acceptance evidence. |
-| [`verify_invoice`](../../scripts/acceptance_stage2.py#L174) | Independently check the fixed behavior. | Run immutable check.ps1 through the selected project registry and OS sandbox, asserting exit/output. | The model cannot pass by claiming success or weakening the acceptance check. |
-| [`exercise`](../../scripts/acceptance_stage2.py#L189) | Accept coding, memory, Skill creation and analysis. | Ask for multi-file repairs and failing/passing checks, verify unchanged user fixtures, guarded memory writes, saved/reloaded Skill and a concrete path-boundary finding. | Representative work demonstrates a local agent beyond a single echo command. |
-| [`main`](../../scripts/acceptance_stage2.py#L261) | Own opt-in setup, project registration, restart and final report. | Validate a real configured provider, create sibling default/project/data folders, run cases, restart and reuse memory/Skill in a fresh conversation, then close resources. | Saved ordinary files and registered roots must survive an application lifecycle without replaying old effects. |
+| [`run_task`](../../scripts/acceptance_stage2.py#L105) | Run one real acceptance task and audit its evidence. | Create a project-bound session, choose an optional explicit preset ID, submit directly, await success, and audit application wire/prepared equality plus canonical source/tool-ID pairing. | Acceptance must establish executed work and inspectable inputs, rather than trust fluent final text or simulated decisions. |
+| [`verify_invoice`](../../scripts/acceptance_stage2.py#L180) | Independently check the fixed behavior. | Run immutable check.ps1 through the selected project registry and OS sandbox, asserting exit/output. | The model cannot pass by claiming success or weakening the acceptance check. |
+| [`exercise`](../../scripts/acceptance_stage2.py#L195) | Accept coding, memory, Skill creation and analysis. | Ask for multi-file repairs and failing/passing checks, verify unchanged user fixtures, guarded memory writes, saved/reloaded Skill and a concrete path-boundary finding. | Representative work demonstrates a local agent beyond a single echo command. |
+| [`main`](../../scripts/acceptance_stage2.py#L267) | Own opt-in setup, project registration, restart and final report. | Validate a real configured provider, create sibling default/project/data folders, run cases, restart and reuse memory/Skill in a fresh conversation, then close resources. | Saved ordinary files and registered roots must survive an application lifecycle without replaying old effects. |
 
 <details>
 <summary>Source signatures (including private and nested functions)</summary>
@@ -620,7 +631,7 @@ Every function below belongs to the layer named above. The last column identifie
 ```python
 async def api(client: httpx.AsyncClient, method: str, path: str, body: Any=None) -> Any
 async def start_server(settings: Settings) -> tuple[uvicorn.Server, asyncio.Task]
-async def run_task(client: httpx.AsyncClient, title: str, task: str, project_id: str | None=None) -> tuple[dict, dict]
+async def run_task(client: httpx.AsyncClient, title: str, task: str, project_id: str | None=None, preset_id: str | None=None) -> tuple[dict, dict]
 async def verify_invoice(server: uvicorn.Server, project_id: str) -> None
 async def exercise(client: httpx.AsyncClient, server: uvicorn.Server, workspace: Path, project_id: str) -> list[dict]
 async def main() -> None
@@ -654,6 +665,58 @@ async def exercise(client: httpx.AsyncClient, roots: list[Path]) -> None
 async def exercise.api(method: str, path: str, body=None)
 async def exercise.start(session_id: str, text: str)
 async def exercise.finish(run)
+async def main() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/smoke_agent_tools.py
+
+**Layer: Engineering / offline live HTTP acceptance.** Exercises new native capabilities with deterministic simulated model decisions and actual files, policies and sandbox commands.
+
+**Connections and effects:** Owns temporary workspace/data and loopback port 8770, including restart. No external model or user workspace is used.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`exercise`](../../scripts/smoke_agent_tools.py#L19) | Verify search, ranged reads, instructions, guarded changes and plans. | Send real API Runs, assert exclusions/traversal/bounds/full hashes, root-to-leaf overrides, Add/Update/Delete effects and conflicts/line endings, paired plans/copies, and native/read-only behavior. | This is one vertical local workflow rather than unit tests that merely mirror an implementation. |
+| [`exercise.api`](../../scripts/smoke_agent_tools.py#L22) | Send one local HTTP acceptance action. | Require successful JSON responses and assign Run idempotency keys. | Assertions cross the listening API, persistence and runtime rather than call file helpers directly. |
+| [`exercise.tool`](../../scripts/smoke_agent_tools.py#L42) | Execute and inspect one simulated native tool decision. | Resolve current revisions, create/directly submit a session task, wait for completion and return the paired tool JSON; classify absent exposure without assuming execution. | Fake model decisions are explicitly separated from real server authorization and effects. |
+| [`main`](../../scripts/smoke_agent_tools.py#L207) | Own the disposable server and restart check. | Prepare fixtures, run on 8770, exercise the workflow, close/reopen the same stores and assert persisted plan projection, then close owned resources. | Durability is checked across a real application lifecycle without contaminating local user records. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def exercise(client: httpx.AsyncClient, workspace: Path) -> str
+async def exercise.api(method: str, path: str, body: Any=None) -> Any
+async def exercise.tool(name: str, args: dict[str, Any]) -> tuple[dict, dict]
+async def main() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/acceptance_agent_tools.py
+
+**Layer: Engineering / opt-in real-model acceptance.** Accepts practical Coding and Code review presets with the configured OpenAI-compatible provider.
+
+**Connections and effects:** Requires --live on Windows; reads provider references from the local service, owns isolated port 8768 and a registered project, and retains ignored local evidence.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`main`](../../scripts/acceptance_agent_tools.py#L27) | Run two real agent workloads and independently verify evidence. | Repair two PowerShell sources through hash-guarded apply_patch and scoped instructions/plan, rerun an immutable sandbox check, then review an unknown function with literal search and explicit code-review Skill in read-only mode; audit paired tool calls/bodies and unchanged protected files. | Real decisions plus independent file/sandbox checks establish useful capabilities; the model cannot pass by claiming success or changing the checker. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
 async def main() -> None
 ```
 

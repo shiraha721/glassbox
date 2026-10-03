@@ -128,7 +128,9 @@ export function Inspector({
               </details>
             </>
           ) : (
-            <div className="empty-inspector">Enter a message and select Preview.</div>
+            <div className="empty-inspector">
+              Select Preview to inspect current instructions and input.
+            </div>
           ))}
         {tab === 'trace' &&
           (run ? (

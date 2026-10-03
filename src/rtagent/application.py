@@ -1,6 +1,7 @@
 """Application use cases; keep HTTP and framework orchestration out of these methods."""
 
 import asyncio
+import os
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,7 @@ from rtagent.domain import (
     StartRun,
     StudioConfig,
     WorkspaceView,
+    latest_plan,
     uid,
 )
 from rtagent.prompts import compile_prompt
@@ -133,6 +135,24 @@ class Studio:
         mentions = re.findall(r"(?<!\S)\$([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$|[.,!?])", user_input)
         selected_skills = skills + [name for name in mentions if name in known_skills]
         workspace_context = await asyncio.to_thread(registry.files.context, selected_skills)
+        workspace_context.insert(
+            0,
+            Message(
+                role="system",
+                source="runtime:environment",
+                content=(
+                    f"Workspace: {registry.workspace}\n"
+                    f"Native command language: {'Windows PowerShell' if os.name == 'nt' else 'Bash on Linux'}.\n"
+                    f"Workspace policy: {config.sandbox_mode}; native command network is disabled. "
+                    "Command availability is not pre-probed; failures are reported without a host fallback. "
+                    "Host credentials, Git metadata, runtime data, and dependencies are excluded. "
+                    "MCP tools use their explicitly configured external connections.\n"
+                    f"Exposed tools: {', '.join(tool.name for tool in tools) or '(none)'}.\n"
+                    f"Run limits: {config.max_steps} model steps, {config.max_tool_calls} tool calls, "
+                    f"{config.tool_timeout:g}s per tool, {config.run_timeout:g}s active runtime."
+                ),
+            ),
+        )
         compiled = compile_prompt(
             preset,
             config,
@@ -279,6 +299,7 @@ class Studio:
         values.update(
             input=run["snapshot"]["input"],
             workspace_root=run["snapshot"]["workspace_root"],
+            plan=latest_plan([Message.model_validate(item) for item in run["messages"]]),
             preset_name=run["snapshot"]["preset"]["name"],
             provider=run["snapshot"]["config"]["provider"]["adapter"],
             unknown_calls=[

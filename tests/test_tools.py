@@ -12,6 +12,7 @@ import pytest
 
 from rtagent.domain import AppError, MCPServer, StudioConfig
 from rtagent.tools import ToolRegistry
+from rtagent.workspace import Workspace
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mcp_server.py"
 
@@ -107,3 +108,55 @@ async def test_changed_mcp_schema_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setenv("TEST_MCP_SCHEMA", "changed")
     with pytest.raises(AppError, match="schema changed"):
         await registry.execute(tool, {"text": "must not run"}, config)
+
+
+def test_partial_patch_reports_completed_files(tmp_path, monkeypatch):
+    """A failure after one atomic file write must expose that effect instead of implying rollback."""
+    workspace = Workspace(tmp_path)
+    original = workspace._replace
+
+    def fail_second(path, content, expected_hash):
+        """Represent a filesystem failure after the first known completed replacement."""
+        if path == "second.txt":
+            raise OSError("Fixture replacement failure")
+        return original(path, content, expected_hash)
+
+    monkeypatch.setattr(workspace, "_replace", fail_second)
+    with pytest.raises(AppError) as error:
+        workspace.apply_patch(
+            "*** Begin Patch\n*** Add File: first.txt\n+one\n*** Add File: second.txt\n+two\n*** End Patch"
+        )
+    assert error.value.code == "partial_patch"
+    assert [item["path"] for item in error.value.details["files"]] == ["first.txt"]
+    assert (tmp_path / "first.txt").read_text() == "one\n"
+    assert not (tmp_path / "second.txt").exists()
+
+
+async def test_read_only_patch_denied_before_effect(tmp_path):
+    """Even a caller holding the native schema cannot bypass read-only execution policy."""
+    registry = ToolRegistry(tmp_path)
+    config = StudioConfig(sandbox_mode="read-only")
+    with pytest.raises(AppError) as error:
+        await registry.execute(
+            registry.catalog["apply_patch"],
+            {"patch": "*** Begin Patch\n*** Add File: forbidden.txt\n+bad\n*** End Patch"},
+            config,
+        )
+    assert error.value.code == "tool_denied"
+    assert not (tmp_path / "forbidden.txt").exists()
+
+
+def test_unicode_patch_evidence_stays_bounded(tmp_path):
+    """Serialized Unicode diffs must remain within the result budget before any side effects occur."""
+    workspace = Workspace(tmp_path)
+    paths = [f"file-{index}.txt" for index in range(20)]
+    text = "Unicode evidence: " + '\u03c0\\"\t' * 400
+    patch = (
+        "*** Begin Patch\n"
+        + "".join(f"*** Add File: {path}\n+{text}\n" for path in paths)
+        + "*** End Patch"
+    )
+    result = workspace.apply_patch(patch)
+    assert len(json.dumps(result, ensure_ascii=False).encode()) < 65_536
+    assert len(result["files"]) == 20 and all((tmp_path / path).exists() for path in paths)
+    assert any(item["diff_truncated"] for item in result["files"])

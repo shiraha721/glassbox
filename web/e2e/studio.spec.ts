@@ -19,6 +19,73 @@ async function startTask(page: Page, input: string) {
   await page.getByRole('button', { name: 'Run', exact: true }).click();
 }
 
+test('tools expose schemas and effective policy, presets and recorded plans remain inspectable', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  await page.getByRole('button', { name: 'Tools', exact: true }).click();
+  const catalog = page.getByLabel('Tool catalog', { exact: true });
+  await catalog.getByLabel('Search tools', { exact: true }).fill('apply_patch');
+  await expect(catalog.locator('[data-tool="apply_patch"]')).toBeVisible();
+  await catalog.getByText('Arguments', { exact: true }).click();
+  await expect(catalog.getByText('"expected_hashes"', { exact: false })).toBeVisible();
+  await catalog.getByRole('button', { name: 'Edit permissions', exact: true }).click();
+  const settings = page.getByRole('dialog');
+  await settings
+    .getByRole('combobox', { name: 'Workspace access', exact: true })
+    .selectOption('read-only');
+  await settings.getByLabel('Search tools', { exact: true }).fill('apply_patch');
+  await expect(settings.getByText('Blocked by read-only', { exact: true })).toBeVisible();
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(
+    settings.getByText('Settings saved. New runs use these settings.', { exact: true }),
+  ).toBeVisible();
+  await settings.getByRole('button', { name: 'Close settings', exact: true }).click();
+  try {
+    await page.getByRole('button', { name: 'Prompt', exact: true }).click();
+    await page.getByLabel('Active preset', { exact: true }).selectOption({ label: 'Coding' });
+    await page.getByText('Implementation workflow', { exact: true }).click();
+    await expect(page.getByLabel('Implementation workflow template')).toBeVisible();
+    await page.getByRole('button', { name: 'Preview', exact: true }).click();
+    await expect(page.getByText('Live draft', { exact: true })).toBeVisible();
+    const current = await (await page.request.get('/api/v1/bootstrap')).json();
+    const inspected = await (
+      await page.request.post('/api/v1/prompts/inspect', {
+        data: {
+          preset: current.presets.find((item: { id: string }) => item.id === 'coding'),
+          config_revision: current.config.revision,
+        },
+      })
+    ).json();
+    expect(
+      inspected.tools.some((item: { name: string }) => item.name === 'apply_patch'),
+    ).toBeFalsy();
+    expect(
+      inspected.compiled.messages.some(
+        (item: { source: string }) => item.source === 'runtime:environment',
+      ),
+    ).toBeTruthy();
+    await page.getByRole('button', { name: 'Close inspector', exact: true }).click();
+    await startTask(
+      page,
+      '/tool update_plan {"explanation":"Check current task progress","plan":[{"step":"Inspect workspace","status":"completed"},{"step":"Verify behavior","status":"in_progress"}]}',
+    );
+    await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+    await expect(page.locator('.task-plan')).toContainText('Verify behavior');
+    await expect(page.locator('.task-plan [data-status="in_progress"]')).toContainText(
+      'Verify behavior',
+    );
+    await page.reload();
+    await expect(page.locator('.task-plan')).toContainText('Check current task progress');
+  } finally {
+    const state = await (await page.request.get('/api/v1/bootstrap')).json();
+    const restored = await page.request.put('/api/v1/config', {
+      data: { ...state.config, sandbox_mode: 'workspace-write' },
+    });
+    expect(restored.ok()).toBeTruthy();
+  }
+});
+
 test('projects bind conversations, tools and memory to the selected workspace folder', async ({
   page,
 }) => {

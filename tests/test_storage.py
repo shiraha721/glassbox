@@ -62,7 +62,7 @@ async def test_starter_upgrade_is_idempotent_and_preserves_user_text(tmp_path):
         saved = await repository.save_preset(legacy)
         await repository.initialize()
         upgraded = await repository.preset(current.id)
-        assert upgraded.revision == saved.revision + 1 and len(upgraded.blocks) == 6
+        assert upgraded.revision == saved.revision + 1 and len(upgraded.blocks) == 7
         await repository.initialize()
         assert await repository.preset(current.id) == upgraded
         legacy.revision = upgraded.revision

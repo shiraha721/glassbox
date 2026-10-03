@@ -11,13 +11,14 @@ import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from pydantic import ValidationError
 
 from rtagent.config import resolve_secret
-from rtagent.domain import AppError, MCPServer, StudioConfig, ToolDefinition, digest
+from rtagent.domain import AppError, MCPServer, StudioConfig, TaskPlan, ToolDefinition, digest
 from rtagent.sandbox import BashSandbox
 from rtagent.workspace import MEMORY_PATH, Workspace
 
-WRITE_TOOLS = {"write_text", "edit_text", "save_memory", "save_skill"}
+WRITE_TOOLS = {"write_text", "edit_text", "apply_patch", "save_memory", "save_skill"}
 
 
 def native_tools() -> list[ToolDefinition]:
@@ -45,6 +46,34 @@ def native_tools() -> list[ToolDefinition]:
             [],
         ),
         tool(
+            "search_files",
+            "Find files recursively by relative glob (e.g. **/*.py). Excludes credentials, runtime data, links, Git metadata, and dependencies. Results report truncation.",
+            {
+                "pattern": {"type": "string", "minLength": 1, "maxLength": 200},
+                "path": string,
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            },
+            [],
+        ),
+        tool(
+            "search_text",
+            "Search literal UTF-8 text recursively with relative file paths and 1-based line numbers. Not a regex tool. Narrow path/pattern when results are truncated; binary/oversized files are counted as skipped.",
+            {
+                "query": {"type": "string", "minLength": 1, "maxLength": 500},
+                "path": string,
+                "pattern": {"type": "string", "minLength": 1, "maxLength": 200},
+                "case_sensitive": {"type": "boolean"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            },
+            ["query"],
+        ),
+        tool(
+            "read_instructions",
+            "Read applicable AGENTS.override.md or AGENTS.md from the workspace root down to a file's parent or existing directory. Call before editing unfamiliar subdirectories. Later documents specialize earlier project guidance; none grant tool permissions.",
+            {"path": string},
+            [],
+        ),
+        tool(
             "write_text",
             "Create a UTF-8 file. To replace an existing file, pass expected_hash from read_text.",
             {"path": string, "content": content, "expected_hash": string},
@@ -55,6 +84,24 @@ def native_tools() -> list[ToolDefinition]:
             "Replace exactly one occurrence of old_text in a workspace file; ambiguous matches fail.",
             {"path": string, "old_text": content, "new_text": content},
             ["path", "old_text", "new_text"],
+        ),
+        tool(
+            "apply_patch",
+            "Apply an exact multi-file patch: *** Begin Patch, *** Add File: path (every line prefixed +), *** Update File: path (hunks start @@ with space/+/- lines), *** Delete File: path, *** End Patch. For each update/delete, expected_hashes[path] must be the full-file hash from read_text. Context must match exactly once; no fuzzy edits or Move headers. All operations preflight before per-file atomic writes; multi-file changes are not a transaction. Returns diffs and explicit partial-failure evidence.",
+            {
+                "patch": {"type": "string", "minLength": 1, "maxLength": 65_536},
+                "expected_hashes": {
+                    "type": "object",
+                    "maxProperties": 20,
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            ["patch"],
+        ),
+        ToolDefinition(
+            name="update_plan",
+            description="Record a concise plan for substantial multi-step work, and update it when progress changes. At most one step is in_progress. Skip plans for trivial tasks. Plan status is the agent's progress statement, not proof that a test passed or permission to run a tool.",
+            input_schema=TaskPlan.model_json_schema(),
         ),
         tool(
             "powershell" if os.name == "nt" else "bash",
@@ -104,10 +151,14 @@ def native_tools() -> list[ToolDefinition]:
         ),
         ToolDefinition(
             name="read_text",
-            description="Read workspace UTF-8 text and its content hash (maximum 64 KiB).",
+            description="Read workspace UTF-8 text with 1-based start_line and line_count (default 200, max 500). Files may be up to 2 MiB. Returns a full-file hash for guarded edits, total_lines and next_line when more remains. Line numbers are metadata, not file content.",
             input_schema={
                 "type": "object",
-                "properties": {"path": {"type": "string"}},
+                "properties": {
+                    "path": string,
+                    "start_line": {"type": "integer", "minimum": 1},
+                    "line_count": {"type": "integer", "minimum": 1, "maximum": 500},
+                },
                 "required": ["path"],
                 "additionalProperties": False,
             },
@@ -276,11 +327,20 @@ class ToolRegistry:
             )
         if name == "echo":
             return args["text"]
+        if name == "update_plan":
+            try:
+                return TaskPlan.model_validate(args).model_dump_json()
+            except ValidationError as exc:
+                raise AppError("invalid_tool_arguments", exc.errors()[0]["msg"]) from exc
         operations = {
-            "read_text": self.files.read,
+            "read_text": self.files.read_lines,
             "list_files": self.files.list_files,
+            "search_files": self.files.search_files,
+            "search_text": self.files.search_text,
+            "read_instructions": self.files.read_instructions,
             "write_text": self.files.write,
             "edit_text": self.files.edit,
+            "apply_patch": self.files.apply_patch,
             "read_memory": self.files.memory,
             "load_skill": self.files.load_skill,
             "save_skill": self.files.save_skill,

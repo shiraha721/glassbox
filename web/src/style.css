@@ -1727,3 +1727,79 @@ summary::marker {
     width: 110px;
   }
 }
+.tools-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+.tool-filter {
+  display: grid;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+  padding: 8px 0;
+}
+.tool-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+.tool-access {
+  display: inline-block;
+  margin-left: 8px;
+}
+.tool-exposed {
+  color: #226be2;
+}
+.tool-schema summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tool-schema pre {
+  max-height: 240px;
+  overflow: auto;
+}
+.task-plan {
+  margin: 12px 0 16px 40px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+.task-plan summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+}
+.task-plan ol {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+}
+.task-plan li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.task-plan li span:first-of-type {
+  flex: 1;
+}
+.task-plan li[data-status='completed'] {
+  color: var(--muted);
+}
+.task-plan li[data-status='in_progress'] {
+  color: #226be2;
+}
+.patch-diff {
+  white-space: pre-wrap;
+  border-left: 2px solid #226be2;
+}

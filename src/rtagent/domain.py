@@ -8,7 +8,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def uid() -> str:
@@ -181,8 +181,13 @@ class StudioConfig(Contract):
         default_factory=lambda: {
             "read_text": "allow",
             "list_files": "allow",
+            "search_files": "allow",
+            "search_text": "allow",
+            "read_instructions": "allow",
             "write_text": "allow",
             "edit_text": "allow",
+            "apply_patch": "allow",
+            "update_plan": "allow",
             "powershell" if os.name == "nt" else "bash": "allow",
             "read_memory": "allow",
             "save_memory": "allow",
@@ -215,6 +220,48 @@ class Message(Contract):
     source: str = "runtime"
     tool_calls: list[ToolCall] = Field(default_factory=list)
     tool_call_id: str | None = None
+
+
+class PlanItem(Contract):
+    """One model-authored task step, separate from verified execution outcomes."""
+
+    step: str = Field(min_length=1, max_length=240)
+    status: Literal["pending", "in_progress", "completed"]
+
+
+class TaskPlan(Contract):
+    """A bounded progress update recorded through the ordinary tool receipt and message ledger."""
+
+    explanation: str = Field(default="", max_length=1000)
+    plan: list[PlanItem] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def one_active_step(self) -> "TaskPlan":
+        """Reject simultaneous active steps and empty labels rather than silently normalizing them."""
+        if sum(item.status == "in_progress" for item in self.plan) > 1:
+            raise ValueError("At most one plan step can be in_progress.")
+        if any(not item.step.strip() for item in self.plan):
+            raise ValueError("Plan step labels must contain non-whitespace text.")
+        return self
+
+
+def latest_plan(messages: list[Message]) -> TaskPlan | None:
+    """Project the last successful paired plan result without trusting arbitrary JSON tool output."""
+    identifiers = {
+        call.id
+        for message in messages
+        if message.role == "assistant"
+        for call in message.tool_calls
+        if call.name == "update_plan"
+    }
+    for message in reversed(messages):
+        if message.role != "tool" or message.tool_call_id not in identifiers:
+            continue
+        try:
+            return TaskPlan.model_validate_json(message.content)
+        except ValueError:
+            continue
+    return None
 
 
 class CompiledPrompt(Contract):
@@ -474,6 +521,7 @@ class RunView(Contract):
     usage: dict[str, Any]
     source_run_id: str | None = None
     unknown_calls: list[dict[str, Any]] = Field(default_factory=list)
+    plan: TaskPlan | None = None
 
 
 class CallView(Contract):

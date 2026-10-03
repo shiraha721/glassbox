@@ -891,6 +891,19 @@ export interface components {
             tool_call_id: string | null;
         };
         /**
+         * PlanItem
+         * @description One model-authored task step, separate from verified execution outcomes.
+         */
+        PlanItem: {
+            /** Step */
+            step: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "in_progress" | "completed";
+        };
+        /**
          * Preset
          * @description Version a collection of embedded blocks as a single editable aggregate.
          */
@@ -1157,6 +1170,7 @@ export interface components {
             unknown_calls: {
                 [key: string]: unknown;
             }[];
+            plan: components["schemas"]["TaskPlan"] | null;
         };
         /**
          * SandboxStatus
@@ -1392,6 +1406,19 @@ export interface components {
              * @default 600
              */
             run_timeout: number;
+        };
+        /**
+         * TaskPlan
+         * @description A bounded progress update recorded through the ordinary tool receipt and message ledger.
+         */
+        TaskPlan: {
+            /**
+             * Explanation
+             * @default
+             */
+            explanation: string;
+            /** Plan */
+            plan: components["schemas"]["PlanItem"][];
         };
         /**
          * ToolCall

@@ -299,14 +299,15 @@ export function Composer({
                       <>
                         <details className="context-file">
                           <summary>
-                            <strong>AGENTS.md</strong>
+                            <strong>{workspace.instructions?.path || 'AGENTS.md'}</strong>
                             <span className="badge">
                               {workspace.instructions ? 'Included' : 'Not found'}
                             </span>
                           </summary>
                           <div className="context-file-body">
                             <p className="subtle">
-                              workspace:AGENTS.md · root instructions · literal file content
+                              workspace:{workspace.instructions?.path || 'AGENTS.md'} · root
+                              instructions · literal file content
                             </p>
                             {workspace.instructions ? (
                               <pre>{workspace.instructions.content || '(Empty file)'}</pre>

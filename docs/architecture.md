@@ -34,6 +34,7 @@ src/rtagent/                    One installable Python package
   application.py               Studio use cases and Run command coordination
   domain.py                    Strict data contracts and canonical utility values
   prompts.py                   Pure compilation, conditions, variables, source mapping
+  patches.py                   Pure Add/Update/Delete parsing and exact text hunks
   policies.py                  Frozen-schema argument validation and allow/ask/deny
   runtime.py                   Explicit LangGraph loop, tasks, budgets, receipts/reentry
   providers.py                 LangChain adapter, prepared/captured requests, fake stream
@@ -45,6 +46,8 @@ src/rtagent/                    One installable Python package
   storage.py                   SQLAlchemy Core tables/transactions/events/copies
   tracing.py                   Sanitized evidence copies
   skills/skill-creator/         Packaged SKILL.md resource
+  skills/debugging/            Packaged reproduce/diagnose/verify procedure
+  skills/code-review/          Packaged evidence-based review procedure
 web/src/                       React presentation and local editor state
   main.tsx, App.tsx            Browser bootstrap and workspace coordination
   Composer.tsx                 Prompt block controls and rule drafts
@@ -54,6 +57,8 @@ web/src/                       React presentation and local editor state
   ConversationHistory.tsx     History groups, menus, and copy/metadata dialogs
   Inspector.tsx                Preview versus actual call evidence
   Settings.tsx                 Versioned execution configuration editor
+  ToolCatalog.tsx             Grouped schemas and effective permission inspection
+  TaskPlan.tsx                Recorded progress within its owning Run
   WorkspacePanel.tsx           Memory/skill editors and sandbox inspection
   api/client.ts                Same-origin JSON transport and generated type aliases
   api/events.ts                Persistent event subscription/query invalidation
@@ -74,7 +79,7 @@ This is the current layout. Responsibilities are modules, not all separate packa
 | Presentation and local UI state | React components, usePresetDrafts, style.css | Displays saved projections and collects explicit task/editor/action input. | Drafts/selection/layout are browser concerns; authorization and effects are server concerns. |
 | Transport | api.py, browser client/events | Validates/serializes HTTP contracts and reads persistent SSE; delegates actions. | Opening/reconnecting UI is a read operation, not implicit model execution. |
 | Application use cases | Studio | Resolves revisions/context, freezes input, starts/approves/resumes/stops, coordinates checkpoint deletion. | Multi-step behavior has one owner independent of route rendering and graph-node internals. |
-| Domain computation and policy | domain.py, prompts.py, policies.py | Represents values, deterministically compiles, validates frozen arguments, returns a configured decision. | No network/database/model SDK can make pure composition or authorization depend on hidden effects. |
+| Domain computation and policy | domain.py, prompts.py, patches.py, policies.py | Represents values, deterministically compiles, computes exact text hunks, validates arguments, returns a configured decision. | Computation cannot bypass the adapter that owns file paths/effects; no network/database/model SDK hides effects in compilation or authorization. |
 | Runtime orchestration | Runner / LangGraph | Orders model/tool steps, checkpoints progress, enforces budgets, persists receipts and interrupts. | One explicit loop makes control flow and recovery visible; model adapters do not nest another loop. |
 | Concrete infrastructure | providers/tools/workspace/sandboxes/config | Talks to SDKs/OS/files/transports and resolves credential references at their boundary. | The external system decides execution mechanics; the model cannot select an unrestricted host implementation. |
 | Persistence and evidence | Repository, AsyncSqliteSaver, tracing | Stores application ownership/projections/receipts and separate graph progress; creates redacted copies. | Durable evidence and progress are different facts, and sanitizing a view must not rewrite originals. |
@@ -95,6 +100,7 @@ These are responsibility layers, not a promise of a strict dependency-inverted f
 | Prepared input | previews JSON with 15-minute expiry | Same compiler path for optional inspection and direct Run; one consumption per preview. |
 | Run snapshot | runs.snapshot | Original configuration/history/task/schema/context/root/body, immutable through the Run and recovery. |
 | Runtime projection | runs messages/status/approval/usage/partial output | Browser-visible current state; updated alongside numbered events. |
+| Agent plan | RunView.plan derived from paired update_plan messages | A validated latest progress receipt, without a separate table, scheduler or mutable plan authority. |
 | Effect receipts | calls table | Intent/result/uncertainty survives node replay and separately records what is known about dispatch. |
 | Graph position | checkpoints.db, thread_id=run_id | LangGraph's node state; original Run only, never cloned by duplicate/fork. |
 | Instructions/memory/Skills | Ordinary workspace/package files | Initial text is snapshotted; later explicit reads/writes are new recorded tool effects. |
@@ -137,7 +143,7 @@ flowchart TD
 | --- | --- |
 | main.py, config.py | Startup, migrations, resource ownership, loopback boundary, static UI |
 | api.py, application.py | HTTP contracts; resolve context/revisions, start/approve/cancel/resume Runs, workspace editing |
-| domain.py, prompts.py | Pydantic contracts; pure ordering, activation, substitution, sources, estimates and hashes |
+| domain.py, prompts.py, patches.py | Pydantic contracts; pure compilation, validated plan projection, and exact text-patch computation |
 | providers.py | Canonical mapping, prepared requests, wire capture, real or explicit simulated streaming |
 | runtime.py | Bounded graph, checkpoints, receipts, interrupts and recovery |
 | policies.py, tools.py | Frozen schemas/permissions, native dispatch, stateless MCP lifecycle |
@@ -221,7 +227,10 @@ Terminal means succeeded, failed, or cancelled. Waiting/interrupted keeps the co
 | --- | --- | --- |
 | Edit and save a preset | Composer → usePresetDrafts → Workspace.savePreset → save_preset | Local undoable content becomes a new aggregate revision; snapshots remain immutable. |
 | Change settings/discover MCP | Settings.save → Studio.save_config / ToolRegistry.discover | New config revision, explicit fresh discovery, tools still disabled until allowed/asked. |
-| Save note/procedure | MemoryEditor/SkillEditor → Studio → Workspace.write/save_skill | Same hash/file-format checks as model tools, with Preview invalidated. |
+| Save note/procedure | MemoryEditor/SkillEditor → Studio → Workspace.write/save_skill | Same hash/file-format checks as model tools; refresh context and recompile a live draft while retaining the last valid result. |
+| Inspect tools | Tools/Settings → ToolCatalog → bootstrap schemas/config | Grouped arguments and effective exposure; Settings alone saves permission changes. |
+| Update progress | model → update_plan → paired tool message → Studio.view → TaskPlan | Validated progress survives refresh/restart/copies through existing evidence, without new state storage. |
+| Apply focused changes | model → apply_patch → parse_patch/apply_hunks → Workspace | Validate all contexts/hashes, apply per-file changes, and return bounded diff/partial-failure evidence. |
 | Duplicate/fork | History.copy or turn fork → Repository.copy_session | New owned evidence IDs/provenance, successful prefix history, zero model/tool replay. |
 | Rename/move/archive | History.update → Repository.update_session | Revisioned metadata; archive requires idle, execution requires restoration. |
 | Delete folder | History.submit → Repository.delete_folder | Members become Unfiled and their revisions advance; history remains. |
@@ -260,7 +269,7 @@ Blocks support system/user/assistant roles, enabled state, placement/order, prov
 Message order:
 
 1. Active before_history blocks sorted by order.
-2. Frozen root instructions, memory, skill catalog, and explicitly selected skill bodies.
+2. Recorded runtime environment, frozen root instructions, memory, Skill catalog, and explicitly selected Skill bodies.
 3. Committed successful conversation history.
 4. Active before_input blocks sorted by order.
 5. Current user input exactly once.
@@ -272,15 +281,17 @@ Variables use declared names such as {{task_type}}, with string/number/boolean t
 
 Estimates use serialized bytes divided by four. A configured context window reserves output and rejects estimated overflow; unknown context remains unverified. There is no implicit trimming. Actual provider usage is separate and unknown values stay null.
 
+Five built-in presets use six independent editable common blocks and one task-focus block. They influence how the model works, not which tools it is allowed to execute. `Repository.initialize` seeds only missing presets and upgrades only exact unchanged historical Security analysis starters. The application adds `runtime:environment` to captured context: root, OS/native command language, configured sandbox mode, no-network command behavior, actual tool names and file/search/patch limits. This message appears in Preview, the snapshot and every canonical model request; it is not an unrecorded system instruction or a claim that a readiness probe passed.
+
 ## Workspace context, memory, and Skills
 
 STUDIO_WORKSPACE_ROOT is the default process root. A trusted user can register an existing absolute folder as a Project; sessions store nullable project_id. Studio resolves that ID for inspection and new Runs, captures the root and project ID, and uses ToolRegistry.for_workspace to bind native file adapters and OS sandboxes. Runner dispatches from the frozen Run root, including after restart or a conversation move. Current catalog/error discovery is shared; explicit MCP transports remain outside native command isolation. Project roots are fixed registrations, not model-editable tool parameters. Changing an idle session’s Project advances its revision; active moves fail. Historical snapshots and copied wire evidence do not change.
 
-Within the selected root, root AGENTS.md and .rtagent/MEMORY.md are captured with sources workspace:AGENTS.md and workspace:memory. The catalog source is workspace:skills; selected bodies use skill:<name>. Context is frozen once per Run and is not persisted as repeated conversation turns.
+Within the selected root, the first nonempty AGENTS.override.md or AGENTS.md is captured with `workspace:<relative path>`; memory uses workspace:memory. The catalog source is workspace:skills; selected bodies use skill:<name>. Context is frozen once per Run and is not persisted as repeated conversation turns. `read_instructions(path)` explicitly reads the root-to-directory/file-parent chain, selecting override before AGENTS at each level, returning paths/text/hashes with deeper precedence, and rejecting combined input above 32 KiB. Markdown links are not automatically followed.
 
 Memory is explicit Markdown, not hidden summarization. Reads return text/hash; save_memory requires that hash. Atomic replacement avoids partial files; stale hashes reject concurrent native edits. Shell/external edits are outside this lock, so this is not a transaction across host processes. Changes become initial context on the next Run; a current Run can read updated files explicitly and record the tool result.
 
-Skills are discovered under .agents/skills/<name>/SKILL.md plus the packaged skill-creator. YAML frontmatter requires a matching lowercase hyphenated name and a description. Only metadata enters the catalog. load_skill, explicit Prompt/Workspace selection, or $skill-name loads the body. Invalid entries are reported; discovery is bounded to 100 entries. Workspace skills cannot shadow bundled skills.
+Skills are discovered under .agents/skills/<name>/SKILL.md plus the packaged skill-creator, debugging and code-review procedures. YAML frontmatter requires a matching lowercase hyphenated name and a description. Only metadata enters the catalog. load_skill, explicit Prompt/Workspace selection, or $skill-name loads the body. Invalid entries are reported; discovery is bounded to 100 entries. Workspace skills cannot shadow bundled skills.
 
 save_skill writes validated frontmatter and Markdown instructions; updates require the current hash. The bundled creator uses those tools to author and verify a focused reusable workflow. Supporting resources remain ordinary files. Skills cannot grant permissions, load host plugins, or bypass the sandbox.
 
@@ -288,9 +299,15 @@ save_skill writes validated frontmatter and Markdown instructions; updates requi
 
 The model receives frozen schemas selected from the configured permission map and available catalog. Read-only mode excludes native mutation tools. Each call is JSON-schema checked and evaluated as allow, ask, or deny before effects occur. Prompt, memory, Skill, and tool-result text cannot broaden permissions.
 
-Native tools: list_files, read_text, write_text, edit_text, powershell (Windows) or bash (Linux), read_memory, save_memory, load_skill, save_skill, and the side-effect-free approval check echo.
+The fifteen native tools are list_files, search_files, search_text, read_text, read_instructions, write_text, edit_text, apply_patch, update_plan, powershell (Windows) or bash (Linux), read_memory, save_memory, load_skill, save_skill, and echo. The [workspace reference](reference/backend-workspace.md#native-tool-surface) lists argument/result contracts and bounds. Tools and Settings show the same catalog; read-only badges reflect actual native exposure rules, while the backend independently enforces them at dispatch.
 
 File tools require relative paths and reject traversal, links/junctions, credential paths, Git metadata, runtime data, and dependency directories. UTF-8 files and serialized outputs are bounded. Replacement uses a content hash; edits require one exact match. These application checks assume a non-hostile concurrent host environment.
+
+Ranged reads accept files up to 2 MiB but return at most 500 lines and a bounded excerpt with the complete text hash and continuation metadata. Literal search scans at most 1,000 files/8 MiB; traversal itself caps at 10,000 entries. Skipped and truncated results are explicit. Regex and unrestricted host processes are unnecessary for this initial search surface. Ordinary memory/Skill reads and direct writes retain their 64 KiB cap.
+
+The patch flow separates pure computation from file effects. `parse_patch` produces up to twenty immutable Add/Update/Delete operations from a patch up to 64 KiB. `apply_hunks` requires unique exact ordered line contexts and preserves unrelated endings. `Workspace.apply_patch` resolves allowed paths, rejects aliases, validates existing-file hashes, computes all replacements and bounds the diff manifest before any write. `_replace` atomically replaces one file up to 2 MiB; deletes recheck the hash. A later I/O/conflict failure returns `partial_patch` with the completed-file manifest and failed path. Cross-file atomicity is not claimed. Runtime retains these details in the matching error receipt. Existing settings introduce the deletion-capable patch at Ask; explicit permissions and old snapshots are preserved.
+
+`update_plan` validates one to twelve step labels/statuses and at most one in_progress item. It returns a complete JSON plan through the ordinary receipt path. `latest_plan` accepts only valid tool messages paired with assistant update_plan calls; Studio projects it in RunView. A folded TaskPlan component shows it alongside messages. There is no plan table or extra loop, and a completed step is not independent verification evidence.
 
 WindowsSandbox launches the built-in Windows PowerShell in a new AppContainer for each call. CreateProcessW receives SECURITY_CAPABILITIES with no capabilities, so Windows denies network access. An explicit inherited-handle list contains only stdin/stdout/stderr. The process starts suspended, is assigned to a kill-on-close Job Object with a 32-process limit, then resumes. Completion, timeout, and cancellation terminate the whole Job; the server waits for zero active processes before copying results back. Blocking Windows calls run in a worker thread, with cancellation signalled by an event and cleanup awaited by the runtime.
 
@@ -316,7 +333,7 @@ The real Chat Completions adapter is default; a blank model fails clearly. Expli
 
 ## Persistence, API, and UI
 
-SQLite tables: settings, presets, conversation_folders, sessions, previews, runs, events, calls. Alembic manages these; LangGraph manages its separate checkpoint database. Memory/Skills are files and need no business-table migration. UTC timestamps, stable IDs, and schema versions identify records.
+SQLite tables: settings, presets, conversation_folders, projects, sessions, previews, runs, events, calls. Alembic manages these; LangGraph manages its separate checkpoint database. Memory/Skills are files and plans derive from existing messages, so these capabilities need no business-table migration. UTC timestamps, stable IDs, and schema versions identify records.
 
 A state projection and its numbered event commit together. Successful completion appends history and releases the session together. A session has one active Run. Settings use optimistic revisions; Run snapshots remain immutable. SSE sequence deduplication and active-state polling keep the UI current.
 
@@ -334,7 +351,7 @@ Actual routes under /api/v1:
 | /prompts/inspect, /prompts/preview, /runs | Nonpersisting live draft inspection, optional saved preview, or direct execution |
 | /runs/{id} subresources | State, cancel, approval, recovery, events, trace, export |
 
-Generated /openapi.json and frontend types define exact contracts. The UI opens Prompt, Inspector, and Workspace only when needed. Run is enabled for nonempty input without a preview. Draft changes invalidate optional previews. File editor saves use hashes.
+Generated /openapi.json and frontend types define exact contracts. The UI opens Prompt, Inspector, Workspace and Tools only when needed. Run is enabled for nonempty input without a preview. Draft changes request a debounced current inspection while retaining the last valid result. File editor saves use hashes.
 
 Conversation metadata includes archive state and optional folder membership. Renames and moves use observed session revisions; explicit titles survive the first Run. Archiving requires an idle conversation, and the server rejects execution until restoration. Folder deletion clears membership and advances affected revisions without deleting history. Schema migration adds columns in place so SQLite foreign-key cascades cannot discard existing Runs.
 
@@ -350,7 +367,7 @@ Run the service and check actual behavior before growing tests. scripts/smoke_wo
 
 scripts/smoke_conversations.py checks management through a separate real HTTP server: copy boundaries, trace provenance, stale revisions, archive/restore, folder operations, and continuation after source deletion. Browser checks exercise preset switching/undo and the complete conversation-menu workflow.
 
-A basic live-model/native-PowerShell loop has passed on Windows; substantial coding/analysis acceptance is still required. Next stages add long-session context handling, diff review and command/process usability, then CLI/RPC/SDK and focused extension hooks. Specialized security integrations and evaluation follow real workflows. Multi-agent orchestration, more workers, PostgreSQL, and remote teams are not prerequisites for a useful local harness.
+Substantial Windows coding/analysis acceptance has passed, including guarded multi-file patches, independent native checks, scoped instructions and a read-only review using actual search. See [Stage 2 acceptance](acceptance-stage2.md) and [Codex capability review](codex-gap-review.md) for separate evidence and remaining gaps. Next work addresses long-session context and command/process usability, followed by CLI/RPC/SDK and focused hooks. Specialized security integrations and evaluation follow real workflows; extra workers, databases or orchestration are not prerequisites for these improvements.
 
 ## Stage 2 acceptance
 

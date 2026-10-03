@@ -103,12 +103,18 @@ async def start_server(settings: Settings) -> tuple[uvicorn.Server, asyncio.Task
 
 
 async def run_task(
-    client: httpx.AsyncClient, title: str, task: str, project_id: str | None = None
+    client: httpx.AsyncClient,
+    title: str,
+    task: str,
+    project_id: str | None = None,
+    preset_id: str | None = None,
 ) -> tuple[dict, dict]:
     """Submit directly to Run, wait for completion, and validate original model/tool evidence."""
     state = await api(client, "GET", "/bootstrap")
     session = await api(client, "POST", "/sessions", {"title": title, "project_id": project_id})
-    preset = state["presets"][0]
+    preset = next(
+        (item for item in state["presets"] if item["id"] == preset_id), state["presets"][0]
+    )
     run = await api(
         client,
         "POST",

@@ -429,7 +429,16 @@ class Runner:
                     )
                     raise
                 content, status = (
-                    json.dumps({"error": {"code": exc.code, "message": exc.message}}),
+                    json.dumps(
+                        {
+                            "error": {
+                                "code": exc.code,
+                                "message": exc.message,
+                                **({"details": exc.details} if exc.details is not None else {}),
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
                     "failed",
                 )
             except TimeoutError:

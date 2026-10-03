@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, RefreshCw, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { request, errorMessage, type Bootstrap, type Config } from './api/client';
+import { ToolCatalog } from './ToolCatalog';
 
 /** Edit one versioned settings aggregate and explicitly discover configured MCP servers. */
 export function Settings({
@@ -182,31 +183,13 @@ export function Settings({
                 Permissions are enforced by the server. New MCP tools remain disabled until you
                 select Ask or Allow.
               </p>
-              {data.tools.map((tool) => (
-                <div className="tool-setting" key={tool.name}>
-                  <div>
-                    <strong title={tool.name}>{tool.original_name || tool.name}</strong>
-                    <p>{tool.description}</p>
-                  </div>
-                  <select
-                    aria-label={`${tool.name} permission`}
-                    value={draft.tools[tool.name] || 'deny'}
-                    onChange={(event) =>
-                      setDraft({
-                        ...draft,
-                        tools: {
-                          ...draft.tools,
-                          [tool.name]: event.target.value as 'allow' | 'ask' | 'deny',
-                        },
-                      })
-                    }
-                  >
-                    <option value="deny">Disabled</option>
-                    <option value="ask">Ask each time</option>
-                    <option value="allow">Allow</option>
-                  </select>
-                </div>
-              ))}
+              <ToolCatalog
+                tools={data.tools}
+                config={draft}
+                onPermission={(name, value) =>
+                  setDraft({ ...draft, tools: { ...draft.tools, [name]: value } })
+                }
+              />
               {Object.keys(draft.tools)
                 .filter((name) => !data.tools.some((tool) => tool.name === name))
                 .map((name) => (

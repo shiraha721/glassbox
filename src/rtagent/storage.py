@@ -33,7 +33,7 @@ from rtagent.domain import (
     now,
     uid,
 )
-from rtagent.prompts import default_preset, is_legacy_default
+from rtagent.prompts import builtin_presets, default_preset, is_legacy_default
 
 metadata = MetaData()
 settings_table = Table(
@@ -167,22 +167,41 @@ class Repository:
                         id="default", data=StudioConfig(revision=1).model_dump()
                     )
                 )
-            existing = (await connection.execute(select(presets.c.data))).scalars().all()
-            if not existing:
-                preset = default_preset()
-                await connection.execute(
-                    insert(presets).values(id=preset.id, data=preset.model_dump())
-                )
             else:
-                for value in existing:
-                    preset = Preset.model_validate(value)
-                    if is_legacy_default(preset):
-                        # Only migrate recognized starter content, never user edits or Run snapshots.
-                        await connection.execute(
-                            update(presets)
-                            .where(presets.c.id == preset.id)
-                            .values(data=default_preset(preset.revision + 1).model_dump())
-                        )
+                config = StudioConfig.model_validate(
+                    (await connection.execute(select(settings_table.c.data))).scalar_one()
+                )
+                permissions = dict(config.tools)
+                additions = {
+                    "search_files": permissions.get("list_files", "deny"),
+                    "search_text": permissions.get("read_text", "deny"),
+                    "read_instructions": permissions.get("read_text", "deny"),
+                    "update_plan": "allow",
+                    # Patches add deletion, so existing profiles ask before this new capability.
+                    "apply_patch": "ask",
+                }
+                for name, permission in additions.items():
+                    permissions.setdefault(name, permission)
+                if permissions != config.tools:
+                    saved = config.model_copy(
+                        update={"tools": permissions, "revision": config.revision + 1}
+                    )
+                    await connection.execute(update(settings_table).values(data=saved.model_dump()))
+            existing = (await connection.execute(select(presets.c.data))).scalars().all()
+            by_id = {value["id"]: Preset.model_validate(value) for value in existing}
+            for preset in builtin_presets():
+                current = by_id.get(preset.id)
+                if current is None:
+                    await connection.execute(
+                        insert(presets).values(id=preset.id, data=preset.model_dump())
+                    )
+                elif is_legacy_default(current):
+                    # Only migrate recognized starter content, never user edits or Run snapshots.
+                    await connection.execute(
+                        update(presets)
+                        .where(presets.c.id == current.id)
+                        .values(data=default_preset(current.revision + 1).model_dump())
+                    )
 
     async def close(self) -> None:
         """Release the database connection pool during application shutdown."""

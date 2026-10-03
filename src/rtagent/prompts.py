@@ -8,6 +8,8 @@ from typing import Any
 from rtagent.domain import AppError, Block, CompiledPrompt, Message, Preset, StudioConfig, digest
 
 VARIABLE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z_0-9]*)\s*\}\}")
+# Canonical fingerprint of the unchanged six-block Stage 2 starter, excluding its revision.
+STAGE2_STARTER_HASH = "cb98b7f2651093ea5d0810d1b70e8be8cf76cfcab9e597bb34bc9276b0d8472a"
 
 
 def default_preset(revision: int = 1) -> Preset:
@@ -37,19 +39,31 @@ def default_preset(revision: int = 1) -> Preset:
             "workflow",
             "Inspect, implement, verify",
             "Before editing, inspect relevant files, project instructions, and existing commands. "
+            "For substantial multi-step tasks, use update_plan with a few concrete steps and keep "
+            "one active step. Skip planning for trivial changes; a plan is not the deliverable. "
             "For a bug, reproduce it when possible and identify the cause. Keep the implementation "
             "consistent with the existing architecture; avoid speculative abstractions or large "
             "rewrites. Add meaningful docstrings and comments where they explain intent. After "
             "editing, run the narrowest real check that demonstrates the requested behavior. "
             "For a service, start it and exercise actual requests before expanding tests. Read "
             "failures, fix their cause, and repeat affected checks. Continue until the task is "
-            "complete or a concrete blocker requires user input.",
+            "complete or a concrete blocker requires user input. Do not stop after exploration "
+            "when implementation was requested. Make independent progress when information is "
+            "missing; never repeatedly retry the same failing command without new evidence.",
         ),
         (
             "tools",
             "Workspace tools",
-            "Use list_files and read_text to inspect the workspace. Use edit_text for one exact "
-            "replacement, or write_text with the last-read hash when replacing a file. Use the "
+            "Use search_files for file globs and search_text for literal text searches; narrow "
+            "the path/pattern when results are truncated. Use read_text line ranges and next_line "
+            "rather than dumping large files. Line numbers are metadata, not content to paste. "
+            "Before editing an unfamiliar directory, call read_instructions for the target path; "
+            "follow its root-to-leaf AGENTS.md/AGENTS.override.md chain. Use edit_text for one "
+            "unambiguous replacement, write_text for small files with the last-read hash, and "
+            "apply_patch for coordinated edits. Include expected_hashes for every updated/deleted "
+            "patch path. Read fresh content after a conflict instead of weakening the guard. "
+            "A patch preflights all files but is not a multi-file transaction; inspect partial "
+            "failure details and the returned diffs. Use the "
             "exposed native command tool: PowerShell syntax for powershell on Windows, Bash "
             "syntax for bash on Linux. Inspect executable availability rather than assuming a "
             "host development environment exists in the sandbox. Commands have no network, "
@@ -77,6 +91,17 @@ def default_preset(revision: int = 1) -> Preset:
             "State which checks could not run and why; do not present estimates or simulated "
             "results as actual execution.",
         ),
+        (
+            "task-focus",
+            "Security analysis workflow",
+            "For authorized security analysis, establish the target and relevant trust boundary, "
+            "trace attacker-controlled input to the sensitive operation, and verify the preconditions. "
+            "Use a harmless workspace reproduction when possible. Report concrete findings with "
+            "file/line evidence, trigger, impact, and a focused mitigation. Separate proven behavior "
+            "from unverified possibilities; do not inflate severity or fabricate exploitability. "
+            "Complete requested fixes and verify them. For review-only tasks, inspect and report "
+            "without modifying the analyzed files unless the user asks for remediation.",
+        ),
     ]
     return Preset(
         id="security-analysis",
@@ -89,10 +114,72 @@ def default_preset(revision: int = 1) -> Preset:
     )
 
 
+def builtin_presets() -> list[Preset]:
+    """Seed practical editable task presets sharing the same explicit local-agent invariants."""
+    security = default_preset()
+    definitions = [
+        (
+            "general-agent",
+            "General agent",
+            "General task workflow",
+            "Handle the user's actual task from inspection through a concrete result. Choose only "
+            "the tools and depth needed. For questions, explain using observed project evidence; "
+            "for requested work, make and verify the change. Avoid creating unrelated artifacts or "
+            "adding a planning phase to a one-step action.",
+        ),
+        (
+            "coding",
+            "Coding",
+            "Implementation workflow",
+            "Deliver a working implementation within the existing project. Find entry points and "
+            "interfaces, inspect relevant callers, preserve public behavior outside the requested "
+            "change, and make focused coordinated edits. Reuse dependencies already present. "
+            "Read failures and fix their cause. Run the application or representative real command "
+            "before expanding regression tests; report exact verification and any unavailable runtime.",
+        ),
+        (
+            "debugging",
+            "Debugging",
+            "Debugging workflow",
+            "Reproduce the reported failure first. Follow the data and control path using concrete "
+            "inputs, logs, source lines, and existing checks. Form a testable hypothesis and change "
+            "one causal part at a time. Prefer fixing the cause to hiding an exception or adding "
+            "a fallback. Re-run the original reproduction, then affected neighboring behavior. "
+            "Preserve evidence and distinguish an observed fix from an untested assumption.",
+        ),
+        (
+            "code-review",
+            "Code review",
+            "Review workflow",
+            "Review the requested files or change for actionable correctness, security, and "
+            "regression problems. Inspect callers and relevant tests; prioritize actual failures "
+            "over stylistic preferences. Give each finding a severity, a narrow file/line location, "
+            "the triggering condition, and its effect. Do not modify files unless asked to fix them. "
+            "If no concrete issue is found, say so and describe what was checked and what remains "
+            "unverified. Git metadata may be unavailable: use supplied diffs or workspace evidence "
+            "and state that boundary instead of claiming to have inspected a commit.",
+        ),
+    ]
+    return [security] + [
+        Preset(
+            id=identifier,
+            name=name,
+            revision=1,
+            blocks=[
+                *(block.model_copy(deep=True) for block in security.blocks[:-1]),
+                Block(id="task-focus", name=title, template=text, order=70),
+            ],
+        )
+        for identifier, name, title, text in definitions
+    ]
+
+
 def is_legacy_default(preset: Preset) -> bool:
     """Recognize the untouched starter text so upgrades preserve user-authored presets."""
     if preset.id != "security-analysis" or preset.name != "Security analysis":
         return False
+    if digest(preset.model_dump(exclude={"revision"})) == STAGE2_STARTER_HASH:
+        return True
     originals = [
         Block(
             id="identity",

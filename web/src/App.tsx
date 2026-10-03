@@ -16,6 +16,7 @@ import {
   Square,
   Terminal,
   User,
+  Wrench,
   X,
 } from 'lucide-react';
 import Markdown, { type Components } from 'react-markdown';
@@ -40,6 +41,8 @@ import { WorkspacePanel } from './WorkspacePanel';
 import { Projects } from './Projects';
 import { usePresetDrafts } from './usePresetDrafts';
 import { useLivePreview } from './useLivePreview';
+import { ToolsPanel } from './ToolCatalog';
+import { TaskPlan } from './TaskPlan';
 
 const emptyRuns: Run[] = [];
 
@@ -91,7 +94,7 @@ function Workspace({ data }: { data: Bootstrap }) {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.matchMedia('(min-width: 761px)').matches,
   );
-  const [panel, setPanel] = useState<'prompt' | 'inspector' | 'workspace' | null>(null);
+  const [panel, setPanel] = useState<'prompt' | 'inspector' | 'workspace' | 'tools' | null>(null);
   const [skills, setSkills] = useState<string[]>([]);
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -341,6 +344,14 @@ function Workspace({ data }: { data: Bootstrap }) {
             </span>
           )}
           <div className="topbar-actions">
+            <button
+              className="button quiet"
+              disabled={busy}
+              aria-pressed={panel === 'tools'}
+              onClick={() => setPanel(panel === 'tools' ? null : 'tools')}
+            >
+              <Wrench size={15} /> Tools
+            </button>
             <button
               className="button quiet"
               disabled={busy}
@@ -651,6 +662,19 @@ function Workspace({ data }: { data: Bootstrap }) {
               onClose={() => setPanel(null)}
             />
           </div>
+          {panel === 'tools' && (
+            <div className="utility-pane">
+              <ToolsPanel
+                tools={data.tools}
+                config={data.config}
+                onClose={() => setPanel(null)}
+                onSettings={() => {
+                  setPanel(null);
+                  setSettings(true);
+                }}
+              />
+            </div>
+          )}
           {panel === 'workspace' && (
             <div className="utility-pane">
               <WorkspacePanel
@@ -751,6 +775,7 @@ function RunTurn({
           <p>{run.input}</p>
         </div>
       </div>
+      {run.plan && <TaskPlan plan={run.plan} />}
       {run.messages.map((message, messageIndex) => (
         <article key={messageIndex} className={`chat-message chat-${message.role}`}>
           {message.role === 'tool' ? (
@@ -858,6 +883,33 @@ function ToolOutput({ content }: { content: string }) {
   }
   if (value && typeof value === 'object') {
     const result = value as Record<string, unknown>;
+    if (
+      Array.isArray(result.files) &&
+      result.files.length > 0 &&
+      result.files.every(
+        (file: unknown) =>
+          !!file &&
+          typeof file === 'object' &&
+          typeof (file as Record<string, unknown>).diff === 'string',
+      )
+    )
+      return (
+        <div className="patch-results">
+          {result.files.map((file: Record<string, unknown>, index: number) => (
+            <div key={index}>
+              <strong>
+                {String(file.path)} · {String(file.operation)}
+              </strong>
+              <pre className="patch-diff">{String(file.diff)}</pre>
+              {file.diff_truncated === true && (
+                <p className="subtle">
+                  Diff truncated. Read the current file for complete content.
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      );
     if (typeof result.stdout === 'string' && typeof result.stderr === 'string')
       return (
         <>
@@ -870,7 +922,19 @@ function ToolOutput({ content }: { content: string }) {
           {result.stderr && <pre>{result.stderr}</pre>}
         </>
       );
-    if (typeof result.content === 'string') return <pre>{result.content}</pre>;
+    if (typeof result.content === 'string')
+      return (
+        <>
+          {typeof result.start_line === 'number' && (
+            <p className="subtle">
+              {String(result.path)} · lines {String(result.start_line)}–{String(result.end_line)} of{' '}
+              {String(result.total_lines)}
+              {result.next_line ? ` · more from line ${String(result.next_line)}` : ''}
+            </p>
+          )}
+          <pre>{result.content}</pre>
+        </>
+      );
   }
   return <pre>{content}</pre>;
 }
