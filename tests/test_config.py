@@ -5,8 +5,8 @@ import os
 import pytest
 from pydantic import ValidationError
 
-from rtagent.config import Settings
 from rtagent.domain import MCPServer, ProviderConfig, StudioConfig
+from rtagent.infrastructure.config import Settings
 
 
 @pytest.mark.parametrize(

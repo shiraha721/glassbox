@@ -488,6 +488,35 @@ test('workspace memory and skills can be saved, selected, and used by direct Run
   await page.screenshot({ path: 'test-results/workspace-context.png', fullPage: true });
 });
 
+test('workspace context refreshes after terminal polling when SSE never connects', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  const bootstrap = await (await page.request.get('/api/v1/bootstrap')).json();
+  const shell = bootstrap.tools.some((tool: { name: string }) => tool.name === 'powershell')
+    ? 'powershell'
+    : 'bash';
+  bootstrap.config.tools[shell] = 'allow';
+  expect((await page.request.put('/api/v1/config', { data: bootstrap.config })).ok()).toBe(true);
+  await page.reload();
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  await expect(page.getByLabel('Project memory', { exact: true })).toBeVisible();
+  const previousMemory = await page.getByLabel('Project memory', { exact: true }).inputValue();
+  await page.route('**/api/v1/runs/*/events', (route) => route.abort());
+  // Delay the real file effect until the ordinary post-submission refresh has completed.
+  const command =
+    shell === 'powershell'
+      ? "Start-Sleep -Milliseconds 1200; New-Item -ItemType Directory -Force -Path (Join-Path $env:RTAGENT_WORKSPACE '.rtagent') | Out-Null; [IO.File]::WriteAllText((Join-Path $env:RTAGENT_WORKSPACE '.rtagent/MEMORY.md'), 'Terminal poll memory', [Text.UTF8Encoding]::new($false))"
+      : "sleep 1.2; mkdir -p .rtagent; printf 'Terminal poll memory' > .rtagent/MEMORY.md";
+  await startTask(page, `/tool ${shell} ${JSON.stringify({ command })}`);
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  await expect(page.getByLabel('Project memory', { exact: true })).toHaveValue(previousMemory);
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await expect(page.getByLabel('Project memory', { exact: true })).toHaveValue(
+    'Terminal poll memory',
+  );
+});
+
 test('the workbench remains usable on a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openWorkspace(page);

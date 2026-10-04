@@ -1,6 +1,6 @@
 # Architecture Reference
 
-Reviewed against the repository source on 2026-10-05, including the [desktop/lifecycle review](../review-2026-10-05.md). Start with [System architecture](../architecture.md) for the whole application and then follow the responsibility you want to inspect. [Project guide](../README.md) covers startup and use; [Development guide](../development.md) defines working constraints.
+Reviewed against the repository source on 2026-10-05, including the [completed layering and lifecycle review](../review.md). Start with [System architecture](../architecture.md) for the whole application and then follow the responsibility you want to inspect. [Project guide](../README.md) covers startup and use; [Development guide](../development.md) defines working constraints.
 
 This reference explains implemented code from the application down to individual functions: **what it does, its inputs/results, how it works, why it exists, its architectural layer, and how it connects to the rest of the system**. Source links point to the reviewed declarations. Private methods and nested helpers are included, rather than only public HTTP handlers.
 
@@ -19,9 +19,9 @@ This reference explains implemented code from the application down to individual
 
 ## Coverage and boundaries
 
-The reviewed source contains **306 backend functions/methods and 82 classes**; **73 frontend functions/methods and 1 class**; **146 support functions/methods and 1 class**. Every declaration has an individual purpose/mechanism/reason/layer/source entry. The callback appendix covers **29 Python lambdas and 359 TypeScript anonymous callbacks**, including verification callbacks. This totals **609 named declarations**.
+The reviewed source contains **306 backend functions/methods and 82 classes**; **73 frontend functions/methods and 1 class**; **149 support functions/methods and 1 class**. Every declaration has an individual purpose/mechanism/reason/layer/source entry. The callback appendix covers **29 Python lambdas and 362 TypeScript anonymous callbacks**, including verification callbacks. This totals **612 named declarations**.
 
-The actual Python package is `rtagent`; its responsibilities are concrete modules. The npm package is `security-agent-studio-web`. `scripts`, `migrations`, and `tests` are supporting source directories. `skills/skill-creator`, `skills/debugging` and `skills/code-review` are packaged Markdown resources. The development guide and architecture describe the actual layout, without a speculative subpackage tree.
+The actual Python package is `rtagent`; its domain/application/infrastructure/interfaces packages group concrete modules with checked dependency direction. The npm package is `security-agent-studio-web`. `scripts`, `migrations`, and `tests` are supporting source directories. `skills/skill-creator`, `skills/debugging` and `skills/code-review` are packaged Markdown resources. The development guide and architecture describe the implemented packages, stable entry aliases and dependency direction.
 
 Generated OpenAPI declarations have no first-party runtime function bodies. Win32 aliases bind operating-system functions; the Windows reference documents their role separately. Third-party internal functions and every transitive lockfile entry are outside this project's function inventory. The dependency reference covers all direct declarations and transitively supplied packages that this source directly imports.
 

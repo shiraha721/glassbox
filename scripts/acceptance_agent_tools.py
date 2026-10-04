@@ -10,8 +10,8 @@ from pathlib import Path
 import httpx
 from acceptance_stage2 import api, run_task, start_server
 
-from rtagent.config import Settings, resolve_secret
 from rtagent.domain import ProviderConfig
+from rtagent.infrastructure.config import Settings, resolve_secret
 
 FIXTURES = {
     "AGENTS.md": "Keep changes focused. Preserve check.ps1 and KEEP.txt. Use native PowerShell; no network or dependencies are needed. Follow instructions for the src directory.\n",

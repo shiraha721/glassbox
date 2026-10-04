@@ -1,7 +1,7 @@
 import pytest
 
 from rtagent.domain import AppError, Block, Message, Preset, ProviderConfig, StudioConfig, Variable
-from rtagent.prompts import compile_prompt, condition_value
+from rtagent.domain.prompts import compile_prompt, condition_value
 
 
 def compile_blocks(blocks, **kwargs):

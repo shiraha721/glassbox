@@ -10,13 +10,13 @@ from pathlib import Path
 
 import uvicorn
 
-from rtagent.client import AgentClient
-from rtagent.config import Settings, resolve_secret
 from rtagent.domain import ProviderConfig, StudioConfig, ToolCall, ToolDefinition
+from rtagent.domain.hooks import Hooks
 from rtagent.harness import Harness
-from rtagent.hooks import Hooks
-from rtagent.main import create_app
-from rtagent.workspace import Workspace
+from rtagent.infrastructure.config import Settings, resolve_secret
+from rtagent.infrastructure.workspace.files import Workspace
+from rtagent.interfaces.client import AgentClient
+from rtagent.interfaces.http.app import create_app
 
 FIXTURES = {
     "AGENTS.md": "This project is RIVER. Preserve check.py, data/*.csv and KEEP.txt. Use English docstrings/comments. Use the native Windows sandbox, not host execution. Python is explicitly available through the trusted runtime configuration. Workspace commands have no network.\n",

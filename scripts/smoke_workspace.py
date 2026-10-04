@@ -16,8 +16,8 @@ from uuid import uuid4
 import httpx
 import uvicorn
 
-from rtagent.config import Settings
-from rtagent.main import create_app
+from rtagent.infrastructure.config import Settings
+from rtagent.interfaces.http.app import create_app
 
 COMMAND_TOOL = "powershell" if os.name == "nt" else "bash"
 

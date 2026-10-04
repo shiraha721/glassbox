@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import App from './App';
+import App from './app/App';
 import './style.css';
 
 // Failed mutations require a user decision; automatic retries could repeat a side effect.

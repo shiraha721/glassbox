@@ -7,7 +7,7 @@ This guide applies to the entire repository and defines project constraints and 
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-05, Stages 1–4 are implemented and the Windows daily-agent/shared-harness workflows are accepted. The [code and architecture review](review-2026-10-05.md) covers native folder selection, lifecycle corrections and maintenance refactoring. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md), [Stage 2 acceptance](acceptance-stage2.md) and the [Codex capability review](codex-gap-review.md). Linux acceptance and an external Claude endpoint check remain unperformed. Inspect actual files and delivery boundaries before work.
+As of 2026-10-05, Stages 1–4 are implemented and the Windows daily-agent/shared-harness workflows are accepted. The [code and architecture review](review.md) covers native folder selection, lifecycle corrections and maintenance refactoring. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md), [Stage 2 acceptance](acceptance-stage2.md) and the [Codex capability review](codex-gap-review.md). Linux acceptance and an external Claude endpoint check remain unperformed. Inspect actual files and delivery boundaries before work.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
 Multi-agent orchestration, batch evaluation, PostgreSQL, and team deployment belong to later phases.
@@ -26,34 +26,54 @@ The [Architecture Reference](reference/README.md) maps every implemented module,
 
 ## Module Structure and Dependency Direction
 
-The implementation uses concrete source files. The [architecture module map](architecture.md#what-the-application-owns) gives the full layout. Split a module only for a concrete need. Presets own embedded blocks; one settings aggregate owns provider, MCP, permission, runtime/download and limit configuration. Preserve snapshots without a generic persistence or plugin framework.
+The implementation groups concrete source files by dependency layer. The [architecture module map](architecture.md#what-the-application-owns) gives the full layout. Split a module only for a concrete need. Presets own embedded blocks; one settings aggregate owns provider, MCP, permission, runtime/download and limit configuration. Preserve snapshots without a generic persistence or plugin framework.
 
 ```text
 src/rtagent/
-  main.py          Composition, concrete ASGI boundary and Web resource lifetime
-  api.py           HTTP/SSE adapters and generated contract source
-  application.py   Studio use cases, packages, Run coordination and recovery
-  harness.py       Shared concrete owner for Web and embedding
-  domain.py        Validated values, errors, commands, projections and events
-  prompts.py       Pure conditions, variables, ordering, compilation and sources
-  providers.py     OpenAI-compatible adapter; anthropic.py owns Messages
-  runtime.py       Explicit LangGraph nodes, checkpoints and recovery
-  tools.py         Schemas, stateless MCP lifecycle and one-call execution
-  policies.py      Frozen-schema validation and permission decisions
-  workspace.py     Guarded files, instructions, memory and Skills
-  sandbox.py       Linux adapter; windows_sandbox.py owns AppContainer
-  desktop.py       User folder dialog ownership; windows_dialog.py owns COM
-  tracing.py       Evidence redaction; calls/events persist through Repository
-  storage.py       Concrete SQLite repository and Alembic initialization
-  client.py        HTTP attachment; cli.py/rpc.py are attached clients
-web/src/           React + TypeScript user interface
-tests/             Python unit, integration, and contract tests
-web/e2e/           Browser end-to-end tests
-docs/              Project documentation, architecture, and development conventions
+  domain/                     Values and pure decisions; no adapters or resource ownership
+    models.py                 Typed contracts and canonical utilities
+    prompts.py, patches.py    Prompt compilation and exact text-hunk computation
+    policies.py               Frozen-schema validation and permission decisions
+    lifecycle.py              Shared immutable Run/process state membership
+    hooks.py, execution.py    Callback contracts and trusted effect ownership values
+  application/                Working workflows over concrete adapters
+    studio.py                 Task/context/recovery/project/package use cases
+    runner.py                 One LangGraph loop, checkpoints, budgets and receipts
+    context.py                Explicit source-bound summarization and evidence
+  infrastructure/             Database, providers, filesystem and OS implementations
+    storage.py                SQLite tables, writer transactions, history and receipts
+    config.py, tracing.py     Process settings, credential resolution, redacted views
+    tools.py, packages.py     Native/MCP/local dispatch and reusable data publication
+    providers/chat.py         OpenAI-compatible preparation/capture and explicit simulation
+    providers/messages.py     Messages text/tool mapping and SSE transport
+    workspace/                files.py, downloads.py, toolchains.py
+    sandbox/                  linux.py, windows.py, files.py, command_io.py, processes.py
+    desktop/                  folders.py and the Windows Shell helper windows_dialog.py
+  interfaces/                 HTTP, client, CLI and JSON-RPC adapters
+    http/app.py               Web composition/lifespan, ASGI errors/origins and SPA delivery
+    http/api.py               Typed routes and persistent SSE observation
+    client.py, cli.py, rpc.py  Existing-owner attachment and explicit commands
+  harness.py                  Shared concrete composition/resource owner for Web/embedding
+  main.py, cli.py, client.py   Stable aliases/launch guards; no duplicate implementations
+  __init__.py, __main__.py     Version and module entry point
+  skills/                     Bundled skill-creator, debugging and code-review resources
+web/src/
+  app/App.tsx                 Workspace composition, target selection and submission identity
+  features/chat/              Saved turns/plans, Context and owned process controls
+  features/history/           Conversation groups, menus and copy/metadata forms
+  features/projects/          Project navigation and OS directory selection
+  features/prompts/           Composer, reversible drafts and live preview hooks
+  features/inspection/        Preview and recorded request/effect evidence
+  features/workspace/         Memory/Skill editors and sandbox inspection
+  features/settings/          Versioned execution settings
+  features/tools/             Searchable schemas and effective tool permissions
+  shared/                     Json, PackageActions and useDialogFocus
+  api/                        HTTP/types and saved-event observation
+  main.tsx, style.css         Browser entry, QueryClient and fixed/scroll layout
 ```
 
-- `api` calls `application` use cases. Keep business decisions out of HTTP routes.
-- `domain`, `prompts`, and `policies` must not depend on FastAPI, databases, MCP clients, or specific model SDKs.
+- `interfaces/http/api.py` adapts transport to Studio and existing atomic Repository operations. Keep multi-resource business decisions in `application`. Root entry aliases are never internal dependencies.
+- `domain` contains models, algorithms, lifecycle and ownership values. It must not import outer layers, FastAPI, databases, MCP, provider SDKs or native-pipe implementations. Infrastructure never imports application/interfaces; application never imports interfaces/composition. Shared callback types belong to domain, not an adapter.
 - `application` coordinates the concrete runtime, tool registry and repository. Harness owns their lifecycle for Web/embedding; AgentClient/CLI/RPC attach to a running service. Never open a second worker on the same data directory. Introduce dependency interfaces only when a second implementation actually needs them.
 - LangGraph controls execution; LangChain provides model/tool adapters. Do not nest another implicit tool loop inside a prebuilt agent.
 - The frontend obtains data, submits actions, and subscribes to events through the API. It must not connect directly to model providers, MCP, or the database.
@@ -149,6 +169,7 @@ uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations
 uv run isort --check-only src tests scripts migrations
 uv run python scripts/check_docs.py
+uv run python scripts/check_layers.py
 ```
 
 Frontend commands, from `web/`:
@@ -182,5 +203,5 @@ Tests should cover the actual behavior affected by a change:
 - Web: editing through preview, execution through trace inspection, approval/rejection, stopping, and state restoration after refresh.
 
 For documentation-only changes, check content, links, examples, and cross-references. Do not initialize the application or run nonexistent tests.
-`scripts/check_docs.py` checks current declarations/callbacks, source lines and links without writing runtime inventories. Node and the installed TypeScript parser (`npm --prefix web ci`) are prerequisites. `scripts/smoke_desktop.py --native` additionally opens, answers and cancels only owned Windows dialogs; the default smoke opens no desktop windows.
+`scripts/check_layers.py` checks Python dependency direction and static UI imports without launching resources. `scripts/check_docs.py` checks current declarations/callbacks, source lines and links without writing runtime inventories. Node and the installed TypeScript parser (`npm --prefix web ci`) are prerequisites. `scripts/smoke_desktop.py --native` additionally opens, answers and cancels only owned Windows dialogs; the default smoke opens no desktop windows.
 Delivery notes must state the changes, verification results, and unimplemented work. Do not repeat passing checks unless new issues justify it.

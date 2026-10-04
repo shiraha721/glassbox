@@ -89,7 +89,7 @@ Use embedding when another Python program owns the agent lifecycle. **Do not sha
 ```python
 import asyncio
 from pathlib import Path
-from rtagent.config import Settings
+from rtagent.infrastructure.config import Settings
 from rtagent.harness import Harness
 
 async def main() -> None:
@@ -112,8 +112,8 @@ asyncio.run(main())
 import asyncio
 import json
 from rtagent.domain import RunEvent, StudioConfig, ToolCall, ToolDefinition
-from rtagent.hooks import Hooks
-from rtagent.workspace import Workspace
+from rtagent.domain.hooks import Hooks
+from rtagent.infrastructure.workspace.files import Workspace
 
 async def observe(event: RunEvent) -> None:
     """Consume a committed, redacted event without mutating its stored payload."""

@@ -1,7 +1,7 @@
 import pytest
 
 from rtagent.domain import AppError, Block, Preset
-from rtagent.storage import Repository
+from rtagent.infrastructure.storage import Repository
 
 
 async def test_migration_persistence_and_revision_conflict(tmp_path):

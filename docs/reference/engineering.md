@@ -556,7 +556,7 @@ Every function below belongs to the layer named above. The last column identifie
 | --- | --- | --- | --- |
 | [`openWorkspace`](../../web/e2e/studio.spec.ts#L6) | Open the app and create a fresh conversation. | Navigate /, assert workspace presence, open the sidebar if needed, create history, require disabled empty Run and enabled empty Preview. | System-only prompt inspection stays usable; tests begin through the actual local UI without login or a model call. |
 | [`startTask`](../../web/e2e/studio.spec.ts#L17) | Submit one task directly. | Fill Task and click Run, without clicking Preview. | Browser acceptance protects the direct operational workflow the product promises. |
-| [`actions`](../../web/e2e/studio.spec.ts#L550) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
+| [`actions`](../../web/e2e/studio.spec.ts#L579) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
 
 ### Registered frontend verification callbacks
 
@@ -564,6 +564,7 @@ Each row describes a concrete anonymous `test`/`it` function. Nested interaction
 
 | Source / case | Mechanism | Why / architectural boundary |
 | --- | --- | --- |
+| [E2E: terminal polling without SSE](../../web/e2e/studio.spec.ts#L491) | Abort the event stream, keep an existing memory projection, execute a delayed real sandbox file write and let Run polling reach terminal state. | Unsubscribe flushes file context as well as history; the editor updates without reloading or relying on a terminal SSE event. |
 | [E2E: accepted submission retry](../../web/e2e/studio.spec.ts#L22) | Accept a Run through real HTTP, abort its browser response, advance history/focus state and retry the unchanged task. | The exact body/key returns one original Run despite newer revisions; transport uncertainty does not repeat work. |
 | [E2E: context/packages/process pipes](../../web/e2e/studio.spec.ts#L52) | Compact/restore real history, import/export a fresh preset, approve a native process and send Unicode stdin/Stop through the UI. | New daily-agent controls form one working vertical workflow with original evidence and completed native cleanup. |
 | [E2E: tool/preset/plan](../../web/e2e/studio.spec.ts#L112) | Search schemas, inspect effective read-only rules, switch Coding, inspect empty context, directly run a plan and reload it. | Tool exposure, useful preset context and durable progress work through actual UI and receipts. |
@@ -576,11 +577,11 @@ Each row describes a concrete anonymous `test`/`it` function. Nested interaction
 | [E2E: provider references and live inspection](../../web/e2e/studio.spec.ts#L414) | Save endpoint/model/reference fields, inspect the current draft and reopen Settings. | Configuration persistence requires neither a browser key nor a Preview gate. |
 | [E2E: stdio MCP](../../web/e2e/studio.spec.ts#L434) | Save/discover a fixture process, inspect default deny, explicitly allow and execute its call. | Discovery is separate from authorization with real local SDK effects. |
 | [E2E: memory/Skills direct Run](../../web/e2e/studio.spec.ts#L461) | Save note/procedure, select it, directly run a task and inspect both sources. | File editors, snapshot compilation and tool evidence form one workflow. |
-| [E2E: narrow viewport](../../web/e2e/studio.spec.ts#L491) | Use a mobile-sized page, inspect Preview and visible Run, and check layout bounds. | Optional panes cannot make task controls inaccessible. |
-| [E2E: reversible drafts](../../web/e2e/studio.spec.ts#L510) | Duplicate/switch/edit/undo/redo/discard and verify original/independent draft state. | Local editor history preserves unsaved work while selection remains usable. |
-| [E2E: conversation organization](../../web/e2e/studio.spec.ts#L540) | Rename/folder/fork/continue/duplicate/archive/restore/delete through visible menus. | Saved prefix provenance, shared-file semantics and history independence are vertical features. |
-| [Component: placement reordering](../../web/src/Composer.test.tsx#L31) | Render Composer, click move, inspect emitted aggregate/order/roles/original object. | UI order normalization preserves slot/role/source semantics. |
-| [Component: malformed rule draft](../../web/src/Composer.test.tsx#L53) | Type invalid JSON, Apply rules, require no emitted aggregate and visible error. | Invalid advanced text cannot corrupt the parent's applied preset draft. |
+| [E2E: narrow viewport](../../web/e2e/studio.spec.ts#L520) | Use a mobile-sized page, inspect Preview and visible Run, and check layout bounds. | Optional panes cannot make task controls inaccessible. |
+| [E2E: reversible drafts](../../web/e2e/studio.spec.ts#L539) | Duplicate/switch/edit/undo/redo/discard and verify original/independent draft state. | Local editor history preserves unsaved work while selection remains usable. |
+| [E2E: conversation organization](../../web/e2e/studio.spec.ts#L569) | Rename/folder/fork/continue/duplicate/archive/restore/delete through visible menus. | Saved prefix provenance, shared-file semantics and history independence are vertical features. |
+| [Component: placement reordering](../../web/src/features/prompts/Composer.test.tsx#L31) | Render Composer, click move, inspect emitted aggregate/order/roles/original object. | UI order normalization preserves slot/role/source semantics. |
+| [Component: malformed rule draft](../../web/src/features/prompts/Composer.test.tsx#L53) | Type invalid JSON, Apply rules, require no emitted aggregate and visible error. | Invalid advanced text cannot corrupt the parent's applied preset draft. |
 
 ## What these checks establish
 
@@ -999,6 +1000,33 @@ async def test_process_exit_during_settings_read_returns_conflict.finish() -> No
 async def test_process_exit_during_settings_read_returns_conflict.settings_after_exit() -> StudioConfig
 async def test_failed_summary_cleanup_still_closes_checkpoints(tmp_path, monkeypatch)
 async def test_rpc_internal_failure_keeps_next_frame_readable(monkeypatch)
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/check_layers.py
+
+**Layer: Engineering / offline dependency-direction review.** Enforces the implemented packages' inward dependency direction and checks relative frontend imports.
+
+**Connections and effects:** Parses actual Python source imports, including relative imports, and static frontend module specifiers; does not import app modules, create stores or install tooling. It supplements language compilation/runtime acceptance and does not claim to resolve arbitrary dynamic imports.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`check_python`](../../scripts/check_layers.py#L10) | Detect forbidden inward-to-outward Python dependencies. | Walk AST imports, resolve package-relative names, reject domain SDK/adapter imports and infrastructure/application imports of outer layers. | Physical folders remain meaningful boundaries; infrastructure cannot import Studio or interfaces, and domain values do not depend on execution adapters. |
+| [`check_frontend`](../../scripts/check_layers.py#L64) | Verify static UI imports and layer direction. | Resolve relative source files, reject missing/outside targets and shared/API dependencies on features/app or feature dependencies on app. | Shared widgets/transport cannot silently depend on a feature or the composition root; TypeScript compilation independently verifies the imports. |
+| [`main`](../../scripts/check_layers.py#L92) | Run the offline structural review. | Combine Python/frontend violations, print actionable paths and exit nonzero on a violation. | Package reorganization has a repeatable check without another framework, runtime dependency or service. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def check_python() -> list[str]
+def check_frontend() -> list[str]
+def main() -> None
 ```
 
 These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.

@@ -25,7 +25,7 @@ Real-model acceptance completed multi-file coding, actual sandbox checks, Skill 
 
 The subsequent [Codex capability review](codex-gap-review.md) closes concrete tool/prompt gaps. Its separate real-model acceptance captured 14 requests and 26 tool calls for hash-guarded multi-file repair and a read-only vulnerability review. Stage 3/4 acceptance added **41 real model requests and 63 tool calls** for multi-file CSV repair, background worker input/cleanup, three-call context reduction, continued CLI implementation, restarted approval and a real embedded extension. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md) and [Harness interfaces](harness.md). External Claude and Linux-native acceptance remain separate unperformed checks.
 
-The [2026-10-05 code and architecture review](review-2026-10-05.md) adds native folder selection and fixes submission retries, event completion, process-input races, shutdown, error contracts and dialog interaction. It records actual service/native acceptance separately from earlier real-model workloads.
+The completed [code and architecture review](review.md) records the domain/application/infrastructure/interfaces package refactor, app/features/shared/api frontend structure, corrected dependency direction, native selection/lifecycle fixes and the terminal-polling file-context correction. Its closure evidence is separate from earlier real-model workloads.
 
 See [Architecture](architecture.md) for the whole-system design and the [Architecture Reference](reference/README.md) for every module, class, function, callback, and dependency role. The [Development Guide](development.md) defines repository conventions. [AGENTS.md](../AGENTS.md) is the root entry point for coding agents.
 
@@ -203,6 +203,7 @@ npm --prefix web run test -- --run
 npm --prefix web run format:check
 npm --prefix web run build
 uv run python scripts/check_docs.py
+uv run python scripts/check_layers.py
 ```
 
 Browser checks use a separate backend and temporary data. Build first, then run `npx playwright install chromium` and `npm run test:e2e` from web/. Offline checks do not replace acceptance against a real model.

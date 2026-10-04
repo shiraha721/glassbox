@@ -4,7 +4,7 @@ import json
 import pytest
 from sqlalchemy import func, select
 
-from rtagent.storage import previews
+from rtagent.infrastructure.storage import previews
 
 
 async def test_draft_inspection_is_live_and_does_not_persist(studio_client):
@@ -239,7 +239,7 @@ async def test_access_boundary_and_stale_preview(studio_client):
 
 
 async def test_approval_checkpoint_survives_runner_restart(studio_client):
-    from rtagent.runtime import Runner
+    from rtagent.application.runner import Runner
 
     client, app = studio_client
     run, *_ = await start(client, "/echo durable")

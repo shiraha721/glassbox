@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from rtagent.domain import AppError, MCPServer, StudioConfig
-from rtagent.tools import ToolRegistry
-from rtagent.workspace import Workspace
+from rtagent.infrastructure.tools import ToolRegistry
+from rtagent.infrastructure.workspace.files import Workspace
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mcp_server.py"
 

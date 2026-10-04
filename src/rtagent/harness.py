@@ -3,13 +3,14 @@
 import asyncio
 from typing import Any
 
-from rtagent.application import Studio
-from rtagent.config import Settings
+from rtagent.application.runner import Runner
+from rtagent.application.studio import Studio
 from rtagent.domain import AppError, PreviewRequest, ResumeRequest, RunView, uid
-from rtagent.hooks import Hooks
-from rtagent.runtime import Runner
-from rtagent.storage import TERMINAL, Repository
-from rtagent.tools import ToolRegistry
+from rtagent.domain.hooks import Hooks
+from rtagent.domain.lifecycle import TERMINAL
+from rtagent.infrastructure.config import Settings
+from rtagent.infrastructure.storage import Repository
+from rtagent.infrastructure.tools import ToolRegistry
 
 
 class Harness:

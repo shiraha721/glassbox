@@ -10,10 +10,10 @@ import httpx
 import uvicorn
 from fastapi.responses import Response
 
-from rtagent.client import AgentClient
-from rtagent.config import Settings
 from rtagent.domain import AppError
-from rtagent.main import create_app
+from rtagent.infrastructure.config import Settings
+from rtagent.interfaces.client import AgentClient
+from rtagent.interfaces.http.app import create_app
 
 
 def dialog_window(pid: int) -> int | None:

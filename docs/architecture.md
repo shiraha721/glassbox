@@ -1,6 +1,6 @@
 # Architecture and Design
 
-Last updated: 2026-10-05. This describes implemented behavior. The [code and architecture review](review-2026-10-05.md) records maintenance findings and validation. Future work is defined in the [delivery stages](README.md#delivery-stages).
+Last updated: 2026-10-05. This describes implemented behavior. The [code and architecture review](review.md) records maintenance findings and validation. Future work is defined in the [delivery stages](README.md#delivery-stages).
 
 ## Read from the whole system to individual functions
 
@@ -26,81 +26,71 @@ The browser and attached clients talk to local HTTP; model adapters talk to expl
 ### Actual repository layout
 
 ```text
-src/rtagent/                    One installable Python package
-  __init__.py                  Package version; no worker
-  main.py                      Composition root, lifespan, local browser boundary, SPA
-  desktop.py, windows_dialog.py User folder selection, helper process and COM lifetime
-  config.py                    Process environment/paths and secret references
-  api.py                       HTTP routes, validated contracts, SSE serialization
-  application.py               Studio use cases and Run command coordination
-  harness.py                   Shared Web/embedded lifecycle and typed Run facade
-  client.py, cli.py, rpc.py     Existing-service HTTP attachment, CLI and newline JSON-RPC
-  domain.py                    Strict data contracts and canonical utility values
-  prompts.py                   Pure compilation, conditions, variables, source mapping
-  patches.py                   Pure Add/Update/Delete parsing and exact text hunks
-  policies.py                  Frozen-schema argument validation and allow/ask/deny
-  runtime.py                   Explicit LangGraph loop, tasks, budgets, receipts/reentry
-  providers.py                 LangChain adapter, prepared/captured requests, fake stream
-  anthropic.py                 Explicit Messages text/tool serializer and SSE parser
-  context.py                   Source-bound no-tools compaction and usage receipts
-  hooks.py, execution.py       Trusted callbacks and per-dispatch Run/session ownership
-  tools.py                     Native schemas, stateless MCP lifecycle, one-call dispatch
-  workspace.py                 Guarded files and file-backed instructions/memory/Skills
-  sandbox.py                   Linux bubblewrap/Bash and process-group cleanup
-  windows_sandbox.py           Win32 AppContainer/PowerShell/Job Object lifecycle
-  sandbox_files.py             Windows filtered copy and conflict-checked reconciliation
-  command_io.py, processes.py  Bounded live pipes/output and original native process ownership
-  toolchains.py, downloads.py  Trusted read-only runtime staging and pinned public HTTPS transfer
-  packages.py                  New-identity preset and validated Skill data import/export
-  storage.py                   SQLAlchemy Core tables/transactions/events/copies
-  tracing.py                   Sanitized evidence copies
-  skills/skill-creator/         Packaged SKILL.md resource
-  skills/debugging/            Packaged reproduce/diagnose/verify procedure
-  skills/code-review/          Packaged evidence-based review procedure
-web/src/                       React presentation and local editor state
-  main.tsx, App.tsx            Browser bootstrap and workspace coordination
-  ConversationTurn.tsx         Saved turn, tool evidence and recovery presentation
-  DirectoryField.tsx           Native folder selection and unavailable fallback
-  useDialogFocus.ts            Modal keyboard focus and restoration
-  Composer.tsx                 Prompt block controls and rule drafts
-  usePresetDrafts.ts           Independent bounded undo/redo histories
-  useLivePreview.ts            Debounced draft compilation and stale-response handling
-  Projects.tsx                 Named workspace registration and navigation
-  ConversationHistory.tsx     History groups, menus, and copy/metadata dialogs
-  Inspector.tsx                Preview versus actual call evidence
-  Settings.tsx                 Versioned execution configuration editor
-  ToolCatalog.tsx             Grouped schemas and effective permission inspection
-  TaskPlan.tsx                Recorded progress within its owning Run
-  WorkspacePanel.tsx           Memory/skill editors and sandbox inspection
-  ContextPanel.tsx             Explicit compaction/accounting/restoration
-  ProcessesPanel.tsx           Owned output, pipe input/EOF and Stop
-  PackageActions.tsx           Shared explicit JSON data import/export
-  api/client.ts                Same-origin JSON transport and generated type aliases
-  api/events.ts                Persistent event subscription/query invalidation
-  api/generated.ts             Generated type-only OpenAPI contract
-  style.css                    Visual hierarchy, fixed/scroll areas, responsive behavior
-migrations/                    Application schema history, separate from checkpoints
-scripts/                       Contract export and isolated real-HTTP smoke checks
-tests/, web/e2e/               Backend/component/browser verification
-docs/                          Project guide, system design, development/reference
+src/rtagent/
+  domain/                     Values and pure decisions; no adapters or resource ownership
+    models.py                 Typed contracts and canonical utilities
+    prompts.py, patches.py    Prompt compilation and exact text-hunk computation
+    policies.py               Frozen-schema validation and permission decisions
+    lifecycle.py              Shared immutable Run/process state membership
+    hooks.py, execution.py    Callback contracts and trusted effect ownership values
+  application/                Working workflows over concrete adapters
+    studio.py                 Task/context/recovery/project/package use cases
+    runner.py                 One LangGraph loop, checkpoints, budgets and receipts
+    context.py                Explicit source-bound summarization and evidence
+  infrastructure/             Database, providers, filesystem and OS implementations
+    storage.py                SQLite tables, writer transactions, history and receipts
+    config.py, tracing.py     Process settings, credential resolution, redacted views
+    tools.py, packages.py     Native/MCP/local dispatch and reusable data publication
+    providers/chat.py         OpenAI-compatible preparation/capture and explicit simulation
+    providers/messages.py     Messages text/tool mapping and SSE transport
+    workspace/                files.py, downloads.py, toolchains.py
+    sandbox/                  linux.py, windows.py, files.py, command_io.py, processes.py
+    desktop/                  folders.py and the Windows Shell helper windows_dialog.py
+  interfaces/                 HTTP, client, CLI and JSON-RPC adapters
+    http/app.py               Web composition/lifespan, ASGI errors/origins and SPA delivery
+    http/api.py               Typed routes and persistent SSE observation
+    client.py, cli.py, rpc.py  Existing-owner attachment and explicit commands
+  harness.py                  Shared concrete composition/resource owner for Web/embedding
+  main.py, cli.py, client.py   Stable aliases/launch guards; no duplicate implementations
+  __init__.py, __main__.py     Version and module entry point
+  skills/                     Bundled skill-creator, debugging and code-review resources
+web/src/
+  app/App.tsx                 Workspace composition, target selection and submission identity
+  features/chat/              Saved turns/plans, Context and owned process controls
+  features/history/           Conversation groups, menus and copy/metadata forms
+  features/projects/          Project navigation and OS directory selection
+  features/prompts/           Composer, reversible drafts and live preview hooks
+  features/inspection/        Preview and recorded request/effect evidence
+  features/workspace/         Memory/Skill editors and sandbox inspection
+  features/settings/          Versioned execution settings
+  features/tools/             Searchable schemas and effective tool permissions
+  shared/                     Json, PackageActions and useDialogFocus
+  api/                        HTTP/types and saved-event observation
+  main.tsx, style.css         Browser entry, QueryClient and fixed/scroll layout
+migrations/                    Application Alembic history; checkpoints belong to LangGraph
+scripts/                       Contract export, real-service acceptance and offline audits
+tests/, web/e2e/               Focused Python/component/browser verification
+docs/                          Project guide, architecture, development and function reference
 ```
 
-This is the current layout. Responsibilities are modules, not all separate packages. Splitting them further requires a concrete need; the design does not assume microservices, a plugin marketplace, a vector store, or a second persistence backend.
+This is the implemented layered layout. Package __init__.py files start no work; domain exports the existing typed contracts. Root launch/client aliases preserve public entry points. The design remains one modular monolith; concrete responsibilities are grouped without service interfaces, a plugin framework or a second persistence backend.
 
 ### Layers and reasons for the boundaries
 
 | Layer | Concrete owner | What it does / how it connects | Why this boundary exists |
 | --- | --- | --- | --- |
 | Presentation and local UI state | React components, usePresetDrafts, style.css | Displays saved projections and collects explicit task/editor/action input. | Drafts/selection/layout are browser concerns; authorization and effects are server concerns. |
-| Transport | api.py, main.LocalAccessMiddleware, browser client/events | Validates/serializes HTTP contracts, preserves ASGI streaming/disconnect and reads persistent SSE; delegates actions. | Opening/reconnecting UI is a read operation, not implicit model execution. |
-| Application use cases | Studio | Resolves revisions/context, freezes input, starts/approves/resumes/stops, coordinates checkpoint deletion. | Multi-step behavior has one owner independent of route rendering and graph-node internals. |
-| Domain computation and policy | domain.py, prompts.py, patches.py, policies.py | Represents values, deterministically compiles, computes exact text hunks, validates arguments, returns a configured decision. | Computation cannot bypass the adapter that owns file paths/effects; no network/database/model SDK hides effects in compilation or authorization. |
-| Runtime orchestration | Runner / LangGraph | Orders model/tool steps, checkpoints progress, enforces budgets, persists receipts and interrupts. | One explicit loop makes control flow and recovery visible; model adapters do not nest another loop. |
-| Concrete infrastructure | providers/tools/workspace/sandboxes/config | Talks to SDKs/OS/files/transports and resolves credential references at their boundary. | The external system decides execution mechanics; the model cannot select an unrestricted host implementation. |
+| Transport | interfaces/http, client/CLI/RPC and browser api/events | Validates/serializes HTTP contracts, preserves ASGI streaming/disconnect and reads persistent SSE; delegates actions. | Opening/reconnecting UI is a read operation, not implicit model execution. |
+| Application use cases | application/studio.Studio | Resolves revisions/context, freezes input, starts/approves/resumes/stops, coordinates checkpoint deletion. | Multi-step behavior has one owner independent of route rendering and graph-node internals. |
+| Domain computation and policy | domain/models, prompts, patches, policies, lifecycle and ownership values | Represents values, deterministically compiles, computes exact text hunks, validates arguments, returns a configured decision. | Computation cannot bypass the adapter that owns file paths/effects; no network/database/model SDK hides effects in compilation or authorization. |
+| Application orchestration | application/runner, application/context / LangGraph | Orders model/tool steps, checkpoints progress, enforces budgets, persists receipts and interrupts. | One explicit loop makes control flow and recovery visible; model adapters do not nest another loop. |
+| Concrete infrastructure | infrastructure/providers, tools, workspace, sandbox, desktop and config | Talks to SDKs/OS/files/transports and resolves credential references at their boundary. | The external system decides execution mechanics; the model cannot select an unrestricted host implementation. |
 | Persistence and evidence | Repository, AsyncSqliteSaver, tracing | Stores application ownership/projections/receipts and separate graph progress; creates redacted copies. | Durable evidence and progress are different facts, and sanitizing a view must not rewrite originals. |
 | Composition and engineering | main, migrations, export/smoke/tests/config | Owns lifetime, migrations, contract generation, and validation. | Resource startup/cleanup and development tooling do not belong in task prompts or frontend flows. |
 
 These are responsibility layers, not a promise of a strict dependency-inverted framework. Studio directly calls the concrete Runner/Repository/ToolRegistry and provider preparation functions. Simple metadata routes delegate to Repository when no additional use case is needed; complicated execution/deletion goes through Studio. Domain/compiler/policy depend only on validated data and local computation. The entry point wires implementations and owns their lifetime. Detailed references identify the actual imports/effects, including these practical cross-layer calls.
+
+Internal dependency rules are checked by `scripts/check_layers.py`: domain imports no application/infrastructure/interfaces or runtime SDK; infrastructure imports no application/interfaces/composition; application imports no interfaces/composition. Concrete application-to-infrastructure calls remain intentional. HTTP may delegate simple atomic CRUD to Repository and uses Studio for multi-resource workflows. Frontend shared/API code cannot import features/app; features cannot import app. Root aliases are entry adapters, not internal dependencies. Shared Json moved out of Inspector, the output callback type moved out of native pipes, and lifecycle sets moved out of storage to remove reverse dependencies.
 
 ### State and authority
 
@@ -160,18 +150,18 @@ flowchart TD
 
 | Module | Responsibility |
 | --- | --- |
-| main.py, harness.py, config.py | Shared startup, migrations, resource ownership, ASGI boundary, static UI |
-| desktop.py, windows_dialog.py | User folder selection, helper ownership, Windows Shell COM and manual fallback outcomes |
-| api.py, application.py | HTTP contracts; resolve context/revisions, start/approve/cancel/resume Runs, workspace editing |
-| client.py, cli.py, rpc.py | HTTP attachment and typed CLI/JSON-RPC operations on the existing owner |
-| domain.py, prompts.py, patches.py | Pydantic contracts; pure compilation, validated plan projection, and exact text-patch computation |
-| providers.py, anthropic.py | Canonical mapping, prepared/captured requests and explicit provider streaming |
-| context.py, hooks.py, execution.py | Source-bound compaction, committed observation/additional guards and effect ownership |
-| runtime.py | Bounded graph, checkpoints, receipts, interrupts and recovery |
-| policies.py, tools.py | Frozen schemas/permissions, native dispatch, stateless MCP lifecycle |
-| workspace.py, sandbox.py, windows_sandbox.py, sandbox_files.py | File context, memory, Skills, guarded edits, native Windows/Linux isolation and Windows file reconciliation |
-| command_io.py, processes.py, toolchains.py, downloads.py, packages.py | Bounded pipes/live commands, trusted runtimes, pinned public transfer and reusable data formats |
-| storage.py, tracing.py | Transactions, revisions, events, traces, redaction and export |
+| interfaces/http/app.py, harness.py, infrastructure/config.py | Shared startup, migrations, resource ownership, ASGI boundary, static UI |
+| infrastructure/desktop/ | User folder selection, helper ownership, Windows Shell COM and manual fallback outcomes |
+| interfaces/http/api.py, application/studio.py | HTTP contracts; resolve context/revisions, start/approve/cancel/resume Runs, workspace editing |
+| interfaces/client.py, cli.py, rpc.py | HTTP attachment and typed CLI/JSON-RPC operations on the existing owner |
+| domain/models.py, prompts.py, patches.py | Pydantic contracts; pure compilation, validated plan projection, and exact text-patch computation |
+| infrastructure/providers/chat.py, messages.py | Canonical mapping, prepared/captured requests and explicit provider streaming |
+| application/context.py, domain/hooks.py, execution.py | Source-bound compaction, committed observation/additional guards and effect ownership |
+| application/runner.py | Bounded graph, checkpoints, receipts, interrupts and recovery |
+| domain/policies.py, infrastructure/tools.py | Frozen schemas/permissions, native dispatch, stateless MCP lifecycle |
+| infrastructure/workspace/files.py, infrastructure/sandbox/ | File context, memory, Skills, guarded edits, native Windows/Linux isolation and Windows file reconciliation |
+| infrastructure/sandbox/command_io.py, processes.py, workspace/toolchains.py, downloads.py, packages.py | Bounded pipes/live commands, trusted runtimes, pinned public transfer and reusable data formats |
+| infrastructure/storage.py, tracing.py | Transactions, revisions, events, traces, redaction and export |
 | web/src/ | Conversation, Prompt, Inspector, Workspace and Settings, generated API types |
 
 Domain/compiler/policy logic does not depend on HTTP or storage. The application reads workspace files before pure compilation. Blocking file operations run in a worker thread; model/MCP/subprocess calls use async I/O. The entry point closes tasks, checkpoints, and database resources.

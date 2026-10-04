@@ -14,10 +14,10 @@ from unittest.mock import patch
 import httpx
 import uvicorn
 
-import rtagent.downloads as downloads
-from rtagent.config import Settings
+import rtagent.infrastructure.workspace.downloads as downloads
 from rtagent.domain import uid
-from rtagent.main import create_app
+from rtagent.infrastructure.config import Settings
+from rtagent.interfaces.http.app import create_app
 
 
 async def wait_until(read, ready, seconds: float = 45):
@@ -142,7 +142,7 @@ async def verify(
         await asyncio.Event().wait()
         yield {}
 
-    with patch("rtagent.context.generate", paused_summary):
+    with patch("rtagent.application.context.generate", paused_summary):
         cancelled = await api(
             "POST",
             f"/sessions/{session['id']}/compact",

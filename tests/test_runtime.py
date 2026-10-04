@@ -5,8 +5,8 @@ import asyncio
 import pytest
 from test_api import start, wait_state
 
+from rtagent.application.runner import Runner
 from rtagent.domain import Message, ToolCall
-from rtagent.runtime import Runner
 
 
 async def allow_echo(client, **limits):
@@ -54,7 +54,7 @@ async def test_multiple_calls_keep_ids_and_complete_before_next_model(studio_cli
             "usage": {"input_tokens": 7, "output_tokens": 2},
         }
 
-    monkeypatch.setattr("rtagent.runtime.generate", scripted_model)
+    monkeypatch.setattr("rtagent.application.runner.generate", scripted_model)
     run, *_ = await start(client, "Use both tools")
     completed = await wait_state(client, run["id"], {"succeeded"})
     assert [message["role"] for message in completed["messages"]] == [
@@ -182,7 +182,7 @@ async def test_attempt_limits_stop_the_loop(studio_client, monkeypatch, limits, 
             "usage": {"input_tokens": None, "output_tokens": None},
         }
 
-    monkeypatch.setattr("rtagent.runtime.generate", looping_model)
+    monkeypatch.setattr("rtagent.application.runner.generate", looping_model)
     run, *_ = await start(client)
     stopped = await wait_state(client, run["id"], {"failed"})
     assert stopped["stop_reason"] == reason

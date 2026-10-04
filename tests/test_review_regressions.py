@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rtagent.command_io import CommandControl
-from rtagent.config import Settings
 from rtagent.domain import AppError, StudioConfig
 from rtagent.harness import Harness
-from rtagent.rpc import serve_rpc
+from rtagent.infrastructure.config import Settings
+from rtagent.infrastructure.sandbox.command_io import CommandControl
+from rtagent.interfaces.rpc import serve_rpc
 
 
 async def test_process_exit_during_settings_read_returns_conflict(tmp_path, monkeypatch):
@@ -79,10 +79,11 @@ async def test_rpc_internal_failure_keeps_next_frame_readable(monkeypatch):
     lines = b'{"jsonrpc":"2.0","id":1,"method":"fixture"}\n{"jsonrpc":"2.0","id":2,"method":"fixture"}\n'
     input_stream = io.TextIOWrapper(io.BytesIO(lines), encoding="utf-8")
     output = io.StringIO()
-    monkeypatch.setattr("rtagent.rpc.sys.stdin", input_stream)
-    monkeypatch.setattr("rtagent.rpc.sys.stdout", output)
+    monkeypatch.setattr("rtagent.interfaces.rpc.sys.stdin", input_stream)
+    monkeypatch.setattr("rtagent.interfaces.rpc.sys.stdout", output)
     monkeypatch.setattr(
-        "rtagent.rpc.dispatch", AsyncMock(side_effect=[RuntimeError("fixture"), {"status": "ok"}])
+        "rtagent.interfaces.rpc.dispatch",
+        AsyncMock(side_effect=[RuntimeError("fixture"), {"status": "ok"}]),
     )
     await serve_rpc(None)
     first, second = [json.loads(line) for line in output.getvalue().splitlines()]

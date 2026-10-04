@@ -10,13 +10,13 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from rtagent.client import AgentClient
-from rtagent.config import Settings
 from rtagent.domain import AppError, ResumeRequest, RunEvent, StudioConfig, ToolCall, ToolDefinition
+from rtagent.domain.hooks import Hooks
 from rtagent.harness import Harness
-from rtagent.hooks import Hooks
-from rtagent.main import create_app
-from rtagent.workspace import Workspace
+from rtagent.infrastructure.config import Settings
+from rtagent.infrastructure.workspace.files import Workspace
+from rtagent.interfaces.client import AgentClient
+from rtagent.interfaces.http.app import create_app
 
 
 async def command(args: list[str], stdin: bytes | None = None) -> str:

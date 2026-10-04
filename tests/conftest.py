@@ -3,8 +3,8 @@
 import httpx
 import pytest
 
-from rtagent.config import Settings
-from rtagent.main import create_app
+from rtagent.infrastructure.config import Settings
+from rtagent.interfaces.http.app import create_app
 
 
 @pytest.fixture

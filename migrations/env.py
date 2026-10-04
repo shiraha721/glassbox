@@ -1,7 +1,7 @@
 from alembic import context
 from sqlalchemy import create_engine
 
-from rtagent.config import Settings
+from rtagent.infrastructure.config import Settings
 
 config = context.config
 url = config.get_main_option("sqlalchemy.url")

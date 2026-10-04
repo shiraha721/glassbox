@@ -12,9 +12,9 @@ from uuid import uuid4
 import httpx
 import uvicorn
 
-from rtagent.config import Settings, resolve_secret
 from rtagent.domain import ProviderConfig, StudioConfig
-from rtagent.main import create_app
+from rtagent.infrastructure.config import Settings, resolve_secret
+from rtagent.interfaces.http.app import create_app
 
 FIXTURES = {
     "AGENTS.md": """# Acceptance workspace

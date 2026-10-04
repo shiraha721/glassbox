@@ -3,8 +3,8 @@ import json
 import httpx
 
 from rtagent.domain import Preset, ProviderConfig, StudioConfig
-from rtagent.prompts import compile_prompt
-from rtagent.providers import generate, prepare
+from rtagent.domain.prompts import compile_prompt
+from rtagent.infrastructure.providers.chat import generate, prepare
 
 
 async def test_openai_preview_matches_captured_outbound_request(monkeypatch):
@@ -54,7 +54,7 @@ async def test_openai_preview_matches_captured_outbound_request(monkeypatch):
         def __init__(self, **kwargs):
             super().__init__(transport=httpx.MockTransport(transport), **kwargs)
 
-    monkeypatch.setattr("rtagent.providers.httpx.AsyncClient", TestClient)
+    monkeypatch.setattr("rtagent.infrastructure.providers.chat.httpx.AsyncClient", TestClient)
 
     async def on_wire(body):
         captured.append(body)

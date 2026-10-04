@@ -58,6 +58,8 @@ export function useRunEvents(runId: string | undefined, enabled: boolean): void 
       // A status read can finish the Run before its last SSE event arrives. Flush the final
       // projection refresh on unsubscribe so active_run_id/revision cannot remain stale.
       refresh();
+      // The final event may be missed after a status refetch; file context still changed.
+      void cache.invalidateQueries({ queryKey: ['workspace'] });
     };
   }, [runId, enabled, cache]);
 }

@@ -4,8 +4,6 @@ import asyncio
 
 import pytest
 
-from rtagent.anthropic import prepare_anthropic
-from rtagent.config import Settings
 from rtagent.domain import (
     AppError,
     Block,
@@ -17,10 +15,12 @@ from rtagent.domain import (
     ToolDefinition,
     digest,
 )
+from rtagent.domain.hooks import Hooks
+from rtagent.domain.prompts import compile_prompt
 from rtagent.harness import Harness
-from rtagent.hooks import Hooks
-from rtagent.prompts import compile_prompt
-from rtagent.storage import Repository
+from rtagent.infrastructure.config import Settings
+from rtagent.infrastructure.providers.messages import prepare_anthropic
+from rtagent.infrastructure.storage import Repository
 
 
 async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, monkeypatch):
@@ -47,7 +47,7 @@ async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, 
                 "usage": {"input_tokens": 1, "output_tokens": None},
             }
 
-        monkeypatch.setattr("rtagent.context.generate", summarizer)
+        monkeypatch.setattr("rtagent.application.context.generate", summarizer)
         from rtagent.domain import CompactRequest, SessionUpdate
 
         job = await harness.studio.compact(
@@ -173,7 +173,7 @@ async def test_trusted_guard_is_never_called_before_core_denial(tmp_path, monkey
             "usage": {"input_tokens": 1, "output_tokens": 1},
         }
 
-    monkeypatch.setattr("rtagent.runtime.generate", model)
+    monkeypatch.setattr("rtagent.application.runner.generate", model)
     async with Harness(
         Settings(
             data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
