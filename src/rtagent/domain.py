@@ -55,7 +55,7 @@ def endpoint_url(value: str) -> str:
 class AppError(Exception):
     """An expected application failure with a safe message and HTTP mapping."""
 
-    def __init__(self, code: str, message: str, status: int = 422, details: Any = None):
+    def __init__(self, code: str, message: str, status: int = 422, details: Any = None) -> None:
         """Keep public error details separate from internal exception diagnostics."""
         super().__init__(message)
         self.code, self.message, self.status, self.details = code, message, status, details
@@ -65,6 +65,21 @@ class Contract(BaseModel):
     """Reject unknown fields at configuration and API boundaries."""
 
     model_config = ConfigDict(extra="forbid", json_schema_serialization_defaults_required=True)
+
+
+class ErrorInfo(Contract):
+    """A displayable service failure with a stable code and diagnostic correlation ID."""
+
+    code: str
+    message: str
+    details: Any = None
+    request_id: str
+
+
+class ErrorEnvelope(Contract):
+    """The common HTTP error body, including field validation and unexpected service failures."""
+
+    error: ErrorInfo
 
 
 class Variable(Contract):
@@ -498,6 +513,20 @@ class ProjectCreate(FolderCreate):
     workspace_root: str = Field(min_length=1, max_length=4096)
 
 
+class FolderPickerRequest(Contract):
+    """Suggest the initial desktop location without registering a project or modifying files."""
+
+    initial_path: str = Field(default="", max_length=4096)
+
+
+class FolderSelection(Contract):
+    """Distinguish a selected path, user cancellation and an unavailable native desktop."""
+
+    status: Literal["selected", "cancelled", "unavailable"]
+    path: str | None = None
+    detail: str | None = None
+
+
 class ProjectView(Contract):
     """A named workspace folder; tool policy remains in the shared settings aggregate."""
 
@@ -505,6 +534,21 @@ class ProjectView(Contract):
     name: str
     workspace_root: str
     created_at: str
+
+
+class SessionCreate(Contract):
+    """Create a meaningfully named empty conversation in a selected project."""
+
+    title: str = Field(default="New investigation", min_length=1, max_length=120)
+    project_id: str | None = None
+
+    @field_validator("title")
+    @classmethod
+    def nonempty_title(cls, value: str) -> str:
+        """Keep explicit titles meaningful and consistent with folder names."""
+        if not value.strip():
+            raise ValueError("Conversation title cannot be empty.")
+        return value.strip()
 
 
 class SessionUpdate(Contract):

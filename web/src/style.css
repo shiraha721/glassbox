@@ -1572,6 +1572,21 @@ summary::marker {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.directory-field {
+  display: grid;
+  gap: 10px;
+}
+.directory-path {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--soft);
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 12px;
+}
 .conversation-heading {
   min-width: 0;
   flex: 1;

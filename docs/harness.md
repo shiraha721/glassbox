@@ -47,6 +47,8 @@ asyncio.run(main())
 
 `AgentClient.run` reads current revisions and optionally creates a conversation. For reliable retry after a lost response, capture a typed `PreviewRequest` containing the observed session/preset/config revisions and input, then call **`client.start(request, key)` with the same request and key**. The server returns the original Run even if the session revision later changes. Reconstructing a convenience request with newer revisions or creating a new session is a new submission. Neither convenience nor explicit submission requires Preview. Exact request/response shapes are in `/openapi.json` and [domain contracts](reference/backend-core.md).
 
+The Web client follows the same rule: an unchanged visible task retains its complete submitted body and key across a lost response and later history revisions. HTTP validation, business and unexpected pre-response failures share `{"error":{"code":"...","message":"...","details":null,"request_id":"..."}}`. Field errors contain locations/types without submitted input values. AgentClient handles non-JSON failures as transport errors; JSON-RPC returns `-32603` for an unexpected operation and continues reading independent frames.
+
 ## Newline JSON-RPC
 
 ```powershell
@@ -168,6 +170,8 @@ Exports create new local files and refuse overwrite. Package formats are:
 ```
 
 Preset import always creates fresh aggregate/block identities and a revision-one saved preset. Skill imports are new-name-only, with matching frontmatter, portable forward-slash relative paths, no links/traversal/case aliases, one to fifty text resources, 64 KiB per file and 1 MiB total. All resources stage and validate before a directory rename publishes the Skill. Existing/bundled names cannot be overwritten. Export a bundled procedure, change the name/frontmatter and import it as a project procedure when customization is needed. Browser/CLI JSON inputs additionally cap at 2 MiB. No secrets, runtime configuration, live effects or checkpoint state are included by these formats.
+
+Studio owns package use cases for HTTP and embedding. Explicit user Skill import follows the same authoring policy as the memory/Skill editors, including when agent tools are read-only. Agent mutation tools and native commands still obey their captured policy; importing procedure text cannot grant tool permissions.
 
 ## Provider support
 

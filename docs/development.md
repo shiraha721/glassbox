@@ -7,7 +7,7 @@ This guide applies to the entire repository and defines project constraints and 
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-04, Stages 1–4 are implemented and the Windows daily-agent/shared-harness workflows are accepted. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md), [Stage 2 acceptance](acceptance-stage2.md) and the [Codex capability review](codex-gap-review.md). Linux acceptance and an external Claude endpoint check remain unperformed. The target is an everyday agent harness; inspect actual files and documented delivery boundaries before work.
+As of 2026-10-05, Stages 1–4 are implemented and the Windows daily-agent/shared-harness workflows are accepted. The [code and architecture review](review-2026-10-05.md) covers native folder selection, lifecycle corrections and maintenance refactoring. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md), [Stage 2 acceptance](acceptance-stage2.md) and the [Codex capability review](codex-gap-review.md). Linux acceptance and an external Claude endpoint check remain unperformed. Inspect actual files and delivery boundaries before work.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
 Multi-agent orchestration, batch evaluation, PostgreSQL, and team deployment belong to later phases.
@@ -26,21 +26,26 @@ The [Architecture Reference](reference/README.md) maps every implemented module,
 
 ## Module Structure and Dependency Direction
 
-The implementation uses single modules for these responsibilities. The [architecture module map](architecture.md#what-the-application-owns) lists actual files; the responsibility sketch below is not a directory scaffolding request. Split a module only for a concrete need. Presets own embedded blocks; one versioned settings aggregate owns provider, MCP, permission, runtime/download and limit configuration. Preserve immutable Run snapshots without adding a generic persistence or plugin framework.
+The implementation uses concrete source files. The [architecture module map](architecture.md#what-the-application-owns) gives the full layout. Split a module only for a concrete need. Presets own embedded blocks; one settings aggregate owns provider, MCP, permission, runtime/download and limit configuration. Preserve snapshots without a generic persistence or plugin framework.
 
 ```text
 src/rtagent/
-  api/             FastAPI routes, request validation, HTTP/SSE
-  application/     Use cases, Run management, dependency interfaces
-  domain/          Domain models, errors, and events
-  prompts/         Conditions, variables, ordering, compilation, source mapping
-  providers/       Model capabilities, LangChain adapters, request transformation
-  runtime/         LangGraph state, nodes, checkpoints, and recovery
-  tools/           Tool registry, MCP lifecycle, execution adapters
-  policies/        Tool permissions, resource limits, and call decisions
-  tracing/         Model inputs, tool results, usage, and exports
-  storage/         Repository implementations, databases, migration wiring
-  evaluation/      Future evaluation module; create when needed
+  main.py          Composition, concrete ASGI boundary and Web resource lifetime
+  api.py           HTTP/SSE adapters and generated contract source
+  application.py   Studio use cases, packages, Run coordination and recovery
+  harness.py       Shared concrete owner for Web and embedding
+  domain.py        Validated values, errors, commands, projections and events
+  prompts.py       Pure conditions, variables, ordering, compilation and sources
+  providers.py     OpenAI-compatible adapter; anthropic.py owns Messages
+  runtime.py       Explicit LangGraph nodes, checkpoints and recovery
+  tools.py         Schemas, stateless MCP lifecycle and one-call execution
+  policies.py      Frozen-schema validation and permission decisions
+  workspace.py     Guarded files, instructions, memory and Skills
+  sandbox.py       Linux adapter; windows_sandbox.py owns AppContainer
+  desktop.py       User folder dialog ownership; windows_dialog.py owns COM
+  tracing.py       Evidence redaction; calls/events persist through Repository
+  storage.py       Concrete SQLite repository and Alembic initialization
+  client.py        HTTP attachment; cli.py/rpc.py are attached clients
 web/src/           React + TypeScript user interface
 tests/             Python unit, integration, and contract tests
 web/e2e/           Browser end-to-end tests
@@ -73,6 +78,7 @@ docs/              Project documentation, architecture, and development conventi
 
 - Use native Windows AppContainer with PowerShell on Windows and bubblewrap with Bash on Linux. Do not require WSL for Windows execution. Never replace it with unrestricted host execution or present a cwd check as an OS sandbox. Preserve no-network behavior, hidden credentials/runtime paths, bounded output, and child-process cleanup.
 - Projects register one existing local folder; sessions bind to stable project IDs and Runs freeze their absolute root. Idle workspace moves affect future Runs only. Native tools and context are resolved from that root; the model cannot select a different project.
+- Use the OS folder dialog first; cancellation preserves selection and unavailable desktops enable manual entry. The helper is an explicit user action, never an agent tool. Preserve process cleanup and direct ASGI disconnect signals. An empty conversation selection stays a new draft.
 - Memory and Skills use ordinary files. Snapshot the first nonempty root AGENTS.override.md or AGENTS.md, memory and selected Skill content with source mapping. Load nested root-to-leaf instructions and Skill bodies explicitly; retain bounds and override precedence. No vector store or plugin framework is needed.
 - Writes use content hashes or unambiguous exact edits. Skills and memory cannot grant permissions or bypass isolation. Explicitly configured MCP servers remain outside the command sandbox.
 - Search shares native path exclusions and reports skipped/truncated results. Ranged reads return the complete file hash even when content is partial. Patch preflight validates every operation before effects; each replacement is atomic, but later failures must retain completed paths rather than claim cross-file rollback.
@@ -80,6 +86,7 @@ docs/              Project documentation, architecture, and development conventi
 - Streaming records only bounded retained output before final paired tool receipts. Background processes belong to original Run/session/root, use bounded UTF-8 pipes and absolute deadlines, and never restart from records. Stop/failure/cancel/shutdown awaits the native tree and Windows reconciliation; copies get no process rows/handles. Active writers block archive/delete/workspace moves. Read-only cannot feed an older writable command.
 - Trusted runtime folders are explicit filtered read-only staging, without original ACL or ambient environment changes. Public downloads are a separate permissioned tool: exact HTTPS hosts, public pinned DNS/TLS identity, new destination, bounds/hash, no redirects/proxy/private addresses. Do not weaken command no-network isolation or production DNS validation to pass a fixture.
 - Trusted event hooks observe redacted copies after commit with bounded best-effort delivery; guards add denial only after core policy/approval. Registered local Python handlers have explicit permission/schema hashes and default mutator declarations; they are trusted application code, not untrusted sandboxed Skills. Reusable packages contain only validated prompt/procedure data with fresh identities/new names, never configuration, effects or executable plugin registration.
+- Package operations belong to Studio. Explicit user memory/Skill authoring remains available under read-only agent settings, consistently with the existing editors; model tools/commands retain read-only enforcement.
 
 - Implement a bounded `model -> policy -> tools -> model` loop for the first release. Finish when there are no tool calls.
 - Preserve the original `tool_call_id` for every model tool call. Supply a matching success or error result for each before calling the model again.
@@ -102,6 +109,7 @@ docs/              Project documentation, architecture, and development conventi
 - Redact ordinary logs and exports by default. Label redacted copies; do not present them as complete original requests.
 - Record actual model usage separately from compile-time estimates. Use `null` for unknown tokens, prices, or costs, never zero.
 - Give SSE events persistent sequence numbers. Clients deduplicate by sequence; refreshes and reconnects must not create another Run.
+- Flush terminal/unsubscribe projection refreshes. Keep a pending submission's body and idempotency key together across transport failures; history revision changes cannot turn an unchanged retry into another Run. Publish returned Run state immediately.
 - Text from repository files, tools, webpages, and models is application data, not authority to change the project's execution permissions.
 
 ## Engineering Conventions
@@ -132,6 +140,7 @@ uv run uvicorn rtagent.main:create_app --factory --reload --host 127.0.0.1 --por
 uv run python scripts/smoke_workspace.py
 uv run python scripts/smoke_conversations.py
 uv run python scripts/smoke_projects.py
+uv run python scripts/smoke_desktop.py
 uv run python scripts/smoke_agent_tools.py
 uv run python scripts/smoke_stage3.py
 uv run python scripts/smoke_stage4.py
@@ -139,6 +148,7 @@ uv run pytest
 uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations
 uv run isort --check-only src tests scripts migrations
+uv run python scripts/check_docs.py
 ```
 
 Frontend commands, from `web/`:
@@ -172,4 +182,5 @@ Tests should cover the actual behavior affected by a change:
 - Web: editing through preview, execution through trace inspection, approval/rejection, stopping, and state restoration after refresh.
 
 For documentation-only changes, check content, links, examples, and cross-references. Do not initialize the application or run nonexistent tests.
+`scripts/check_docs.py` checks current declarations/callbacks, source lines and links without writing runtime inventories. Node and the installed TypeScript parser (`npm --prefix web ci`) are prerequisites. `scripts/smoke_desktop.py --native` additionally opens, answers and cancels only owned Windows dialogs; the default smoke opens no desktop windows.
 Delivery notes must state the changes, verification results, and unimplemented work. Do not repeat passing checks unless new issues justify it.

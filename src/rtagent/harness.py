@@ -42,8 +42,10 @@ class Harness:
                 await self.repository.save_config(configured)
             await self.runner.open()
         except BaseException:
-            await self.runner.close()
-            await self.repository.close()
+            try:
+                await self.runner.close()
+            finally:
+                await self.repository.close()
             raise
         self.entered = True
         return self
@@ -51,11 +53,15 @@ class Harness:
     async def __aexit__(self, *_exception: Any) -> None:
         """Stop summaries, Runs and processes before closing checkpoints and application storage."""
         try:
-            await self.studio.close()
-            await self.runner.close()
+            try:
+                await self.studio.close()
+            finally:
+                await self.runner.close()
         finally:
-            await self.repository.close()
-            self.entered = False
+            try:
+                await self.repository.close()
+            finally:
+                self.entered = False
 
     async def run(
         self,

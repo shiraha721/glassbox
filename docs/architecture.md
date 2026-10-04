@@ -1,6 +1,6 @@
 # Architecture and Design
 
-Last updated: 2026-10-04. This describes implemented behavior. Future work is defined in the [delivery stages](README.md#delivery-stages).
+Last updated: 2026-10-05. This describes implemented behavior. The [code and architecture review](review-2026-10-05.md) records maintenance findings and validation. Future work is defined in the [delivery stages](README.md#delivery-stages).
 
 ## Read from the whole system to individual functions
 
@@ -29,6 +29,7 @@ The browser and attached clients talk to local HTTP; model adapters talk to expl
 src/rtagent/                    One installable Python package
   __init__.py                  Package version; no worker
   main.py                      Composition root, lifespan, local browser boundary, SPA
+  desktop.py, windows_dialog.py User folder selection, helper process and COM lifetime
   config.py                    Process environment/paths and secret references
   api.py                       HTTP routes, validated contracts, SSE serialization
   application.py               Studio use cases and Run command coordination
@@ -58,6 +59,9 @@ src/rtagent/                    One installable Python package
   skills/code-review/          Packaged evidence-based review procedure
 web/src/                       React presentation and local editor state
   main.tsx, App.tsx            Browser bootstrap and workspace coordination
+  ConversationTurn.tsx         Saved turn, tool evidence and recovery presentation
+  DirectoryField.tsx           Native folder selection and unavailable fallback
+  useDialogFocus.ts            Modal keyboard focus and restoration
   Composer.tsx                 Prompt block controls and rule drafts
   usePresetDrafts.ts           Independent bounded undo/redo histories
   useLivePreview.ts            Debounced draft compilation and stale-response handling
@@ -88,7 +92,7 @@ This is the current layout. Responsibilities are modules, not all separate packa
 | Layer | Concrete owner | What it does / how it connects | Why this boundary exists |
 | --- | --- | --- | --- |
 | Presentation and local UI state | React components, usePresetDrafts, style.css | Displays saved projections and collects explicit task/editor/action input. | Drafts/selection/layout are browser concerns; authorization and effects are server concerns. |
-| Transport | api.py, browser client/events | Validates/serializes HTTP contracts and reads persistent SSE; delegates actions. | Opening/reconnecting UI is a read operation, not implicit model execution. |
+| Transport | api.py, main.LocalAccessMiddleware, browser client/events | Validates/serializes HTTP contracts, preserves ASGI streaming/disconnect and reads persistent SSE; delegates actions. | Opening/reconnecting UI is a read operation, not implicit model execution. |
 | Application use cases | Studio | Resolves revisions/context, freezes input, starts/approves/resumes/stops, coordinates checkpoint deletion. | Multi-step behavior has one owner independent of route rendering and graph-node internals. |
 | Domain computation and policy | domain.py, prompts.py, patches.py, policies.py | Represents values, deterministically compiles, computes exact text hunks, validates arguments, returns a configured decision. | Computation cannot bypass the adapter that owns file paths/effects; no network/database/model SDK hides effects in compilation or authorization. |
 | Runtime orchestration | Runner / LangGraph | Orders model/tool steps, checkpoints progress, enforces budgets, persists receipts and interrupts. | One explicit loop makes control flow and recovery visible; model adapters do not nest another loop. |
@@ -121,11 +125,13 @@ The model can propose a ToolCall, not change this ownership. File/tool/model tex
 
 ### Resource lifetime and concurrency
 
-`main.create_app` registers behavior without opening runtime stores. Its lifespan resolves directories, migrates/seeds Repository, applies explicit startup overrides, constructs ToolRegistry and Studio/Runner, then opens the checkpoint saver/graph and classifies queued/stranded work. Normal shutdown stops/gathers Run tasks before closing checkpoints, then disposes application connections.
+`main.create_app` registers behavior without opening runtime stores. Its lifespan enters the shared Harness, which resolves directories, migrates/seeds Repository, applies explicit startup overrides and opens the checkpoint saver/graph to classify queued/stranded work. The Web lifespan also owns FolderPicker; the chooser opens only on an explicit request. Shutdown stops summary tasks, always stops/gathers Runs and native processes, always closes checkpoints, then disposes application connections through nested finally blocks. The Web owner always closes its dialog helper. Earlier cleanup failure cannot skip later resource release.
 
 Studio's command lock sequences start/approval/resume/cancel/deletion commands within this process. Repository's writer lock protects short SQLite transactions; it is not held across model/tool execution. Runner's semaphore allows one graph invocation at a time, across conversations. A waiting approval ends that invocation and releases the slot, while its conversation remains reserved by active_run_id. Workspace's RLock serializes native guarded file replacements and Windows reconciliation, separate from database locks. Linux subprocesses use async I/O; blocking file/Win32 operations run off the event loop. One Uvicorn worker is the supported ownership model.
 
 The application does not claim atomicity across model services, workspace edits, app.db, and checkpoints.db. Receipts/checkpoint reuse and explicit uncertainty are how it recovers when those boundaries cannot commit together. Stop awaits local cleanup; it cannot undo a completed file write or remote effect.
+
+Live process input captures its controller/task/data together before reading settings and rechecks completion after that await. A retired process returns a conflict without map lookup failure, queued input or a new running receipt. Its persisted ID does not recreate a live capability. Folder selection has a separate process-local lock and async helper; request disconnect, timeout and shutdown terminate/reap that owned helper without blocking the agent loop.
 
 ## Application shape
 
@@ -134,12 +140,14 @@ One local FastAPI process owns one LangGraph worker, SQLite persistence, root-bo
 ```mermaid
 flowchart TD
     UI[React workspace] -->|HTTP / SSE| API[FastAPI]
+    API --> DESKTOP[User folder picker]
+    DESKTOP --> DIALOG[Windows Shell / Linux desktop dialog]
     API --> APP[Studio use cases]
     APP --> FILES[Instructions / memory / Skills]
     APP --> COMP[Pure compiler]
     COMP --> SNAP[Immutable input snapshot]
     SNAP --> RUN[LangGraph model / tool loop]
-    RUN --> MODEL[Chat Completions adapter]
+    RUN --> MODEL[Chat Completions / Messages adapter]
     RUN --> POLICY[Schema and permission checks]
     POLICY --> TOOLS[Native tools / MCP]
     TOOLS --> SHELL[Windows AppContainer / Linux bubblewrap]
@@ -152,13 +160,17 @@ flowchart TD
 
 | Module | Responsibility |
 | --- | --- |
-| main.py, config.py | Startup, migrations, resource ownership, loopback boundary, static UI |
+| main.py, harness.py, config.py | Shared startup, migrations, resource ownership, ASGI boundary, static UI |
+| desktop.py, windows_dialog.py | User folder selection, helper ownership, Windows Shell COM and manual fallback outcomes |
 | api.py, application.py | HTTP contracts; resolve context/revisions, start/approve/cancel/resume Runs, workspace editing |
+| client.py, cli.py, rpc.py | HTTP attachment and typed CLI/JSON-RPC operations on the existing owner |
 | domain.py, prompts.py, patches.py | Pydantic contracts; pure compilation, validated plan projection, and exact text-patch computation |
-| providers.py | Canonical mapping, prepared requests, wire capture, real or explicit simulated streaming |
+| providers.py, anthropic.py | Canonical mapping, prepared/captured requests and explicit provider streaming |
+| context.py, hooks.py, execution.py | Source-bound compaction, committed observation/additional guards and effect ownership |
 | runtime.py | Bounded graph, checkpoints, receipts, interrupts and recovery |
 | policies.py, tools.py | Frozen schemas/permissions, native dispatch, stateless MCP lifecycle |
 | workspace.py, sandbox.py, windows_sandbox.py, sandbox_files.py | File context, memory, Skills, guarded edits, native Windows/Linux isolation and Windows file reconciliation |
+| command_io.py, processes.py, toolchains.py, downloads.py, packages.py | Bounded pipes/live commands, trusted runtimes, pinned public transfer and reusable data formats |
 | storage.py, tracing.py | Transactions, revisions, events, traces, redaction and export |
 | web/src/ | Conversation, Prompt, Inspector, Workspace and Settings, generated API types |
 
@@ -298,6 +310,8 @@ Five built-in presets use six independent editable common blocks and one task-fo
 
 STUDIO_WORKSPACE_ROOT is the default process root. A trusted user can register an existing absolute folder as a Project; sessions store nullable project_id. Studio resolves that ID for inspection and new Runs, captures the root and project ID, and uses ToolRegistry.for_workspace to bind native file adapters and OS sandboxes. Runner dispatches from the frozen Run root, including after restart or a conversation move. Current catalog/error discovery is shared; explicit MCP transports remain outside native command isolation. Project roots are fixed registrations, not model-editable tool parameters. Changing an idle session’s Project advances its revision; active moves fail. Historical snapshots and copied wire evidence do not change.
 
+Registration first uses DirectoryField → `/desktop/folder-picker` → FolderPicker. Windows runs a stdlib helper using IFileOpenDialog/FOS_PICKFOLDERS with COM STA ownership and Unicode filesystem paths. Linux uses an installed desktop dialog when its display is available. The parent invokes the real Windows interpreter rather than a venv redirector, owns the helper handle, and reaps it on cancellation/disconnect/shutdown. `selected` updates the field, `cancelled` preserves it, and `unavailable` exposes manual entry. Selecting a folder does not register a project, copy files or execute an agent tool; Studio.create_project validates/persists the explicit subsequent form action.
+
 Within the selected root, the first nonempty AGENTS.override.md or AGENTS.md is captured with `workspace:<relative path>`; memory uses workspace:memory. The catalog source is workspace:skills; selected bodies use skill:<name>. Context is frozen once per Run and is not persisted as repeated conversation turns. `read_instructions(path)` explicitly reads the root-to-directory/file-parent chain, selecting override before AGENTS at each level, returning paths/text/hashes with deeper precedence, and rejecting combined input above 32 KiB. Markdown links are not automatically followed.
 
 Memory is explicit Markdown, not hidden summarization. Reads return text/hash; save_memory requires that hash. Atomic replacement avoids partial files; stale hashes reject concurrent native edits. Shell/external edits are outside this lock, so this is not a transaction across host processes. Changes become initial context on the next Run; a current Run can read updated files explicitly and record the tool result.
@@ -358,6 +372,7 @@ Actual routes under /api/v1:
 | /workspace, /workspace/memory, /workspace/skills | Selected-project sandbox/instructions/memory/Skills through optional project_id; /workspace/skills/{name} loads a body |
 | /workspace/skills/{name}/export, /workspace/skills/import | Selected-project text-resource packages, with new-name-only validated publication |
 | /projects | Register an existing named absolute workspace folder; membership is part of session metadata |
+| /desktop/folder-picker | User OS folder chooser; selected/cancelled/unavailable, without project registration or model execution |
 | /sessions, /sessions/{id}, /sessions/{id}/runs | Conversations, versioned metadata edits, deletion, and saved Run history |
 | /sessions/{id}/copy | Duplicate all completed records or fork through a successful Run |
 | /sessions/{id}/context, /compact, /compactions/{job} | Explicit reduction/accounting/restore, captured requests and cancellation |
@@ -369,11 +384,15 @@ Actual routes under /api/v1:
 
 Generated /openapi.json and frontend types define exact contracts. The UI opens Prompt, Inspector, Workspace and Tools only when needed. Run is enabled for nonempty input without a preview. Draft changes request a debounced current inspection while retaining the last valid result. File editor saves use hashes.
 
+HTTP expected errors, field-validation failures and unexpected errors before response start share ErrorEnvelope with code/message/details/request_id. Field details omit submitted values; unexpected diagnostics log type/source locations with the same ID. Concrete ASGI middleware forwards receive unchanged, preserving SSE and desktop disconnect detection; an already streamed response cannot be replaced with another JSON body. Attached clients tolerate non-JSON failures, and RPC isolates unexpected operation errors to their response frame. Fingerprinted assets cache immutably; the index revalidates and missing assets return 404.
+
 Conversation metadata includes archive state and optional folder membership. Renames and moves use observed session revisions; explicit titles survive the first Run. Archiving requires an idle conversation, and the server rejects execution until restoration. Folder deletion clears membership and advances affected revisions without deleting history. Schema migration adds columns in place so SQLite foreign-key cascades cannot discard existing Runs.
 
 Duplicate/fork is a single business-data transaction. Duplicate retains all terminal Runs and committed history. Fork requires a successful Run boundary and rebuilds committed messages from successful turns through that point. Both assign new session, Run, and receipt IDs and preserve immutable source snapshots and request evidence. Run source_run_id and receipt provenance identify copied history; a new run.copied event records the copy instead of replaying original SSE events. Checkpoints are not copied and historical effects cannot be resumed or executed by copying. Source IDs are provenance strings without foreign-key ownership, so deleting a source leaves its copies intact. Subsequent turns use new Runs with the copied history and the current shared workspace/configuration.
 
-The UI renders all turns in one scroll region under a fixed history toolbar and above a fixed message dock. The sidebar has separate fixed search/filter controls and a scrolling folder/history list. Prompt controls and save/discard actions stay fixed while grouped message blocks scroll. Each preset has a page-local draft with bounded, reversible snapshots; switching preserves edits and saving updates the revision baseline. Menu actions derive state from the latest session projection even while a menu remains open across Run completion.
+The UI renders ConversationTurn components in one scroll region under a fixed history toolbar and above a fixed message dock. The sidebar has separate fixed search/filter controls and a scrolling folder/history list. Prompt controls and save/discard actions stay fixed while grouped message blocks scroll. Each preset has a page-local draft with bounded, reversible snapshots; switching preserves edits and saving updates the revision baseline. Menu/dialog actions derive current metadata from the latest projection while preserving their input draft across Run completion. A shared small focus hook traps modal Tab navigation and restores the previous connected control.
+
+Workspace stores project/session as one selection and validates persisted IDs. An empty session stays a new draft; selecting a Project does not implicitly select its first conversation. Conversation-specific Context/process panels reset when that identity changes. The returned accepted Run enters the query cache immediately; terminal events and subscription cleanup flush bootstrap/Context/trace invalidations. For an unchanged task whose acceptance response is lost, Workspace retains the original body and idempotency key across revision changes. Definitive rejection clears that identity; transport uncertainty does not create a new submission.
 
 The app binds to loopback without login/access tokens. TrustedHost and Origin/Sec-Fetch-Site checks reject foreign browser requests; local native clients can call directly. This is not remote deployment authentication. Original traces are explicit local views; exports are labeled redacted copies.
 

@@ -20,6 +20,8 @@ class AgentClient:
 
     async def __aenter__(self) -> "AgentClient":
         """Open one reusable connection pool without contacting a model."""
+        if self.http is not None:
+            raise AppError("client_open", "Use one active context per AgentClient instance.")
         self.http = httpx.AsyncClient(base_url=self.base_url, trust_env=False, timeout=90)
         return self
 
@@ -50,15 +52,31 @@ class AgentClient:
                 "service_connection", f"Local service request failed ({type(exc).__name__}).", 503
             ) from None
         if response.is_error:
-            data = response.json()
+            try:
+                data = response.json()
+                if not isinstance(data, dict):
+                    data = {}
+            except ValueError:
+                data = {}
             error = data.get("error", {})
+            if not isinstance(error, dict):
+                error = {}
             raise AppError(
                 error.get("code", "request_invalid"),
-                error.get("message", "Request validation failed."),
+                error.get(
+                    "message", f"Local service request failed (HTTP {response.status_code})."
+                ),
                 response.status_code,
                 error.get("details", data.get("detail")),
             )
-        return response.json() if response.content else None
+        if not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            raise AppError(
+                "service_response", "Local service returned an invalid JSON response.", 502
+            ) from None
 
     async def start(self, request: PreviewRequest, key: str) -> RunView:
         """Submit an explicit immutable request; retry this same request/key for idempotency."""

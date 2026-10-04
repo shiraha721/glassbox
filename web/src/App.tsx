@@ -1,26 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Check,
   ArchiveRestore,
   Bot,
   Code2,
   Eye,
   FolderOpen,
-  GitBranch,
   PanelLeft,
   Play,
   Plus,
-  ShieldCheck,
   SlidersHorizontal,
   Square,
   Terminal,
-  User,
   Wrench,
   X,
 } from 'lucide-react';
-import Markdown, { type Components } from 'react-markdown';
 import {
+  ApiError,
   errorMessage,
   request,
   terminal,
@@ -28,30 +24,25 @@ import {
   type Bootstrap,
   type Preset,
   type WorkspaceView,
-  type ResumeRequest,
   type Run,
+  type RunRequest,
   type Session,
 } from './api/client';
 import { useRunEvents } from './api/events';
 import { Composer } from './Composer';
 import { ConversationHistory } from './ConversationHistory';
-import { Inspector, Json } from './Inspector';
+import { Inspector } from './Inspector';
+import { RunTurn } from './ConversationTurn';
 import { Settings } from './Settings';
 import { WorkspacePanel } from './WorkspacePanel';
 import { Projects } from './Projects';
 import { usePresetDrafts } from './usePresetDrafts';
 import { useLivePreview } from './useLivePreview';
 import { ToolsPanel } from './ToolCatalog';
-import { TaskPlan } from './TaskPlan';
 import { ContextPanel } from './ContextPanel';
 import { ProcessesPanel } from './ProcessesPanel';
 
 const emptyRuns: Run[] = [];
-
-// Untrusted output must not trigger automatic requests to remote image URLs.
-const markdownComponents: Components = {
-  img: ({ alt }) => <span className="subtle">[Image: {alt || 'external content'}]</span>,
-};
 
 /** Load the local workspace directly, without accounts or an unlock screen. */
 export default function App() {
@@ -79,14 +70,20 @@ function Workspace({ data }: { data: Bootstrap }) {
   const cache = useQueryClient();
   const drafts = usePresetDrafts(data.presets);
   const { preset, dirty } = drafts;
-  const [sessionId, setSessionId] = useState(() => localStorage.getItem('studio.session') || '');
-  const [projectId, setProjectId] = useState(
-    () =>
-      data.sessions.find((item) => item.id === localStorage.getItem('studio.session'))
-        ?.project_id ||
-      localStorage.getItem('studio.project') ||
-      '',
-  );
+  const [{ sessionId, projectId }, setSelection] = useState(() => {
+    const remembered = data.sessions.find(
+      (item) => item.id === localStorage.getItem('studio.session'),
+    );
+    const storedProject = localStorage.getItem('studio.project') || '';
+    return {
+      sessionId: remembered?.id || '',
+      projectId: remembered
+        ? remembered.project_id || ''
+        : data.projects.some((item) => item.id === storedProject)
+          ? storedProject
+          : '',
+    };
+  });
   const [selectedRun, setSelectedRun] = useState('');
   const [input, setInput] = useState('');
   const [variables, setVariables] = useState('{}');
@@ -102,14 +99,13 @@ function Workspace({ data }: { data: Bootstrap }) {
     'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes' | null
   >(null);
   const [skills, setSkills] = useState<string[]>([]);
-  const submission = useRef<{ fingerprint: string; key: string } | null>(null);
+  const submission = useRef<{ fingerprint: string; key: string; body: RunRequest } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const project = data.projects.find((item) => item.id === projectId);
   const projectSessions = data.sessions.filter((item) => (item.project_id || '') === projectId);
-  const session =
-    projectSessions.find((item) => item.id === sessionId) ||
-    projectSessions.find((item) => !item.archived);
+  // An empty selection is a new draft, never implicit permission to continue an old conversation.
+  const session = projectSessions.find((item) => item.id === sessionId);
   const conversationScroll = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
   const runQuery = useQuery({
@@ -169,15 +165,14 @@ function Workspace({ data }: { data: Bootstrap }) {
     }
   };
   const chooseSession = (id: string, chosenProject?: string) => {
-    localStorage.setItem('studio.session', id);
-    setSessionId(id);
     const chosen = data.sessions.find((item) => item.id === id);
-    if (chosen || chosenProject !== undefined) {
-      const nextProject = chosenProject ?? chosen?.project_id ?? '';
-      setProjectId(nextProject);
-      localStorage.setItem('studio.project', nextProject);
-    }
+    const nextProject = chosenProject ?? (chosen ? chosen.project_id || '' : projectId);
+    setSelection({ sessionId: id, projectId: nextProject });
+    localStorage.setItem('studio.session', id);
+    localStorage.setItem('studio.project', nextProject);
     setSkills([]);
+    setVariables('{}');
+    submission.current = null;
     followLatest.current = true;
     if (window.matchMedia('(max-width: 760px)').matches) setSidebarOpen(false);
     setSelectedRun('');
@@ -200,7 +195,7 @@ function Workspace({ data }: { data: Bootstrap }) {
     await refresh();
     return saved;
   };
-  const inputRequest = async () => {
+  const inputRequest = async (): Promise<RunRequest> => {
     const parsed: unknown = JSON.parse(variables);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       throw new Error('Variables must be a JSON object.');
@@ -213,7 +208,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       preset_revision: saved.revision,
       config_revision: data.config.revision,
       input,
-      variables: parsed,
+      variables: parsed as Record<string, unknown>,
       skills,
     };
   };
@@ -223,14 +218,42 @@ function Workspace({ data }: { data: Bootstrap }) {
     setPanel('inspector');
   };
   const start = async () => {
-    // Live inspection is a draft, so Run always compiles the latest input after saving edits.
-    const body = await inputRequest();
-    const fingerprint = JSON.stringify(body);
-    // An explicit retry of unchanged input keeps its identity even if the response was lost.
-    if (submission.current?.fingerprint !== fingerprint)
-      submission.current = { fingerprint, key: crypto.randomUUID() };
-    const created = await request<Run>('/runs', 'POST', body, submission.current.key);
+    // New submissions compile current input; transport retries retain their accepted snapshot.
+    const fingerprint = (id: string) =>
+      JSON.stringify({
+        session_id: id,
+        projectId,
+        input,
+        variables,
+        skills,
+        preset: { ...preset, revision: 0 },
+      });
+    let pending = submission.current;
+    if (!pending || pending.fingerprint !== fingerprint(session?.id || '')) {
+      const body = await inputRequest();
+      pending = { fingerprint: fingerprint(body.session_id), key: crypto.randomUUID(), body };
+      submission.current = pending;
+    }
+    let created: Run;
+    try {
+      // Server completion can advance revisions before a lost response is retried. Keep the
+      // original body and key together, rather than rebuilding it from newer history versions.
+      created = await request<Run>('/runs', 'POST', pending.body, pending.key);
+    } catch (caught) {
+      if (caught instanceof ApiError && [400, 403, 404, 409, 422].includes(caught.status)) {
+        submission.current = null;
+        await refresh();
+      }
+      throw caught;
+    }
     submission.current = null;
+    // Publish the accepted projection immediately. Showing the previous turn's success while
+    // the next Run is being fetched makes both users and controls act on the wrong lifecycle.
+    cache.setQueryData<Run[]>(['runs', created.session_id], (current = []) =>
+      current.some((item) => item.id === created.id)
+        ? current.map((item) => (item.id === created.id ? created : item))
+        : [...current, created],
+    );
     followLatest.current = true;
     setSelectedRun(created.id);
     setInput('');
@@ -282,8 +305,6 @@ function Workspace({ data }: { data: Bootstrap }) {
           onUpdated={refresh}
           onSelect={(id) => {
             if (id === projectId) return;
-            setProjectId(id);
-            localStorage.setItem('studio.project', id);
             chooseSession('', id);
           }}
         />
@@ -693,6 +714,7 @@ function Workspace({ data }: { data: Bootstrap }) {
           {panel === 'context' && session && (
             <div className="utility-pane">
               <ContextPanel
+                key={session.id}
                 session={session}
                 config={data.config}
                 onClose={() => setPanel(null)}
@@ -702,7 +724,7 @@ function Workspace({ data }: { data: Bootstrap }) {
           )}
           {panel === 'processes' && session && (
             <div className="utility-pane">
-              <ProcessesPanel session={session} onClose={() => setPanel(null)} />
+              <ProcessesPanel key={session.id} session={session} onClose={() => setPanel(null)} />
             </div>
           )}
           {panel === 'tools' && (
@@ -739,332 +761,11 @@ function Workspace({ data }: { data: Bootstrap }) {
           data={data}
           onClose={() => setSettings(false)}
           onSaved={async () => {
+            submission.current = null;
             await refresh();
           }}
         />
       )}
-    </div>
-  );
-}
-
-/** Render every persisted turn, with tools and continuation controls next to their evidence. */
-function RunTurn({
-  run,
-  index,
-  busy,
-  selected,
-  canFork,
-  onInspect,
-  onFork,
-  onApprove,
-  onResume,
-}: {
-  run: Run;
-  index: number;
-  busy: boolean;
-  selected: boolean;
-  canFork: boolean;
-  onInspect: () => void;
-  onFork: () => void;
-  onApprove: (decision: 'approve' | 'reject') => void;
-  onResume: (resolutions: NonNullable<ResumeRequest['resolutions']>) => void;
-}) {
-  return (
-    <section
-      className="conversation-turn"
-      id={`turn-${run.id}`}
-      data-selected={selected}
-      aria-label={`Turn ${index + 1}`}
-    >
-      <div className="turn-heading">
-        <span className="turn-number">{String(index + 1).padStart(2, '0')}</span>
-        <time dateTime={run.created_at} title={new Date(run.created_at).toLocaleString()}>
-          {new Date(run.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </time>
-        <span className={`status status-${run.status}`}>{run.status.replaceAll('_', ' ')}</span>
-        {run.source_run_id && (
-          <span className="badge" title={`Source run: ${run.source_run_id}`}>
-            Copied history
-          </span>
-        )}
-        <div className="turn-actions">
-          <button
-            className="icon-button"
-            aria-label={`Inspect turn ${index + 1}`}
-            title="Inspect turn"
-            disabled={busy}
-            onClick={onInspect}
-          >
-            <Eye size={14} />
-          </button>
-          {canFork && (
-            <button
-              className="button small quiet"
-              aria-label={`Fork after turn ${index + 1}`}
-              disabled={busy}
-              onClick={onFork}
-            >
-              <GitBranch size={13} /> Fork here
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="task-message">
-        <span className="message-avatar user-avatar">
-          <User size={15} />
-        </span>
-        <div className="message-body">
-          <span className="message-caption">You</span>
-          <p>{run.input}</p>
-        </div>
-      </div>
-      {run.plan && <TaskPlan plan={run.plan} />}
-      {run.messages.map((message, messageIndex) => (
-        <article key={messageIndex} className={`chat-message chat-${message.role}`}>
-          {message.role === 'tool' ? (
-            <details className="tool-result">
-              <summary>
-                <Terminal size={14} /> Tool result{' '}
-                <span className="subtle">{message.tool_call_id?.slice(-10)}</span>
-              </summary>
-              <ToolOutput content={message.content} />
-            </details>
-          ) : (
-            <>
-              <span className="message-avatar agent-avatar">
-                <Bot size={16} />
-              </span>
-              <div className="message-body">
-                <span className="message-caption">
-                  {message.role === 'assistant' ? 'Agent' : message.role}
-                </span>
-                {message.content && (
-                  <div className="markdown">
-                    <Markdown skipHtml components={markdownComponents}>
-                      {message.content}
-                    </Markdown>
-                  </div>
-                )}
-                {message.tool_calls.map((call) => (
-                  <details className="tool-request" key={call.id}>
-                    <summary>
-                      <Terminal size={14} />
-                      <strong>{call.name}</strong>
-                      <span className="subtle">Tool call</span>
-                    </summary>
-                    <pre>{JSON.stringify(call.args, null, 2)}</pre>
-                  </details>
-                ))}
-              </div>
-            </>
-          )}
-        </article>
-      ))}
-      {run.partial_output && (
-        <article className="chat-message streaming">
-          <span className="message-avatar agent-avatar">
-            <Bot size={16} />
-          </span>
-          <div className="message-body">
-            <span className="message-caption">
-              Agent <span className="streaming-label">Thinking…</span>
-            </span>
-            <div className="markdown">
-              <Markdown skipHtml components={markdownComponents}>
-                {run.partial_output}
-              </Markdown>
-            </div>
-          </div>
-        </article>
-      )}
-      {run.active_tool && (
-        <article className="live-tool-output">
-          <div className="row">
-            <Terminal size={15} />
-            <strong>{String(run.active_tool.name)}</strong>
-            <span className="activity-dot" />
-            Running
-          </div>
-          {!!(run.active_tool.stdout || run.active_tool.stderr) && (
-            <pre>
-              {String(run.active_tool.stdout || '')}
-              {run.active_tool.stderr ? `\n[stderr]\n${String(run.active_tool.stderr)}` : ''}
-            </pre>
-          )}
-          {!!run.active_tool.truncated && <span className="subtle">Output truncated</span>}
-        </article>
-      )}
-      {['queued', 'running'].includes(run.status) && !run.partial_output && (
-        <div className="agent-progress">
-          <span className="activity-dot" />
-          Agent is working…
-        </div>
-      )}
-      {run.error && (
-        <p role="alert" className="notice warning">
-          {run.error}
-        </p>
-      )}
-      {run.status === 'waiting_approval' && run.approval && (
-        <div className="approval-card">
-          <div className="row">
-            <ShieldCheck size={19} />
-            <h3>Permission to run a tool</h3>
-          </div>
-          <p>
-            <strong>{String(run.approval.name)}</strong> is waiting for your decision.
-          </p>
-          <Json value={run.approval.args} />
-          <div className="row">
-            <button className="button primary" disabled={busy} onClick={() => onApprove('approve')}>
-              <Check size={14} />
-              Approve once
-            </button>
-            <button className="button" disabled={busy} onClick={() => onApprove('reject')}>
-              Reject
-            </button>
-          </div>
-          <p className="subtle">This decision applies only to the arguments shown above.</p>
-        </div>
-      )}
-      {run.status === 'interrupted' && <Recovery run={run} busy={busy} onResume={onResume} />}
-    </section>
-  );
-}
-
-/** Display actual command output without forcing users to read an escaped JSON string. */
-function ToolOutput({ content }: { content: string }) {
-  let value: unknown;
-  try {
-    value = JSON.parse(content);
-  } catch {
-    // Plain-text and MCP results use the same fallback as an unrecognized JSON shape.
-    value = null;
-  }
-  if (value && typeof value === 'object') {
-    const result = value as Record<string, unknown>;
-    if (
-      Array.isArray(result.files) &&
-      result.files.length > 0 &&
-      result.files.every(
-        (file: unknown) =>
-          !!file &&
-          typeof file === 'object' &&
-          typeof (file as Record<string, unknown>).diff === 'string',
-      )
-    )
-      return (
-        <div className="patch-results">
-          {result.files.map((file: Record<string, unknown>, index: number) => (
-            <div key={index}>
-              <strong>
-                {String(file.path)} · {String(file.operation)}
-              </strong>
-              <pre className="patch-diff">{String(file.diff)}</pre>
-              {file.diff_truncated === true && (
-                <p className="subtle">
-                  Diff truncated. Read the current file for complete content.
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      );
-    if (typeof result.stdout === 'string' && typeof result.stderr === 'string')
-      return (
-        <>
-          <div className="subtle">
-            Exit {String(result.exit_code)}
-            {result.timed_out ? ' · timed out; edits may be partial' : ''}
-            {result.truncated ? ' · output truncated' : ''}
-          </div>
-          {result.stdout && <pre>{result.stdout}</pre>}
-          {result.stderr && <pre>{result.stderr}</pre>}
-        </>
-      );
-    if (typeof result.content === 'string')
-      return (
-        <>
-          {typeof result.start_line === 'number' && (
-            <p className="subtle">
-              {String(result.path)} · lines {String(result.start_line)}–{String(result.end_line)} of{' '}
-              {String(result.total_lines)}
-              {result.next_line ? ` · more from line ${String(result.next_line)}` : ''}
-            </p>
-          )}
-          <pre>{result.content}</pre>
-        </>
-      );
-  }
-  return <pre>{content}</pre>;
-}
-
-/** Require a per-call recovery choice; uncertain external effects are never silently repeated. */
-function Recovery({
-  run,
-  busy,
-  onResume,
-}: {
-  run: Run;
-  busy: boolean;
-  onResume: (resolutions: NonNullable<ResumeRequest['resolutions']>) => void;
-}) {
-  const [resolutions, setResolutions] = useState<NonNullable<ResumeRequest['resolutions']>>({});
-  return (
-    <div className="approval-card recovery-card">
-      <h3>Review interrupted execution</h3>
-      <p>
-        Some calls may have completed outside the studio. Retrying can repeat an external effect or
-        model charge.
-      </p>
-      {run.unknown_calls.map((call) => (
-        <div key={String(call.id)} className="recovery-call">
-          <strong>{String(call.kind)} call</strong>
-          <Json value={call.data} />
-          <label>
-            Recovery decision
-            <select
-              value={resolutions[String(call.id)]?.action || ''}
-              onChange={(event) =>
-                setResolutions({
-                  ...resolutions,
-                  [String(call.id)]: {
-                    action: event.target.value as 'retry' | 'record',
-                    result: '',
-                  },
-                })
-              }
-            >
-              <option value="" disabled>
-                Choose explicitly…
-              </option>
-              <option value="retry">Retry this call</option>
-              {call.kind === 'tool' && <option value="record">Record a verified result</option>}
-            </select>
-          </label>
-          {resolutions[String(call.id)]?.action === 'record' && (
-            <label>
-              Verified tool result
-              <textarea
-                value={resolutions[String(call.id)].result}
-                onChange={(event) =>
-                  setResolutions({
-                    ...resolutions,
-                    [String(call.id)]: { action: 'record', result: event.target.value },
-                  })
-                }
-              />
-            </label>
-          )}
-        </div>
-      ))}
-      <button
-        className="button primary"
-        disabled={busy || run.unknown_calls.some((call) => !resolutions[String(call.id)])}
-        onClick={() => onResume(resolutions)}
-      >
-        Resume from checkpoint
-      </button>
     </div>
   );
 }

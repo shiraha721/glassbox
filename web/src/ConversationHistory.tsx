@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -24,6 +24,7 @@ import {
   type Session,
   type SessionUpdate,
 } from './api/client';
+import { useDialogFocus } from './useDialogFocus';
 
 type Dialog =
   | { kind: 'rename' | 'move' | 'project' | 'delete' | 'fork'; session: Session }
@@ -72,7 +73,26 @@ export function ConversationHistory({
           ...menuTarget,
           folder: folders.find((item) => item.id === menuTarget.folder.id) || menuTarget.folder,
         });
-  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [dialogTarget, setDialog] = useState<Dialog | null>(null);
+  const dialog =
+    dialogTarget &&
+    ('session' in dialogTarget
+      ? {
+          ...dialogTarget,
+          session:
+            sessions.find((item) => item.id === dialogTarget.session.id) || dialogTarget.session,
+        }
+      : 'folder' in dialogTarget
+        ? {
+            ...dialogTarget,
+            folder:
+              folders.find((item) => item.id === dialogTarget.folder.id) || dialogTarget.folder,
+          }
+        : dialogTarget);
+  const dialogRef = useRef<HTMLFormElement>(null);
+  useDialogFocus(dialogRef, !!dialog, () => {
+    if (!busy) setDialog(null);
+  });
   const [value, setValue] = useState('');
   const forkSource = dialog?.kind === 'fork' ? dialog.session.id : '';
   const turns = useQuery({
@@ -112,7 +132,7 @@ export function ConversationHistory({
     });
     await onUpdated();
     setArchived(false);
-    onChoose(created.id);
+    onChoose(created.id, created.project_id || '');
   };
   const submit = async () => {
     if (!dialog) return;
@@ -383,13 +403,10 @@ export function ConversationHistory({
         )}
       {dialog &&
         createPortal(
-          <div
-            className="modal-backdrop"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape' && !busy) setDialog(null);
-            }}
-          >
+          <div className="modal-backdrop">
             <form
+              ref={dialogRef}
+              tabIndex={-1}
               className="history-dialog"
               role="dialog"
               aria-modal="true"

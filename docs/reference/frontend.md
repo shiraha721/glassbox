@@ -11,7 +11,7 @@ The browser is a React workspace, not a model client. It reads/submits the local
 ```text
 App (bootstrap query)
 └── Workspace (server projections + page-local controls)
-    ├── Projects (saved folder selection/registration)
+    ├── Projects → DirectoryField (OS folder selection / unavailable manual entry)
     ├── ConversationHistory (project-filtered history, groups, menus, dialogs)
     ├── RunTurn[] (all inspectable turns)
     │   ├── ToolOutput (bounded returned command/file evidence)
@@ -22,6 +22,8 @@ App (bootstrap query)
     ├── WorkspacePanel → MemoryEditor / SkillEditor (ordinary files)
     └── Settings (one versioned settings aggregate)
 ```
+
+Projects, Settings and history forms share useDialogFocus for keyboard containment and restoration. Workspace owns explicit combined project/session selection and a complete pending submission body/key; ConversationTurn owns saved-turn presentation. Native dialogs are server-owned user actions.
 
 | State | Owner / lifetime | Architectural reason |
 | --- | --- | --- |
@@ -46,17 +48,17 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`ApiError.constructor`](../../web/src/api/client.ts#L27) | Construct a displayable API failure with status/code. | Extend Error, set its message, and retain readonly numeric status/string code constructor properties. | UI can show a useful message while preserving machine-readable conflict/validation identity. |
-| [`request`](../../web/src/api/client.ts#L37) | Fetch a typed local API resource. | Apply JSON/idempotency headers, optional AbortSignal, parse public errors, and handle empty responses. | Live inspection can cancel obsolete requests; server validation remains authoritative. |
-| [`errorMessage`](../../web/src/api/client.ts#L69) | Turn an unknown caught value into display text. | Return Error.message or a stable fallback. | Every local editor/action can handle JavaScript and HTTP failures without unsafe type assumptions. |
-| [`workspacePath`](../../web/src/api/client.ts#L74) | Address the selected project file API. | Add encoded project_id using the correct query separator while preserving explicit refresh options. | Every memory/skill/probe request uses the same root selection rather than hand-built inconsistent URLs. |
-| [`terminal`](../../web/src/api/client.ts#L79) | Check whether a Run is succeeded/failed/cancelled. | Test membership in the three terminal state names. | Controls/polling/stream ownership agree; waiting_approval/interrupted remain nonterminal and cannot be copied/deleted as active conversations. |
+| [`ApiError.constructor`](../../web/src/api/client.ts#L29) | Construct a displayable API failure with status/code. | Extend Error, set its message, and retain readonly numeric status/string code constructor properties. | UI can show a useful message while preserving machine-readable conflict/validation identity. |
+| [`request`](../../web/src/api/client.ts#L39) | Fetch a typed local API resource. | Apply JSON/idempotency headers, optional AbortSignal, parse public errors, and handle empty responses. | Live inspection can cancel obsolete requests; server validation remains authoritative. |
+| [`errorMessage`](../../web/src/api/client.ts#L71) | Turn an unknown caught value into display text. | Return Error.message or a stable fallback. | Every local editor/action can handle JavaScript and HTTP failures without unsafe type assumptions. |
+| [`workspacePath`](../../web/src/api/client.ts#L76) | Address the selected project file API. | Add encoded project_id using the correct query separator while preserving explicit refresh options. | Every memory/skill/probe request uses the same root selection rather than hand-built inconsistent URLs. |
+| [`terminal`](../../web/src/api/client.ts#L81) | Check whether a Run is succeeded/failed/cancelled. | Test membership in the three terminal state names. | Controls/polling/stream ownership agree; waiting_approval/interrupted remain nonterminal and cannot be copied/deleted as active conversations. |
 
 ### Types and ownership
 
 | Type / source | Purpose | Representation / behavior | Why / architectural role |
 | --- | --- | --- | --- |
-| [`ApiError`](../../web/src/api/client.ts#L26) | Typed transport failure. | Error message plus HTTP status/application code. | Error handling stays in the presentation boundary rather than inventing separate frontend business exceptions. |
+| [`ApiError`](../../web/src/api/client.ts#L28) | Typed transport failure. | Error message plus HTTP status/application code. | Error handling stays in the presentation boundary rather than inventing separate frontend business exceptions. |
 
 ## web/src/api/events.ts
 
@@ -68,9 +70,9 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`useRunEvents`](../../web/src/api/events.ts#L25) | Own an EventSource while a Run subscription is enabled. | Register the implemented Run/model/tool/approval event names inside useEffect, keep an effect-local sequence cursor/timer, and close resources on dependency change/unmount. | React StrictMode/remounts can create readers without creating work; the API replay is read-only and persisted state remains authoritative. |
-| [`useRunEvents.refresh`](../../web/src/api/events.ts#L32) | Refresh saved projections after accumulated events. | Clear the pending timer and invalidate runs, bootstrap, and the affected Run trace query family. | One refreshed server projection covers transcript/sidebar/inspection rather than racing token-by-token client mutations. |
-| [`useRunEvents.receive`](../../web/src/api/events.ts#L39) | Deduplicate one event and schedule a state refresh. | Parse RunEvent, ignore seq <= cursor, advance cursor, start at most one 80 ms timer, and close stream for terminal event types. | Replay and reconnection do not duplicate visible effects; batching reduces HTTP reads without losing the final saved state. |
+| [`useRunEvents`](../../web/src/api/events.ts#L25) | Own an EventSource while a Run subscription is enabled. | Register known events with a sequence cursor and bounded refresh timer; cleanup closes the stream and flushes outstanding invalidations. | Unsubscription after terminal state cannot discard the final authoritative session/context projection. |
+| [`useRunEvents.refresh`](../../web/src/api/events.ts#L32) | Reload saved projections after observed events. | Clear the pending timer and invalidate Runs, bootstrap, Context and trace query families. | Active reservations/revisions, evidence and reduction controls become consistent together. |
+| [`useRunEvents.receive`](../../web/src/api/events.ts#L40) | Deduplicate a saved event and refresh at the appropriate time. | Parse RunEvent, ignore old sequence values, batch ordinary updates for 80 ms and immediately flush/close on a terminal event. | Replay never repeats effects, and completion cannot remain hidden behind a cancelled timer. |
 
 The subscriber initially replays from sequence 0. It handles only execution event types, because copied Runs are already terminal and read through normal queries; `run.copied` need not drive an active subscription. Its effect cleanup lambda closes EventSource and clears the pending timer. The effect-local cursor and browser Last-Event-ID apply within that subscription; a reload fetches persisted Runs and may safely replay again. Interrupted/waiting Runs keep fallback polling because they are not terminal.
 
@@ -84,24 +86,22 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`App`](../../web/src/App.tsx#L57) | Load the local workspace directly. | Query bootstrap, render loading/retry state on failure, then render Workspace with saved data. | There is no login/access-token screen or implicit model call on page open. |
-| [`Workspace`](../../web/src/App.tsx#L78) | Coordinate chat and auxiliary views. | Derive current session/Run/active/latest from cached lists; keep task/preview/panel/draft controls; subscribe to active events and poll; render all turns, fixed task dock, optional panes, and Settings. | The selected historical Run is inspection state, while latestRun/active determine current status/Stop. Server state is kept separate from reversible local drafts. |
-| [`Workspace.refresh`](../../web/src/App.tsx#L151) | Reload saved projections after an accepted action. | Invalidate bootstrap, Run lists, traces, and project-keyed workspace context. | File changes and metadata changes become visible alongside execution evidence. |
-| [`Workspace.perform`](../../web/src/App.tsx#L160) | Apply uniform busy/error handling to one user operation. | Set busy/clear error, await callback, turn failures into display text, always clear busy. | Repeated clicks are disabled while dependent actions run; errors remain visible instead of disappearing into promises. |
-| [`Workspace.chooseSession`](../../web/src/App.tsx#L171) | Select a conversation and project. | Persist only IDs, honor an explicitly returned project when data refresh closures are stale, clear selected skills/task/inspection, and reset follow-latest. | A workspace move cannot leave the UI pointing at an old root, and skill selection does not leak across projects. |
-| [`Workspace.newSession`](../../web/src/App.tsx#L189) | Open history in the selected project. | POST nullable project_id, refresh, select returned IDs, and optionally keep task text. | Direct Run can create its conversation without a Preview gate or an unintended default workspace. |
-| [`Workspace.savePreset`](../../web/src/App.tsx#L196) | Persist an intentional dirty preset. | PUT the observed aggregate, commit its returned baseline, and refresh; unchanged drafts return immediately. | Run binds saved revisions, while live inspection can compile unsaved edits without writing them. |
-| [`Workspace.inputRequest`](../../web/src/App.tsx#L203) | Build a direct revision-bound task request. | Parse variables as a non-array object, save dirty preset, use current or newly created session, attach current session/preset/config revisions, input, variables, and skill names. | Submission ties visible task context to actual server state; malformed variables fail before a model request. |
-| [`Workspace.buildPreview`](../../web/src/App.tsx#L220) | Enable live draft inspection, including empty task input. | Set previewEnabled and open the Inspector Preview tab; useLivePreview supplies subsequent compiled results. | Preview has no save/create/model effect and remains optional. |
-| [`Workspace.start`](../../web/src/App.tsx#L225) | Run the latest visible input. | Save a dirty preset, build direct revision-bound input, retain retry identity, submit, then clear accepted task/inspection state and refresh. | A retained previous preview can never execute stale input; duplicate HTTP submissions retain one Run. |
-| [`Workspace.changeInput`](../../web/src/App.tsx#L242) | Edit task text. | Update local input only; the serialized draft drives a debounced inspection. | The last valid preview remains visible while a replacement is compiling. |
-| [`RunTurn`](../../web/src/App.tsx#L751) | Render one persisted execution turn. | Display status/provenance, paired assistant/tool messages, usage and an optional validated recorded TaskPlan. | Continuous chat keeps model claims and actual receipts connected to their Run; progress is derived from evidence and survives reload. |
-| [`ToolOutput`](../../web/src/App.tsx#L936) | Render an inspectable tool receipt. | Parse JSON when possible; show native command reports, patch file operations and bounded diffs, ranged-read metadata/content, or a folded general JSON/plain-text result. | Effects and evidence are readable in chat without hiding errors or creating an additional execution endpoint. |
-| [`Recovery`](../../web/src/App.tsx#L1003) | Collect explicit choices for every uncertain call. | Maintain receipt-ID mapping, offer retry or record only for tools, capture supplied result text, and disable resume until every unknown call has a choice. | The user acknowledges potentially repeated effects/model charges; generated tool/model text cannot make its own recovery decision. |
+| [`App`](../../web/src/App.tsx#L48) | Load the local workspace directly. | Query bootstrap, render loading/retry state on failure, then render Workspace with saved data. | There is no login/access-token screen or implicit model call on page open. |
+| [`Workspace`](../../web/src/App.tsx#L69) | Coordinate explicit navigation, chat and auxiliary views. | Validate persisted IDs, store project/session together, derive Runs from authoritative queries, keep draft/inspection state separate and key conversation-specific editors. | An empty session stays a new draft; inspecting old evidence does not choose another execution target or lose local form state. |
+| [`Workspace.refresh`](../../web/src/App.tsx#L147) | Reload saved projections after an accepted action. | Invalidate bootstrap, Run lists, traces, and project-keyed workspace context. | File changes and metadata changes become visible alongside execution evidence. |
+| [`Workspace.perform`](../../web/src/App.tsx#L156) | Apply uniform busy/error handling to one user operation. | Set busy/clear error, await callback, turn failures into display text, always clear busy. | Repeated clicks are disabled while dependent actions run; errors remain visible instead of disappearing into promises. |
+| [`Workspace.chooseSession`](../../web/src/App.tsx#L167) | Select a conversation and its project as one target. | Update the combined selection, persist IDs, honor explicitly returned membership, clear task/variables/Skills/pending retry/inspection and reset follow-latest. | Selecting a project leaves an explicit new draft rather than implicitly choosing its first history entry. |
+| [`Workspace.newSession`](../../web/src/App.tsx#L184) | Open history in the selected project. | POST nullable project_id, refresh, select returned IDs, and optionally keep task text. | Direct Run can create its conversation without a Preview gate or an unintended default workspace. |
+| [`Workspace.savePreset`](../../web/src/App.tsx#L191) | Persist an intentional dirty preset. | PUT the observed aggregate, commit its returned baseline, and refresh; unchanged drafts return immediately. | Run binds saved revisions, while live inspection can compile unsaved edits without writing them. |
+| [`Workspace.inputRequest`](../../web/src/App.tsx#L198) | Build a direct revision-bound task request. | Parse variables as a non-array object, save dirty preset, use current or newly created session, attach current session/preset/config revisions, input, variables, and skill names. | Submission ties visible task context to actual server state; malformed variables fail before a model request. |
+| [`Workspace.buildPreview`](../../web/src/App.tsx#L215) | Enable live draft inspection, including empty task input. | Set previewEnabled and open the Inspector Preview tab; useLivePreview supplies subsequent compiled results. | Preview has no save/create/model effect and remains optional. |
+| [`Workspace.start`](../../web/src/App.tsx#L220) | Submit current input or retry the same uncertain HTTP acceptance. | Retain a fingerprint/body/key, reuse them after history advances, clear on definitive rejection, cache the returned Run immediately, then refresh and clear accepted draft state. | Transport uncertainty cannot change submission identity; the toolbar displays the newly accepted Run while revalidation is pending. |
+| [`Workspace.changeInput`](../../web/src/App.tsx#L265) | Edit task text. | Update local input only; the serialized draft drives a debounced inspection. | The last valid preview remains visible while a replacement is compiling. |
+| [`Workspace.start.fingerprint`](../../web/src/App.tsx#L222) | Identify an unchanged visible submission for a retry. | Serialize selected session/root, task, variables, Skills and preset content while excluding revisions and transient server state. | History can advance after acceptance while a lost HTTP response is retried; the original request body/key must remain stable. |
 
 ### App callbacks and rendering boundaries
 
-The Markdown image renderer returns an inert label for any image source, avoiding automatic requests to model-supplied external URLs. react-markdown uses skipHtml, so generated HTML is not executed. The follow-latest effect scrolls only while the user's view is near the bottom; scrolling more than 100 pixels away stops automatic following. Selecting a Run scrolls its DOM turn into view and changes Inspector state only.
+ConversationTurn's Markdown image renderer returns an inert label for any image source, avoiding automatic requests to model-supplied external URLs. react-markdown uses skipHtml, so generated HTML is not executed. The follow-latest effect scrolls only while the user's view is near the bottom; scrolling more than 100 pixels away stops automatic following. Selecting a Run scrolls its DOM turn into view and changes Inspector state only.
 
 Inline action callbacks submit: fork at a specific succeeded Run, approve/reject a specific displayed approval ID, resume explicit receipt resolutions, restore a revisioned archived conversation, or cancel the active Run. They await request then refresh through perform. Composer edits, variables, skill selection, saved Settings, and refreshed project file context change the live draft key; the last valid preview remains visible while updates compile. The Ctrl/Cmd+Enter handler uses the same start function as Run and rejects empty/busy/active input. Utility Prompt/Inspector panes stay mounted but hidden when toggled so local editor state survives; WorkspacePanel is mounted on demand.
 
@@ -127,8 +127,8 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`Projects`](../../web/src/Projects.tsx#L7) | Render named folder selection and an Add project dialog. | Show default root and saved choices, bounded scrolling, folder/name fields, and root tool-policy explanation. | Project selection is a familiar local folder action with one backend root per conversation. |
-| [`Projects.submit`](../../web/src/Projects.tsx#L29) | Register the entered folder and select it. | POST name/root, await parent refresh, select returned ID, close only on success. | Errors preserve entered data; current server metadata is available before navigation depends on it. |
+| [`Projects`](../../web/src/Projects.tsx#L9) | Render saved roots and a native folder registration form. | Show default/registered choices, use DirectoryField before manual fallback, infer a draft name from a selected folder and keep modal keyboard focus scoped. | Ordinary registration is an OS folder action without extra configuration or a custom filesystem browser. |
+| [`Projects.submit`](../../web/src/Projects.tsx#L36) | Register the selected folder and choose its returned project. | Require completed picker/name/path, POST name/root, await metadata refresh and close only on success. | Busy native selection cannot submit or dismiss stale form state; errors preserve the user's draft. |
 
 ## web/src/usePresetDrafts.ts
 
@@ -178,13 +178,13 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`ConversationHistory`](../../web/src/ConversationHistory.tsx#L35) | Render searchable grouped conversation history and action dialogs. | Filter titles/archive state, derive menu entities from latest props, keep local collapsed groups/value/dialog, lazily query fork turns, and render portal menu/form. | Navigation stays lightweight; an open menu observes Run completion/current revisions instead of retaining a permanently busy stale object. |
-| [`ConversationHistory.openDialog`](../../web/src/ConversationHistory.tsx#L88) | Switch from menu to an explicit input/confirmation dialog. | Clear menu, set initial form value, store typed dialog variant. | Rename/move/fork/delete get distinct fields and consequences rather than overloading one ambiguous button. |
-| [`ConversationHistory.openMenu`](../../web/src/ConversationHistory.tsx#L93) | Position the action menu for a chosen row/folder. | Read trigger bounding box and clamp left/top within viewport before saving target. | Portal rendering can be outside scroll clipping while remaining near the user's clicked control. |
-| [`ConversationHistory.update`](../../web/src/ConversationHistory.tsx#L101) | Submit one revisioned conversation metadata patch. | PATCH session ID with expected_revision and requested changes. | Server revision/archive/folder constraints remain authoritative; UI does not mutate saved messages. |
-| [`ConversationHistory.copy`](../../web/src/ConversationHistory.tsx#L107) | Duplicate/fork then select the independent result. | POST revision/operation/optional boundary, await refresh, switch to Active filter, and choose new session ID. | Copied history is immediately usable navigation, while backend evidence cloning performs no replay. |
-| [`ConversationHistory.submit`](../../web/src/ConversationHistory.tsx#L117) | Execute the current dialog's operation. | Branch by typed dialog kind for folder create/rename/delete, session rename/move/delete/fork; call update/copy/request, notify removal/refresh, close only after success. | One form handles shared busy/error presentation without hiding different backend semantics. Failed/stale actions leave input available for correction. |
-| [`ConversationHistory.rows`](../../web/src/ConversationHistory.tsx#L142) | Render selectable conversation rows and menu triggers. | Map IDs/titles/selection/active reference into buttons with accessibility labels and activity markers. | Navigation uses stable identities and separates selection from metadata actions. |
+| [`ConversationHistory`](../../web/src/ConversationHistory.tsx#L36) | Render searchable grouped history and actions. | Derive menus and dialogs from latest session/folder props while retaining typed operation/value drafts and modal focus. | Run completion can advance revisions while a dialog remains open; metadata updates must use current observed identity. |
+| [`ConversationHistory.openDialog`](../../web/src/ConversationHistory.tsx#L108) | Switch from menu to an explicit input/confirmation dialog. | Clear menu, set initial form value, store typed dialog variant. | Rename/move/fork/delete get distinct fields and consequences rather than overloading one ambiguous button. |
+| [`ConversationHistory.openMenu`](../../web/src/ConversationHistory.tsx#L113) | Position the action menu for a chosen row/folder. | Read trigger bounding box and clamp left/top within viewport before saving target. | Portal rendering can be outside scroll clipping while remaining near the user's clicked control. |
+| [`ConversationHistory.update`](../../web/src/ConversationHistory.tsx#L121) | Submit one revisioned conversation metadata patch. | PATCH session ID with expected_revision and requested changes. | Server revision/archive/folder constraints remain authoritative; UI does not mutate saved messages. |
+| [`ConversationHistory.copy`](../../web/src/ConversationHistory.tsx#L127) | Copy history and navigate to the independent result. | POST observed revision/operation/boundary, refresh and explicitly choose returned session/project IDs. | Navigation cannot retain a stale root after metadata changes; evidence copies still replay no effects. |
+| [`ConversationHistory.submit`](../../web/src/ConversationHistory.tsx#L137) | Execute the current dialog's operation. | Branch by typed dialog kind for folder create/rename/delete, session rename/move/delete/fork; call update/copy/request, notify removal/refresh, close only after success. | One form handles shared busy/error presentation without hiding different backend semantics. Failed/stale actions leave input available for correction. |
+| [`ConversationHistory.rows`](../../web/src/ConversationHistory.tsx#L162) | Render selectable conversation rows and menu triggers. | Map IDs/titles/selection/active reference into buttons with accessibility labels and activity markers. | Navigation uses stable identities and separates selection from metadata actions. |
 
 Inline archive/restore callbacks close the menu, submit the latest observed revision, refresh, and select Active after restore. Copy/archive/delete are disabled while active; rename/move remain available through versioned metadata checks. Fork dialogs list only succeeded Runs and default to the latest successful boundary. Folder deletion explicitly explains that members move to Unfiled. Conversation deletion explains that owned traces/Runs are removed; the backend also cleans checkpoints. Form submit prevents browser navigation and awaits the parent's perform wrapper. Escape/backdrop/close handlers only dismiss local controls; they do not undo completed API effects.
 
@@ -211,10 +211,10 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`Settings`](../../web/src/Settings.tsx#L7) | Edit the one versioned execution configuration. | Keep local general/connection/tool drafts, show the shared searchable ToolCatalog with effective read-only badges, save config with its observed revision, and optionally discover configured MCP servers. | Settings owns policy edits; task presets and ToolCatalog views cannot silently change permissions. |
-| [`Settings.setProvider`](../../web/src/Settings.tsx#L21) | Patch provider fields inside the draft. | Replace draft and shallow-merge provider options. | Endpoint/model/reference changes remain local until a versioned save; other aggregate fields stay intact. |
-| [`Settings.save`](../../web/src/Settings.tsx#L23) | Save settings and optionally discover their MCP tools. | Set busy/clear feedback, PUT current revision, update draft from response, optionally POST refresh, call onSaved, report result, and always clear busy. | Discovery uses saved definitions, and newly discovered tools still require explicit permission. Errors do not silently switch to simulation. |
-| [`Settings.change`](../../web/src/Settings.tsx#L288) | Patch one MCP server card in the local draft. | In the map closure, replace only the server at its index with merged fields. | A server edit changes the aggregate consistently without independent child persistence or model-controlled connection loading. |
+| [`Settings`](../../web/src/Settings.tsx#L8) | Edit the one versioned execution configuration. | Keep local general/connection/tool drafts, show the shared searchable ToolCatalog with effective read-only badges, save config with its observed revision, and optionally discover configured MCP servers. | Settings owns policy edits; task presets and ToolCatalog views cannot silently change permissions. |
+| [`Settings.setProvider`](../../web/src/Settings.tsx#L26) | Patch provider fields inside the draft. | Replace draft and shallow-merge provider options. | Endpoint/model/reference changes remain local until a versioned save; other aggregate fields stay intact. |
+| [`Settings.save`](../../web/src/Settings.tsx#L28) | Save settings and optionally discover their MCP tools. | Set busy/clear feedback, PUT current revision, update draft from response, optionally POST refresh, call onSaved, report result, and always clear busy. | Discovery uses saved definitions, and newly discovered tools still require explicit permission. Errors do not silently switch to simulation. |
+| [`Settings.change`](../../web/src/Settings.tsx#L300) | Patch one MCP server card in the local draft. | In the map closure, replace only the server at its index with merged fields. | A server edit changes the aggregate consistently without independent child persistence or model-controlled connection loading. |
 
 Server arguments are split by newlines into an argument array. Stdio environment editor splits each nonempty NAME=SERVER_VARIABLE line at the first equals sign on blur; malformed/missing identifiers are rejected by the backend. HTTP credentials use a variable-name field, never a key input. Tool permission changes replace the map entry with allow/ask/deny; unavailable names can be removed explicitly. New server callbacks create a random ID and blank transport fields; removal only edits the draft until Save. Environment provider overrides are applied at backend startup, while saved UI values apply immediately to later Runs until restart.
 
@@ -330,3 +330,43 @@ Every function below belongs to the layer named above. The last column identifie
 | [`PackageActions`](../../web/src/PackageActions.tsx#L6) | Render explicit bounded package transfer. | Maintain selected file reference/busy/error state and show only available export plus import actions. | Reuse remains a small data workflow rather than a separate package-management service. |
 | [`PackageActions.save`](../../web/src/PackageActions.tsx#L23) | Download current reusable data. | Await the parent's package callback, encode JSON into a Blob, trigger a filename download and revoke the object URL. | Unsaved prompt data can be exported without saving configuration or including Run history. |
 | [`PackageActions.load`](../../web/src/PackageActions.tsx#L43) | Import one user-selected JSON file. | Enforce a 2 MiB browser input limit, parse JSON, await authoritative parent/API validation and clear the file input in finally. | Failed imports remain visible and the same corrected file can be selected again. |
+
+## web/src/ConversationTurn.tsx
+
+**Layer: Frontend presentation / recorded execution.** Renders persisted turns, tool evidence and explicit recovery decisions extracted from App.
+
+**Connections and effects:** Receives typed RunView and action callbacks from Workspace. Rendering and component-local disclosure/recovery input do not select projects, issue model calls, mutate snapshots or invent tool receipts.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`RunTurn`](../../web/src/ConversationTurn.tsx#L14) | Render one persisted execution turn. | Display status/provenance, paired assistant/tool messages, usage and an optional validated recorded TaskPlan. | Continuous chat keeps model claims and actual receipts connected to their Run; progress derives from evidence and survives reload. |
+| [`ToolOutput`](../../web/src/ConversationTurn.tsx#L199) | Render an inspectable tool receipt. | Parse JSON when possible; show command reports, patch operations/bounded diffs, ranged-read metadata/content or a folded general result. | Effects and evidence remain readable without an additional execution endpoint. |
+| [`Recovery`](../../web/src/ConversationTurn.tsx#L266) | Collect explicit decisions for uncertain calls. | Maintain receipt-ID choices, permit tool record or retry, collect supplied result text and require all unknown calls to be resolved before resume. | Model text cannot resolve its own uncertainty or authorize repeated effects. |
+
+## web/src/DirectoryField.tsx
+
+**Layer: Frontend presentation / desktop selection.** Collects a workspace folder through the OS before offering manual entry.
+
+**Connections and effects:** Uses the typed folder-picker HTTP response and an AbortController; Projects owns the name/path form and registration. Does not place a filesystem handle or path in browser storage.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`DirectoryField`](../../web/src/DirectoryField.tsx#L6) | Show the selected folder and native Choose/Change action. | Keep picker busy/fallback/notice state; render a path output normally and an input only after unavailability; abort an owned request on unmount. | The normal local workflow is visual selection, cancellation preserves user input, and unsupported desktops remain usable. |
+| [`DirectoryField.browse`](../../web/src/DirectoryField.tsx#L25) | Request one explicit system folder selection. | Mark busy, POST current/initial path with a signal, update only on selected, expose manual fallback on unavailable/transport failure, distinguish busy/cancel and always clear ownership. | A competing dialog is not a reason to bypass selection; user cancellation cannot wipe a prior valid path. |
+
+## web/src/useDialogFocus.ts
+
+**Layer: Frontend presentation / keyboard interaction.** Shares a small concrete modal focus lifecycle for Settings, Projects and history actions.
+
+**Connections and effects:** Uses effects and DOM focus only; callers own modal open state and close/save restrictions. One effect captures/restores previous focus; another updates keyboard handling when close behavior changes.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`useDialogFocus`](../../web/src/useDialogFocus.ts#L4) | Focus an open dialog and restore the prior connected control when it closes. | Prefer an input/select/textarea then button; capture the original active element; attach/remove a document key listener while open. | Keyboard users can finish forms without reaching unrelated background controls or losing their place. |
+| [`useDialogFocus.handle`](../../web/src/useDialogFocus.ts#L27) | Handle Escape and wrap modal Tab navigation. | Invoke the caller's close callback, or filter visible enabled tabbable elements and wrap first/last focus; focus the dialog when no controls exist. | Focus behavior respects caller busy state and the actual rendered controls instead of a hard-coded button list. |

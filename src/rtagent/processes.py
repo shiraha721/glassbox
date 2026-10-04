@@ -149,8 +149,10 @@ class ProcessManager:
     ) -> ProcessView:
         """Send explicit pipe input; retain its hash/size instead of duplicating input text."""
         record = await self.owned(identifier, session_id, root)
-        if identifier not in self.live or record["status"] not in ACTIVE:
+        live = self.live.get(identifier)
+        if not live or record["status"] not in ACTIVE:
             raise AppError("process_finished", "The process is no longer running.", 409)
+        control, task, data = live
         if (
             record["data"]["mode"] == "workspace-write"
             and (await self.repository.config()).sandbox_mode == "read-only"
@@ -158,12 +160,14 @@ class ProcessManager:
             raise AppError(
                 "tool_denied", "Stop the earlier writable process before using read-only.", 403
             )
+        # The command can finish during the settings read and remove itself from the live map.
+        if task.done():
+            raise AppError("process_finished", "The process is no longer running.", 409)
         try:
-            self.live[identifier][0].feed(text, eof)
+            control.feed(text, eof)
         except ValueError as exc:
             raise AppError("process_input", str(exc)) from exc
-        data = self.live[identifier][2]
-        data["stdin_closed"] = self.live[identifier][0].input_closed
+        data["stdin_closed"] = control.input_closed
         data["inputs"].append(
             {"hash": digest(text), "bytes": len(text.encode()), "eof": eof, "at": now()}
         )

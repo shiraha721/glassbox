@@ -19,6 +19,36 @@ async function startTask(page: Page, input: string) {
   await page.getByRole('button', { name: 'Run', exact: true }).click();
 }
 
+test('retrying a lost Run response reuses its body after history revision advances', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  let loseResponse = true;
+  await page.route('**/api/v1/runs', async (route) => {
+    if (route.request().method() !== 'POST' || !loseResponse) return route.continue();
+    loseResponse = false;
+    const accepted = await route.fetch();
+    expect(accepted.status()).toBe(202);
+    await route.abort('failed');
+  });
+  await startTask(page, 'A task whose accepted response is lost.');
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeEnabled();
+  const sessionId = await page.evaluate(() => localStorage.getItem('studio.session'));
+  await expect
+    .poll(
+      async () => (await (await page.request.get(`/api/v1/sessions/${sessionId}`)).json()).revision,
+    )
+    .toBe(1);
+  // Simulate a normal focus refresh discovering the completed Run and its newer history revision.
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await expect(page.getByLabel('Task', { exact: true })).toHaveValue('');
+  const runs = await (await page.request.get(`/api/v1/sessions/${sessionId}/runs`)).json();
+  expect(runs).toHaveLength(1);
+  await expect(page.locator('.conversation-turn')).toHaveCount(1);
+});
+
 test('daily work compacts history, reuses preset packages and controls a native pipe process', async ({
   page,
 }) => {
@@ -157,6 +187,12 @@ test('projects bind conversations, tools and memory to the selected workspace fo
   writeFileSync(path.join(root, 'AGENTS.md'), 'Use this project folder only.');
   await page.getByRole('button', { name: 'Add project', exact: true }).click();
   await page.getByLabel('Project name', { exact: true }).fill('Browser project');
+  await page.route('**/api/v1/desktop/folder-picker', (route) =>
+    route.fulfill({
+      json: { status: 'unavailable', path: null, detail: 'No desktop in this browser fixture.' },
+    }),
+  );
+  await page.getByRole('button', { name: 'Choose folder', exact: true }).click();
   await page.getByLabel('Workspace folder', { exact: true }).fill(root);
   await page.getByRole('dialog').getByRole('button', { name: 'Add project', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeAttached();
@@ -197,6 +233,70 @@ test('projects bind conversations, tools and memory to the selected workspace fo
     'Local MCP and browser test workspace.',
   );
   await page.screenshot({ path: 'test-results/project-workspace.png', fullPage: true });
+});
+
+test('folder selection preserves cancellation, falls back when unavailable and keeps project drafts separate', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  const boot = await (await page.request.get('/api/v1/bootstrap')).json();
+  const root = path.join(path.dirname(boot.workspace_root), 'native-ui-project');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(path.join(root, 'README.md'), 'Separate native-selected project.');
+  let outcome: 'selected' | 'cancelled' | 'unavailable' = 'cancelled';
+  await page.route('**/api/v1/desktop/folder-picker', (route) =>
+    route.fulfill({
+      json: {
+        status: outcome,
+        path: outcome === 'selected' ? root : null,
+        detail: outcome === 'unavailable' ? 'Desktop unavailable.' : null,
+      },
+    }),
+  );
+  const add = page.getByRole('button', { name: 'Add project', exact: true });
+  await add.click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+  await expect(dialog.getByText('Folder selection cancelled.', { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByRole('textbox', { name: 'Workspace folder', exact: true }),
+  ).not.toBeAttached();
+  outcome = 'selected';
+  await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+  await expect(dialog.locator('output')).toHaveText(root);
+  await expect(dialog.getByLabel('Project name', { exact: true })).toHaveValue('native-ui-project');
+  outcome = 'cancelled';
+  await dialog.getByRole('button', { name: 'Change folder', exact: true }).click();
+  await expect(dialog.locator('output')).toHaveText(root);
+  await dialog.getByRole('button', { name: 'Add project', exact: true }).click();
+  await startTask(page, '/read README.md');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await page.getByRole('button', { name: 'Default workspace', exact: true }).click();
+  await expect(page.locator('.conversation-turn')).toHaveCount(0);
+  await page.getByRole('button', { name: 'native-ui-project', exact: true }).click();
+  await expect(page.locator('.conversation-turn')).toHaveCount(0);
+  await startTask(page, 'New independent project draft.');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  const after = await (await page.request.get('/api/v1/bootstrap')).json();
+  const project = after.projects.find(
+    (item: { workspace_root: string }) => item.workspace_root === root,
+  );
+  expect(
+    after.sessions.filter((item: { project_id: string }) => item.project_id === project.id),
+  ).toHaveLength(2);
+  await add.click();
+  outcome = 'unavailable';
+  await dialog.getByRole('button', { name: 'Choose folder', exact: true }).click();
+  await expect(dialog.getByText('Desktop unavailable.', { exact: true })).toBeVisible();
+  await dialog.getByLabel('Workspace folder', { exact: true }).fill(root);
+  await dialog.getByRole('button', { name: 'Add project', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(
+    true,
+  );
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeAttached();
+  await expect(add).toBeFocused();
 });
 
 test('live preview follows input, variables, preset and Skills without saving drafts', async ({

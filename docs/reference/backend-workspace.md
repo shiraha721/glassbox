@@ -382,10 +382,10 @@ Every function below belongs to the layer named above. The last column identifie
 | [`ProcessManager.start`](../../src/rtagent/processes.py#L49) | Persist intent before bounded native launch. | Enforce four active tasks, freeze owner/root/mode/timeout/runtime roots, save starting, schedule sandbox drive and await readiness/completion briefly. | Background execution uses the same OS isolation and limits; launch failures remain records, not host fallbacks. |
 | [`ProcessManager._drive`](../../src/rtagent/processes.py#L95) | Run and finalize one sandbox command. | Stream retained output into its record, await sandbox exit/tree cleanup/copy-back, save explicit terminal status/result/error and completion time. | No PID/status claims precede native cleanup; private Windows files appear only after exit. |
 | [`ProcessManager._drive.output`](../../src/rtagent/processes.py#L100) | Commit real background output. | Append already capped stream text, retain truncation/PID/stdin state and save active progress. | Polling can inspect output while the owning tool call and later conversation turns continue. |
-| [`ProcessManager.input`](../../src/rtagent/processes.py#L142) | Deliver explicit stdin to a live owned process. | Verify ownership/active control and current read-only restrictions, feed bounded text/EOF and retain only input digest/size/EOF/time (last 100). | An older writable process cannot be fed after switching to read-only; input text is not duplicated in process records. |
-| [`ProcessManager.stop`](../../src/rtagent/processes.py#L174) | Await stop of a selected owned process. | Resolve authority, signal its controller, shield-await native drive, then read the saved final projection. | A stop response implies Job/group cleanup rather than merely setting a flag. |
-| [`ProcessManager.stop_run`](../../src/rtagent/processes.py#L184) | Stop original effects of a cancelled/failed Run. | Iterate live records and match original run_id before invoking stop. | A conversation copy cannot acquire or repeat another Run's background effects. |
-| [`ProcessManager.close`](../../src/rtagent/processes.py#L191) | Stop all owned live resources. | Signal every controller and gather drive completion before Repository closes. | Normal service shutdown leaves no owned child process running or deferred copy-back writer. |
+| [`ProcessManager.input`](../../src/rtagent/processes.py#L142) | Feed one still-live original process. | Capture controller/task/data together after owned-record validation, read current settings, recheck completion, then queue bounded input/EOF and persist only hashes/sizes. | Completion across an await returns 409 without a removed-map KeyError, late input or a resurrected terminal receipt; read-only cannot feed older writable commands. |
+| [`ProcessManager.stop`](../../src/rtagent/processes.py#L178) | Await stop of a selected owned process. | Resolve authority, signal its controller, shield-await native drive, then read the saved final projection. | A stop response implies Job/group cleanup rather than merely setting a flag. |
+| [`ProcessManager.stop_run`](../../src/rtagent/processes.py#L188) | Stop original effects of a cancelled/failed Run. | Iterate live records and match original run_id before invoking stop. | A conversation copy cannot acquire or repeat another Run's background effects. |
+| [`ProcessManager.close`](../../src/rtagent/processes.py#L195) | Stop all owned live resources. | Signal every controller and gather drive completion before Repository closes. | Normal service shutdown leaves no owned child process running or deferred copy-back writer. |
 
 ### Types and ownership
 
@@ -486,6 +486,70 @@ Every function below belongs to the layer named above. The last column identifie
 def import_preset(package: PresetPackage) -> Preset
 def export_skill(workspace: Workspace, name: str) -> SkillPackage
 def import_skill(workspace: Workspace, package: SkillPackage) -> dict
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## src/rtagent/desktop.py
+
+**Layer: Desktop infrastructure / user interaction.** Owns one native folder dialog independently of model tools and workspace registration.
+
+**Connections and effects:** HTTP calls choose explicitly; the Web lifespan closes it. Launches a short-lived native helper, never a shell command or agent tool. The process-local lock rejects competing dialogs; the helper is terminated and reaped on cancellation, timeout or shutdown.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`FolderPicker.__init__`](../../src/rtagent/desktop.py#L17) | Establish an idle desktop dialog owner. | Create an asyncio lock and empty task/process references with a shutdown flag. | App startup has no GUI side effect; one local request owns one modal capability. |
+| [`FolderPicker.close`](../../src/rtagent/desktop.py#L24) | Release an outstanding dialog on shutdown. | Mark closed, cancel the owned task and gather its cleanup. | A native window cannot outlive the Web process's resource lifetime. |
+| [`FolderPicker.choose`](../../src/rtagent/desktop.py#L31) | Return a canonical directory or a typed cancellation/fallback outcome. | Reject closed/busy state, normalize an existing initial folder, shield subprocess creation, communicate asynchronously for at most five minutes and resolve the selected Unicode path; kill/reap in finally. | The GUI remains responsive alongside Runs/SSE, cancellation retains prior input, and helper failures enable manual selection rather than breaking registration. |
+| [`FolderPicker._command`](../../src/rtagent/desktop.py#L105) | Select concrete OS desktop support. | On Windows launch the real base interpreter with the stdlib Shell helper; on a Linux desktop use installed zenity or kdialog; otherwise return None. | Windows venv redirectors can orphan a child on stub termination. The chooser needs no WSL, package install or speculative desktop abstraction. |
+
+### Types and ownership
+
+| Type / source | Purpose | Representation / behavior | Why / architectural role |
+| --- | --- | --- | --- |
+| [`FolderPicker`](../../src/rtagent/desktop.py#L14) | Process-local dialog resource owner. | One lock/task/process plus an explicit closed state. | Selection ownership belongs to the desktop adapter, distinct from saved Projects and command sandbox capabilities. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def FolderPicker.__init__(self) -> None
+async def FolderPicker.close(self) -> None
+async def FolderPicker.choose(self, initial_path: str) -> FolderSelection
+def FolderPicker._command(initial_path: str) -> list[str] | None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## src/rtagent/windows_dialog.py
+
+**Layer: Desktop infrastructure / Windows Shell FFI.** Opens Explorer's modern folder picker in an isolated stdlib helper process.
+
+**Connections and effects:** Invoked only by FolderPicker on Windows. Uses ctypes COM/Win32 with explicit pointer/HRESULT signatures and releases all owned Shell items and task-allocated strings. Its single UTF-8 JSON result contains a selected path; it neither edits files nor executes model instructions.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`select_folder`](../../src/rtagent/windows_dialog.py#L10) | Show IFileOpenDialog configured for existing filesystem folders. | Verify an interactive window station, initialize a COM STA, create the dialog, set FOS_PICKFOLDERS/options/title/initial Shell item, show, retrieve SIGDN_FILESYSPATH and release all objects/COM state in finally. | Use the native system UI and Unicode paths without a dependency framework, directory upload or custom tree. |
+| [`select_folder.check`](../../src/rtagent/windows_dialog.py#L20) | Recognize a failed COM HRESULT. | Raise OSError when the signed HRESULT is negative; cancellation is handled separately by Show's known code. | Unexpected Shell failures become unavailable at the parent adapter rather than an invented selected path. |
+| [`select_folder.method`](../../src/rtagent/windows_dialog.py#L25) | Bind a specific documented COM vtable method. | Cast the interface to its vtable and construct a WINFUNCTYPE callable with HRESULT, this pointer and explicit argument types. | ctypes has no COM wrapper here; exact ABI signatures are required for reliable pointer lifetime and 64-bit calls. |
+| [`main`](../../src/rtagent/windows_dialog.py#L94) | Translate native selection into the helper protocol. | Reconfigure stdout to UTF-8, select the initial argument, emit a JSON path or null for cancellation and use exit two for failure. | The asynchronous parent interprets a small outcome protocol without locale-dependent text or traceback parsing. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def select_folder(initial_path: str) -> str | None
+def select_folder.check(result: int) -> None
+def select_folder.method(instance: ctypes.c_void_p, index: int, *types: type) -> Callable[..., int]
+def main() -> None
 ```
 
 These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.

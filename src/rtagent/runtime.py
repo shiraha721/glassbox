@@ -51,7 +51,7 @@ class Runner:
         registry: ToolRegistry,
         checkpoint_path: str,
         hooks: Hooks | None = None,
-    ):
+    ) -> None:
         """Prepare lifecycle resources without opening files or starting background tasks."""
         self.repository, self.registry = repository, registry
         self.hooks = hooks or Hooks()
@@ -65,6 +65,7 @@ class Runner:
 
     async def open(self) -> None:
         """Open checkpoints, build the explicit loop, and recover queued work."""
+        self.shutting_down = False
         self.checkpointer = await self.stack.enter_async_context(
             AsyncSqliteSaver.from_conn_string(self.checkpoint_path)
         )
@@ -98,13 +99,15 @@ class Runner:
     async def close(self) -> None:
         """Interrupt active work, preserve uncertain outcomes, and release checkpoints."""
         self.shutting_down = True
-        pending = list(self.tasks.values())
-        for task in pending:
-            task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-        await self.registry.processes.close()
-        await self.stack.aclose()
+        try:
+            pending = list(self.tasks.values())
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            await self.registry.processes.close()
+        finally:
+            await self.stack.aclose()
 
     async def drive(self, run_id: str, resume: bool) -> None:
         """Execute or resume a graph under the Run budget and persist its stop state."""

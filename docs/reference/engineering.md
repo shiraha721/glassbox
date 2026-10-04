@@ -556,7 +556,7 @@ Every function below belongs to the layer named above. The last column identifie
 | --- | --- | --- | --- |
 | [`openWorkspace`](../../web/e2e/studio.spec.ts#L6) | Open the app and create a fresh conversation. | Navigate /, assert workspace presence, open the sidebar if needed, create history, require disabled empty Run and enabled empty Preview. | System-only prompt inspection stays usable; tests begin through the actual local UI without login or a model call. |
 | [`startTask`](../../web/e2e/studio.spec.ts#L17) | Submit one task directly. | Fill Task and click Run, without clicking Preview. | Browser acceptance protects the direct operational workflow the product promises. |
-| [`actions`](../../web/e2e/studio.spec.ts#L450) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
+| [`actions`](../../web/e2e/studio.spec.ts#L550) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
 
 ### Registered frontend verification callbacks
 
@@ -564,19 +564,21 @@ Each row describes a concrete anonymous `test`/`it` function. Nested interaction
 
 | Source / case | Mechanism | Why / architectural boundary |
 | --- | --- | --- |
-| [E2E: context/packages/process pipes](../../web/e2e/studio.spec.ts#L22) | Compact/restore real history, import/export a fresh preset, approve a native process and send Unicode stdin/Stop through the UI. | New daily-agent controls form one working vertical workflow with original evidence and completed native cleanup. |
-| [E2E: tool/preset/plan](../../web/e2e/studio.spec.ts#L82) | Search schemas, inspect effective read-only rules, switch Coding, inspect empty context, directly run a plan and reload it. | Tool exposure, useful preset context and durable progress work through actual UI and receipts. |
-| [E2E: project selection](../../web/e2e/studio.spec.ts#L149) | Register a folder, create a bound conversation, run native file reads, save/reload memory, inspect frozen root and move idle history. | Workspace selection binds effects and sources rather than only changing a sidebar label. |
-| [E2E: live draft](../../web/e2e/studio.spec.ts#L202) | Change task/variables/preset/Skills and clear task; inspect debounced canonical updates and absence of saved drafts/history. | Current input stays inspectable without blanking valid evidence or requiring a nonempty task. |
-| [E2E: edit/preview/file/trace/refresh](../../web/e2e/studio.spec.ts#L263) | Edit a prompt marker, compile Preview, run actual read_text, inspect/export trace and reload one saved turn. | Rendering, compilation, actual tools and refresh identity form one complete workflow. |
-| [E2E: approval after refresh](../../web/e2e/studio.spec.ts#L287) | Trigger Ask, reload, approve once and verify one paired result/turn. | Browser lifetime does not own the durable approval/checkpoint. |
-| [E2E: reject and cancel](../../web/e2e/studio.spec.ts#L301) | Reject echo, inspect tool_denied, then Stop a slow turn. | Permission and cancellation feedback remain operational in chat. |
-| [E2E: provider references and live inspection](../../web/e2e/studio.spec.ts#L314) | Save endpoint/model/reference fields, inspect the current draft and reopen Settings. | Configuration persistence requires neither a browser key nor a Preview gate. |
-| [E2E: stdio MCP](../../web/e2e/studio.spec.ts#L334) | Save/discover a fixture process, inspect default deny, explicitly allow and execute its call. | Discovery is separate from authorization with real local SDK effects. |
-| [E2E: memory/Skills direct Run](../../web/e2e/studio.spec.ts#L361) | Save note/procedure, select it, directly run a task and inspect both sources. | File editors, snapshot compilation and tool evidence form one workflow. |
-| [E2E: narrow viewport](../../web/e2e/studio.spec.ts#L391) | Use a mobile-sized page, inspect Preview and visible Run, and check layout bounds. | Optional panes cannot make task controls inaccessible. |
-| [E2E: reversible drafts](../../web/e2e/studio.spec.ts#L410) | Duplicate/switch/edit/undo/redo/discard and verify original/independent draft state. | Local editor history preserves unsaved work while selection remains usable. |
-| [E2E: conversation organization](../../web/e2e/studio.spec.ts#L440) | Rename/folder/fork/continue/duplicate/archive/restore/delete through visible menus. | Saved prefix provenance, shared-file semantics and history independence are vertical features. |
+| [E2E: accepted submission retry](../../web/e2e/studio.spec.ts#L22) | Accept a Run through real HTTP, abort its browser response, advance history/focus state and retry the unchanged task. | The exact body/key returns one original Run despite newer revisions; transport uncertainty does not repeat work. |
+| [E2E: context/packages/process pipes](../../web/e2e/studio.spec.ts#L52) | Compact/restore real history, import/export a fresh preset, approve a native process and send Unicode stdin/Stop through the UI. | New daily-agent controls form one working vertical workflow with original evidence and completed native cleanup. |
+| [E2E: tool/preset/plan](../../web/e2e/studio.spec.ts#L112) | Search schemas, inspect effective read-only rules, switch Coding, inspect empty context, directly run a plan and reload it. | Tool exposure, useful preset context and durable progress work through actual UI and receipts. |
+| [E2E: project selection](../../web/e2e/studio.spec.ts#L179) | Register a folder, create a bound conversation, run native file reads, save/reload memory, inspect frozen root and move idle history. | Workspace selection binds effects and sources rather than only changing a sidebar label. |
+| [E2E: desktop outcomes and explicit drafts](../../web/e2e/studio.spec.ts#L238) | Exercise selected/cancelled/unavailable picker responses, modal keyboard focus, manual fallback and switching away from existing history. | Only unavailable selection exposes manual entry; project navigation does not silently continue an old conversation. Actual OS windows are checked by smoke_desktop. |
+| [E2E: live draft](../../web/e2e/studio.spec.ts#L302) | Change task/variables/preset/Skills and clear task; inspect debounced canonical updates and absence of saved drafts/history. | Current input stays inspectable without blanking valid evidence or requiring a nonempty task. |
+| [E2E: edit/preview/file/trace/refresh](../../web/e2e/studio.spec.ts#L363) | Edit a prompt marker, compile Preview, run actual read_text, inspect/export trace and reload one saved turn. | Rendering, compilation, actual tools and refresh identity form one complete workflow. |
+| [E2E: approval after refresh](../../web/e2e/studio.spec.ts#L387) | Trigger Ask, reload, approve once and verify one paired result/turn. | Browser lifetime does not own the durable approval/checkpoint. |
+| [E2E: reject and cancel](../../web/e2e/studio.spec.ts#L401) | Reject echo, inspect tool_denied, then Stop a slow turn. | Permission and cancellation feedback remain operational in chat. |
+| [E2E: provider references and live inspection](../../web/e2e/studio.spec.ts#L414) | Save endpoint/model/reference fields, inspect the current draft and reopen Settings. | Configuration persistence requires neither a browser key nor a Preview gate. |
+| [E2E: stdio MCP](../../web/e2e/studio.spec.ts#L434) | Save/discover a fixture process, inspect default deny, explicitly allow and execute its call. | Discovery is separate from authorization with real local SDK effects. |
+| [E2E: memory/Skills direct Run](../../web/e2e/studio.spec.ts#L461) | Save note/procedure, select it, directly run a task and inspect both sources. | File editors, snapshot compilation and tool evidence form one workflow. |
+| [E2E: narrow viewport](../../web/e2e/studio.spec.ts#L491) | Use a mobile-sized page, inspect Preview and visible Run, and check layout bounds. | Optional panes cannot make task controls inaccessible. |
+| [E2E: reversible drafts](../../web/e2e/studio.spec.ts#L510) | Duplicate/switch/edit/undo/redo/discard and verify original/independent draft state. | Local editor history preserves unsaved work while selection remains usable. |
+| [E2E: conversation organization](../../web/e2e/studio.spec.ts#L540) | Rename/folder/fork/continue/duplicate/archive/restore/delete through visible menus. | Saved prefix provenance, shared-file semantics and history independence are vertical features. |
 | [Component: placement reordering](../../web/src/Composer.test.tsx#L31) | Render Composer, click move, inspect emitted aggregate/order/roles/original object. | UI order normalization preserves slot/role/source semantics. |
 | [Component: malformed rule draft](../../web/src/Composer.test.tsx#L53) | Type invalid JSON, Apply rules, require no emitted aggregate and visible error. | Invalid advanced text cannot corrupt the parent's applied preset draft. |
 
@@ -896,6 +898,107 @@ async def test_trusted_guard_is_never_called_before_core_denial(tmp_path, monkey
 async def test_trusted_guard_is_never_called_before_core_denial.guard(call, _config)
 async def test_trusted_guard_is_never_called_before_core_denial.extension(_args, _workspace)
 async def test_trusted_guard_is_never_called_before_core_denial.model(_config, compiled, _tools, _prepared, on_wire)
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/smoke_desktop.py
+
+**Layer: Engineering / actual desktop and HTTP acceptance.** Verifies native folder selection and the surrounding transport/authoring lifecycle with an isolated Uvicorn service.
+
+**Connections and effects:** Uses disposable folders/data and explicit simulated model decisions. Optional Windows GUI control enumerates and messages only the helper PID owned by the fixture. Temporary fault/plain-text routes are acceptance-only; no user workspace or credential is consumed.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`dialog_window`](../../scripts/smoke_desktop.py#L19) | Locate the owned helper's visible modal. | Enumerate Windows top-level windows and select the matching PID and dialog title. | Acceptance cannot click unrelated desktop windows or mistake a redirector stub for the actual owner. |
+| [`dialog_window.visit`](../../scripts/smoke_desktop.py#L32) | Inspect one Win32 window in the enumeration callback. | Read its owning PID/title and record only the visible expected dialog. | Native verification is scoped to the test's actual subprocess capability. |
+| [`answer_dialog`](../../scripts/smoke_desktop.py#L46) | Select the current test folder or cancel its modal. | Post WM_COMMAND using the dialog's Select/Cancel IDs, falling back to WM_CLOSE only for cancellation cleanup. | Tests exercise real OS outcomes without a synthetic browser file-picker claim. |
+| [`exercise`](../../scripts/smoke_desktop.py#L56) | Verify live error handling, package authoring, chooser outcomes and resource release. | Use actual HTTP requests for validation/internal/plain errors, explicit read-only Skill import and unavailable fallback; optionally select/cancel/disconnect native windows while health and competing requests remain responsive. | Service/native behavior is established before adding focused regression tests; terminated windows and reaped processes are evidence. |
+| [`main`](../../scripts/smoke_desktop.py#L152) | Own temporary resources and the disposable HTTP server. | Construct explicit test Settings, add fixture routes before the SPA, start Uvicorn, await availability, exercise workflows and request orderly shutdown in finally. | Acceptance has separate port/storage and never reuses the main owner's SQLite files. |
+| [`main.fault`](../../scripts/smoke_desktop.py#L165) | Produce an unexpected acceptance-only handler failure. | Raise RuntimeError before a response starts. | Assert a stable internal envelope and correlated diagnostics without modifying production routes. |
+| [`main.plain_error`](../../scripts/smoke_desktop.py#L170) | Produce a non-JSON acceptance-only HTTP failure. | Return bounded plain text with status 502. | AgentClient must report transport failure usefully and continue handling subsequent valid requests. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def dialog_window(pid: int) -> int | None
+def dialog_window.visit(hwnd: int, _parameter: int) -> bool
+def answer_dialog(window: int, cancel: bool) -> None
+async def exercise(client: httpx.AsyncClient, app, root: Path, native: bool) -> None
+async def main(native: bool) -> None
+async def main.fault() -> None
+async def main.plain_error() -> Response
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/check_docs.py
+
+**Layer: Engineering / offline documentation audit.** Checks actual source coverage, exact declaration anchors and local document references without starting the application.
+
+**Connections and effects:** Reads first-party Python ASTs and the locked installed TypeScript parser via Node. Requires developer dependencies, not model credentials, migrations or a running service. It reports missing/incorrect links and exits nonzero; it does not generate prose or change runtime data.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`python_inventory`](../../scripts/check_docs.py#L51) | List Python declarations and anonymous lambdas. | Parse src/rtagent, tests, scripts and migrations and visit nested classes/functions with qualified ownership and exact AST lines. | Private/nested implementations need the same reviewed purpose/layer explanation as public entry points. |
+| [`python_inventory.visit`](../../scripts/check_docs.py#L55) | Preserve declaration ownership recursively. | Walk AST children, extend the owner tuple for function/class declarations and record lambda locations. | Nested helpers are not conflated with similarly named top-level functions; anchors identify current source. |
+| [`typescript_inventory`](../../scripts/check_docs.py#L74) | Extract TypeScript source declarations and callback lines. | Invoke Node with the embedded TypeScript-parser script, recursively traverse src/e2e, qualify class/method/named-arrow ownership and return JSON; exclude generated.ts. | Use the language parser for JSX/arrows rather than brittle signature regexes; generated contracts are not runtime implementations. |
+| [`slug`](../../scripts/check_docs.py#L87) | Normalize a local Markdown heading anchor. | Remove inline HTML, lowercase, drop punctuation and replace spaces with hyphens. | Cross-references follow the repository's GitHub-style Markdown convention. |
+| [`headings`](../../scripts/check_docs.py#L93) | Index valid heading targets including duplicates. | Skip fenced code and assign numbered duplicate slugs. | An example heading inside a code block cannot satisfy a real document reference. |
+| [`check`](../../scripts/check_docs.py#L107) | Validate the documentation against current files and implementations. | Check fences/local links/heading and line bounds/table cells, collect qualified source links, compare every named declaration line and anonymous callback location, and return actionable errors. | Refactors cannot silently leave obsolete line anchors or omit new functions from the architecture reference. |
+| [`main`](../../scripts/check_docs.py#L161) | Run the offline audit and report its exit status. | Catch unavailable tooling, print actionable errors/counts and exit one on failed coverage or invalid links. | Documentation-only changes can be verified without builds, database effects or service restarts. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def python_inventory() -> tuple[list[dict[str, Any]], set[tuple[str, int]]]
+def python_inventory.visit(node: ast.AST, path: str, owners: tuple[str, ...]=()) -> None
+def typescript_inventory() -> tuple[list[dict[str, Any]], list[tuple[str, int]]]
+def slug(heading: str) -> str
+def headings(path: Path) -> set[str]
+def check() -> list[str]
+def main() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## tests/test_review_regressions.py
+
+**Layer: Engineering / focused lifecycle regressions.** Protects three observed async/transport failure modes after actual service acceptance.
+
+**Connections and effects:** Uses actual disposable Harness/Repository resources and controlled await boundaries. Tests assert operational behavior, rather than duplicating implementation shapes or opening the user's main databases.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`test_process_exit_during_settings_read_returns_conflict`](../../tests/test_review_regressions.py#L17) | Verify an exiting command cannot accept late input or raise a map KeyError. | Persist a real running process, pause config resolution until its owned task finishes, then assert 409 and no queued input. | An await can retire live capabilities; a durable receipt never grants an input channel after completion. |
+| [`test_process_exit_during_settings_read_returns_conflict.finish`](../../tests/test_review_regressions.py#L35) | Retire the command across the controlled await. | Wait on the fixture gate and persist exited; task completion retires its live ownership. | Reproduce the actual interleaving instead of directly forcing a KeyError. |
+| [`test_process_exit_during_settings_read_returns_conflict.settings_after_exit`](../../tests/test_review_regressions.py#L44) | Resolve settings only after command completion. | Signal the gate, await the fixture task, then return the actual stored configuration. | Drive the race at the production input method's await boundary. |
+| [`test_failed_summary_cleanup_still_closes_checkpoints`](../../tests/test_review_regressions.py#L58) | Verify later resource release after an earlier cleanup exception. | Enter an actual Harness, inject summary cleanup failure, then assert checkpoint connection closure and an empty database pool. | Exception paths must release owned resources as reliably as the ordinary shutdown path. |
+| [`test_rpc_internal_failure_keeps_next_frame_readable`](../../tests/test_review_regressions.py#L77) | Verify one unexpected RPC operation cannot kill framing. | Inject a failing operation followed by a valid second request, then inspect internal-error and successful JSON responses. | Independent clients can recover at the transport boundary without replaying uncertain agent effects. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def test_process_exit_during_settings_read_returns_conflict(tmp_path, monkeypatch)
+async def test_process_exit_during_settings_read_returns_conflict.finish() -> None
+async def test_process_exit_during_settings_read_returns_conflict.settings_after_exit() -> StudioConfig
+async def test_failed_summary_cleanup_still_closes_checkpoints(tmp_path, monkeypatch)
+async def test_rpc_internal_failure_keeps_next_frame_readable(monkeypatch)
 ```
 
 These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.

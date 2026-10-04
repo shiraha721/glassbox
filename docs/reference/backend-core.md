@@ -20,17 +20,18 @@ Every function below belongs to the layer named above. The last column identifie
 | [`credential_reference`](../../src/rtagent/domain.py#L30) | Validate an optional environment variable name. | Accept empty or an ASCII Python identifier; reject literal key syntax. | Serializable settings retain references rather than normal API keys. Identifier-shaped secrets are not distinguishable automatically, so this is format validation, not secret detection. |
 | [`endpoint_url`](../../src/rtagent/domain.py#L37) | Validate an optional HTTP(S) endpoint. | Parse the URL and require a hostname; reject user information, queries, and fragments. | Provider/MCP settings can be stored and displayed without embedded URL credentials. |
 | [`AppError.__init__`](../../src/rtagent/domain.py#L58) | Construct an expected failure with code, safe message, HTTP status, and optional details. | Initialize `Exception` and retain the four public error attributes; default status is 422. | Domain/application errors stay transport independent; `main.error_response` performs HTTP translation. |
-| [`ProviderConfig.credential_name`](../../src/rtagent/domain.py#L116) | Validate `credential_ref` during Pydantic construction. | Delegate to `credential_reference`. | The provider contract prevents normal literal API keys from entering configuration snapshots. |
-| [`ProviderConfig.safe_url`](../../src/rtagent/domain.py#L122) | Validate the serialized provider `base_url`. | Delegate to `endpoint_url`. | Central validation covers Settings API edits as well as snapshot reconstruction. |
-| [`MCPServer.credential_name`](../../src/rtagent/domain.py#L142) | Validate the optional MCP bearer reference. | Delegate to the same reference validator as providers. | MCP authentication follows the same server-side secret boundary. |
-| [`MCPServer.safe_url`](../../src/rtagent/domain.py#L148) | Validate an optional MCP endpoint independently of transport. | Delegate to `endpoint_url`; an empty value is legal for stdio. | A single connection contract supports both transports without putting their lifecycle in the domain. |
-| [`MCPServer.environment_references`](../../src/rtagent/domain.py#L154) | Validate child-variable to server-variable mappings. | Require both sides to be nonempty ASCII identifiers and return the mapping. | Stdio environment values describe references, and only the transport adapter resolves their actual values. |
-| [`FolderCreate.nonempty_name`](../../src/rtagent/domain.py#L482) | Normalize a folder display name. | Reject whitespace-only text and strip surrounding whitespace after length validation. | Flat folder names remain meaningful and comparable rather than becoming invisible navigation entries. |
-| [`TaskPlan.one_active_step`](../../src/rtagent/domain.py#L258) | Validate a coherent bounded plan. | Reject whitespace-only step labels and more than one in_progress item after field validation. | Agent progress has a clear current step; a completed label remains a model claim rather than proof that a check passed. |
-| [`latest_plan`](../../src/rtagent/domain.py#L267) | Recover the latest valid recorded agent plan. | Collect update_plan call IDs from assistant messages, scan paired tool messages in reverse, validate TaskPlan JSON, and return the latest valid value or null. | Arbitrary JSON from other tools cannot impersonate progress; refresh, restart and copied evidence share the same immutable-message projection. |
-| [`SessionUpdate.nonempty_title`](../../src/rtagent/domain.py#L521) | Normalize an explicitly supplied conversation title. | Preserve `None`, reject whitespace-only values, and strip valid text. | Optional metadata patches distinguish no rename from an intentional visible title. |
-| [`StudioConfig.exact_hosts`](../../src/rtagent/domain.py#L216) | Validate an exact public-download host policy. | Lowercase and deduplicate at most twenty DNS names; reject URLs, ports, wildcards and malformed labels. | Configuration grants a narrowly defined application download surface, never shell networking. |
-| [`SkillPackage.bounded_files`](../../src/rtagent/domain.py#L379) | Bound the reusable text-resource package. | Require SKILL.md, one to fifty UTF-8 text files, at most 64 KiB each and 1 MiB total. | Imported procedures remain inspectable data with predictable storage cost; path publication checks belong to packages.py. |
+| [`ProviderConfig.credential_name`](../../src/rtagent/domain.py#L131) | Validate `credential_ref` during Pydantic construction. | Delegate to `credential_reference`. | The provider contract prevents normal literal API keys from entering configuration snapshots. |
+| [`ProviderConfig.safe_url`](../../src/rtagent/domain.py#L137) | Validate the serialized provider `base_url`. | Delegate to `endpoint_url`. | Central validation covers Settings API edits as well as snapshot reconstruction. |
+| [`MCPServer.credential_name`](../../src/rtagent/domain.py#L157) | Validate the optional MCP bearer reference. | Delegate to the same reference validator as providers. | MCP authentication follows the same server-side secret boundary. |
+| [`MCPServer.safe_url`](../../src/rtagent/domain.py#L163) | Validate an optional MCP endpoint independently of transport. | Delegate to `endpoint_url`; an empty value is legal for stdio. | A single connection contract supports both transports without putting their lifecycle in the domain. |
+| [`MCPServer.environment_references`](../../src/rtagent/domain.py#L169) | Validate child-variable to server-variable mappings. | Require both sides to be nonempty ASCII identifiers and return the mapping. | Stdio environment values describe references, and only the transport adapter resolves their actual values. |
+| [`FolderCreate.nonempty_name`](../../src/rtagent/domain.py#L497) | Normalize a folder display name. | Reject whitespace-only text and strip surrounding whitespace after length validation. | Flat folder names remain meaningful and comparable rather than becoming invisible navigation entries. |
+| [`TaskPlan.one_active_step`](../../src/rtagent/domain.py#L273) | Validate a coherent bounded plan. | Reject whitespace-only step labels and more than one in_progress item after field validation. | Agent progress has a clear current step; a completed label remains a model claim rather than proof that a check passed. |
+| [`latest_plan`](../../src/rtagent/domain.py#L282) | Recover the latest valid recorded agent plan. | Collect update_plan call IDs from assistant messages, scan paired tool messages in reverse, validate TaskPlan JSON, and return the latest valid value or null. | Arbitrary JSON from other tools cannot impersonate progress; refresh, restart and copied evidence share the same immutable-message projection. |
+| [`SessionUpdate.nonempty_title`](../../src/rtagent/domain.py#L565) | Normalize an explicitly supplied conversation title. | Preserve `None`, reject whitespace-only values, and strip valid text. | Optional metadata patches distinguish no rename from an intentional visible title. |
+| [`StudioConfig.exact_hosts`](../../src/rtagent/domain.py#L231) | Validate an exact public-download host policy. | Lowercase and deduplicate at most twenty DNS names; reject URLs, ports, wildcards and malformed labels. | Configuration grants a narrowly defined application download surface, never shell networking. |
+| [`SkillPackage.bounded_files`](../../src/rtagent/domain.py#L394) | Bound the reusable text-resource package. | Require SKILL.md, one to fifty UTF-8 text files, at most 64 KiB each and 1 MiB total. | Imported procedures remain inspectable data with predictable storage cost; path publication checks belong to packages.py. |
+| [`SessionCreate.nonempty_title`](../../src/rtagent/domain.py#L547) | Normalize a new conversation title. | Trim its bounded field value and reject whitespace-only text with a title-specific error. | Creation and metadata updates cannot introduce invisible conversation names; the transport owns no separate DTO. |
 
 ### Types and ownership
 
@@ -38,49 +39,64 @@ Every function below belongs to the layer named above. The last column identifie
 | --- | --- | --- | --- |
 | [`AppError`](../../src/rtagent/domain.py#L55) | Expected business/validation failure. | Exception attributes carry public details; internal causes are separate. | Error vocabulary is shared without making the domain depend on HTTP responses. |
 | [`Contract`](../../src/rtagent/domain.py#L64) | Base for first-party serialized contracts. | `extra=forbid` rejects unknown fields; serialization defaults are marked required in JSON Schema. | Unexpected input is caught early and generated frontend output types reflect defaulted fields. |
-| [`Variable`](../../src/rtagent/domain.py#L70) | Declaration for one template variable. | String/number/boolean type, required flag, and optional default. | Explicit declarations limit substitution and expose missing/type-invalid values. |
-| [`Block`](../../src/rtagent/domain.py#L78) | One configured prompt message. | Stable ID, name, role restricted to system/user/assistant, literal template, enabled flag, placement/order, variable declarations, filters, and structured condition. | Message behavior is inspectable data; runtime-created tool messages cannot be forged as preset blocks. |
-| [`Preset`](../../src/rtagent/domain.py#L94) | Editable collection of embedded blocks. | ID/name/revision plus at most 100 blocks; repository writes advance its revision. | Blocks belong to their preset aggregate, avoiding independent block repositories and synchronization machinery. |
-| [`ProviderConfig`](../../src/rtagent/domain.py#L103) | Provider options saved in configuration and Runs. | Adapter, model, Base URL, credential reference, temperature, output reservation, and optional context window. | Requests are reproducible from non-secret options while actual credentials are resolved at execution. |
-| [`MCPServer`](../../src/rtagent/domain.py#L127) | An explicitly configured external tool connection. | ID/name, stdio executable/argument array/cwd/environment references, or HTTP URL/bearer reference. | Connection permission remains local configuration; the model cannot add servers. |
-| [`ToolDefinition`](../../src/rtagent/domain.py#L164) | Frozen tool interface. | Name/description/JSON Schema, optional MCP origin, schema hash and trusted native/local writes_workspace declaration. | Snapshot schemas pin dispatch; mutator declarations supplement core read-only enforcement without trusting remote annotations. |
-| [`StudioConfig`](../../src/rtagent/domain.py#L176) | One versioned execution-settings aggregate. | Provider, allow/ask/deny, sandbox mode, three trusted runtime roots, twenty exact download hosts, MCP transports and call/time budgets. | Runtime/dependency policy is captured with every new Run; settings edits cannot change an existing snapshot. |
-| [`ToolCall`](../../src/rtagent/domain.py#L226) | Model invocation intent. | Original ID, exposed tool name, and decoded argument object. | The same model ID must be used by the resulting tool message; the receipt ID is separate. |
-| [`Message`](../../src/rtagent/domain.py#L234) | Canonical model conversation item. | Explicit role/content/source, assistant tool calls, and tool-result `tool_call_id`. | SDK-independent messages retain ordering, provenance, and call/result pairing across compilation and storage. |
-| [`CompiledPrompt`](../../src/rtagent/domain.py#L286) | Pure compiler result. | Final messages, activation report, source map, estimate/budget status, and input hash. | Inspection and execution share the same evidence rather than two prompt renderers. |
-| [`PreviewRequest`](../../src/rtagent/domain.py#L297) | Direct task submission or optional inspection request. | Session/config/preset revision references, nonempty input, variables, and at most 20 explicitly selected skills. | The application can freeze actual inputs without requiring a separate Preview UI step. |
-| [`DraftPreviewRequest`](../../src/rtagent/domain.py#L310) | Nonpersisting editor inspection input. | Inline Preset, saved settings revision, optional session/project references, possibly empty task, variables and selected skills. | Unsaved composition can be inspected without saving presets, creating history, or acquiring an execution identity. |
-| [`PromptInspection`](../../src/rtagent/domain.py#L411) | Compiled draft projection. | Hash, compiler result, prepared body, transformations and selected schemas. | Users can inspect explicit provider adaptation while the live result remains a draft, not an execution identity. |
-| [`MemoryDocument`](../../src/rtagent/domain.py#L323) | Last-read workspace note. | Relative path, content, and canonical text hash. | The editor and model tool can detect a stale replacement without a memory database. |
-| [`MemorySave`](../../src/rtagent/domain.py#L331) | Explicit memory replacement command. | Bounded content and mandatory expected hash. | An edit acknowledges the exact prior document instead of silently overwriting another Run's notes. |
-| [`SkillInfo`](../../src/rtagent/domain.py#L338) | Catalog metadata for a discovered procedure. | Name/description/path, built-in flag, and source hash; no body. | Default model context stays small and the UI can select/inspect a source. |
-| [`SkillDocument`](../../src/rtagent/domain.py#L348) | Loaded procedure source. | Inherits metadata and adds full SKILL.md text. | Full instructions enter context only through selection or load_skill; provenance stays attached. |
-| [`SkillSave`](../../src/rtagent/domain.py#L354) | Skill authoring command. | Name, short description, Markdown instructions, optional expected hash. | The file adapter owns frontmatter serialization and protected updates, rather than accepting arbitrary filesystem destinations. |
-| [`SandboxStatus`](../../src/rtagent/domain.py#L391) | OS isolation probe result. | Backend label, readiness, network label, and diagnostic detail. | UI can report a real failed sandbox without making app startup or model configuration unavailable. |
-| [`WorkspaceView`](../../src/rtagent/domain.py#L400) | Editable project context projection. | Root, actual sandbox status, selected root instruction document/hash/path, memory, Skill metadata and invalid-source diagnostics. | Prompt composition and workspace editing expose identical sources without a second configuration store. |
-| [`Preview`](../../src/rtagent/domain.py#L421) | Expiring frozen first input. | Extends PromptInspection with a saved ID and expiry. | API clients may consume this immutable record; browser live drafts instead use side-effect-free inspection and direct Run. |
-| [`StartRun`](../../src/rtagent/domain.py#L428) | Saved-preview consumption command. | Preview ID/hash and observed session revision only. | Clients cannot replace the frozen tools, settings, or prompt at execution time. |
-| [`ApprovalDecision`](../../src/rtagent/domain.py#L436) | Human decision for one pending tool call. | Literal approve/reject value; approval ID comes from the URL. | A model cannot approve a call through its generated text. |
-| [`RecoveryDecision`](../../src/rtagent/domain.py#L442) | User reconciliation of one uncertain effect. | Explicit retry or record action plus a result string. | External effects are not treated as exactly-once; callers choose whether repetition is acceptable. |
-| [`ResumeRequest`](../../src/rtagent/domain.py#L449) | Reconciliation set for a paused Run. | Mapping from application receipt IDs to RecoveryDecision. | The application requires every unknown receipt to be resolved before graph recovery. |
-| [`RunEvent`](../../src/rtagent/domain.py#L455) | Persisted browser event envelope. | Schema version, Run ID, sequence, event type, UTC timestamp, and payload. | Reconnection has a durable cursor rather than an in-memory streaming offset. |
-| [`FolderView`](../../src/rtagent/domain.py#L466) | Stored flat folder projection. | ID/name/revision/creation timestamp. | Folders organize conversations, not workspace filesystem paths. |
-| [`FolderCreate`](../../src/rtagent/domain.py#L475) | Folder creation input. | Bounded nonempty name plus normalization validator. | A minimal contract avoids nested trees or separate folder settings. |
-| [`FolderUpdate`](../../src/rtagent/domain.py#L489) | Version-bound folder rename. | Inherits creation name and adds nonnegative expected revision. | Optimistic concurrency rejects edits based on stale sidebar state. |
-| [`ProjectCreate`](../../src/rtagent/domain.py#L495) | Register a local workspace folder. | Inherit nonempty display-name validation and accept an absolute folder string checked by Studio. | Registration is a trusted user action; the model cannot alter its root through tool arguments. |
-| [`ProjectView`](../../src/rtagent/domain.py#L501) | Stored named folder projection. | Stable ID, name, canonical workspace_root and creation timestamp. | Root selection is separate from chat-organization folders and the one shared permission/config aggregate. |
-| [`SessionUpdate`](../../src/rtagent/domain.py#L510) | Partial conversation metadata command. | Expected revision plus optional title/archive/folder/project; fields_set distinguishes omission from explicit null. | Idle workspace moves affect future Runs while saved snapshots retain their original roots. |
-| [`SessionCopy`](../../src/rtagent/domain.py#L528) | Duplicate/fork command. | Revision, operation, and optional successful Run boundary. | One evidence-copy use case covers both operations without replay or checkpoint cloning. |
-| [`SessionView`](../../src/rtagent/domain.py#L582) | Committed conversation projection. | Original messages, active Run, project/folder/archive/copy metadata and active/working compaction IDs. | Effective context is a checked projection; original chat evidence stays immutable across explicit reduction. |
-| [`PlanItem`](../../src/rtagent/domain.py#L244) | One explicit task-progress item. | A nonempty bounded step label and pending/in_progress/completed status. | Small validated values support readable task progress without database-owned jobs. |
-| [`TaskPlan`](../../src/rtagent/domain.py#L251) | A complete progress receipt. | Optional bounded explanation plus one to twelve PlanItems with at most one active item. | One update replaces the displayed plan; it cannot schedule work or grant permissions. |
-| [`RunView`](../../src/rtagent/domain.py#L599) | Public execution projection. | Status/messages/approval/unknown receipts/usage, frozen workspace/preset/provider, derived validated plan and active tool output. | Chat can inspect real streamed progress without replacing final paired receipts or changing configuration. |
-| [`CallView`](../../src/rtagent/domain.py#L652) | One durable model/tool receipt. | Application call ID, Run ID, kind/status, structured evidence, and optional result. | A receipt survives a graph-node replay and separately identifies uncertain external outcomes. |
-| [`TraceView`](../../src/rtagent/domain.py#L663) | Labeled collection of receipts. | Schema version, explicit redacted flag, and CallView list. | Sanitized evidence cannot be mistaken for an exact original request body. |
+| [`Variable`](../../src/rtagent/domain.py#L85) | Declaration for one template variable. | String/number/boolean type, required flag, and optional default. | Explicit declarations limit substitution and expose missing/type-invalid values. |
+| [`Block`](../../src/rtagent/domain.py#L93) | One configured prompt message. | Stable ID, name, role restricted to system/user/assistant, literal template, enabled flag, placement/order, variable declarations, filters, and structured condition. | Message behavior is inspectable data; runtime-created tool messages cannot be forged as preset blocks. |
+| [`Preset`](../../src/rtagent/domain.py#L109) | Editable collection of embedded blocks. | ID/name/revision plus at most 100 blocks; repository writes advance its revision. | Blocks belong to their preset aggregate, avoiding independent block repositories and synchronization machinery. |
+| [`ProviderConfig`](../../src/rtagent/domain.py#L118) | Provider options saved in configuration and Runs. | Adapter, model, Base URL, credential reference, temperature, output reservation, and optional context window. | Requests are reproducible from non-secret options while actual credentials are resolved at execution. |
+| [`MCPServer`](../../src/rtagent/domain.py#L142) | An explicitly configured external tool connection. | ID/name, stdio executable/argument array/cwd/environment references, or HTTP URL/bearer reference. | Connection permission remains local configuration; the model cannot add servers. |
+| [`ToolDefinition`](../../src/rtagent/domain.py#L179) | Frozen tool interface. | Name/description/JSON Schema, optional MCP origin, schema hash and trusted native/local writes_workspace declaration. | Snapshot schemas pin dispatch; mutator declarations supplement core read-only enforcement without trusting remote annotations. |
+| [`StudioConfig`](../../src/rtagent/domain.py#L191) | One versioned execution-settings aggregate. | Provider, allow/ask/deny, sandbox mode, three trusted runtime roots, twenty exact download hosts, MCP transports and call/time budgets. | Runtime/dependency policy is captured with every new Run; settings edits cannot change an existing snapshot. |
+| [`ToolCall`](../../src/rtagent/domain.py#L241) | Model invocation intent. | Original ID, exposed tool name, and decoded argument object. | The same model ID must be used by the resulting tool message; the receipt ID is separate. |
+| [`Message`](../../src/rtagent/domain.py#L249) | Canonical model conversation item. | Explicit role/content/source, assistant tool calls, and tool-result `tool_call_id`. | SDK-independent messages retain ordering, provenance, and call/result pairing across compilation and storage. |
+| [`CompiledPrompt`](../../src/rtagent/domain.py#L301) | Pure compiler result. | Final messages, activation report, source map, estimate/budget status, and input hash. | Inspection and execution share the same evidence rather than two prompt renderers. |
+| [`PreviewRequest`](../../src/rtagent/domain.py#L312) | Direct task submission or optional inspection request. | Session/config/preset revision references, nonempty input, variables, and at most 20 explicitly selected skills. | The application can freeze actual inputs without requiring a separate Preview UI step. |
+| [`DraftPreviewRequest`](../../src/rtagent/domain.py#L325) | Nonpersisting editor inspection input. | Inline Preset, saved settings revision, optional session/project references, possibly empty task, variables and selected skills. | Unsaved composition can be inspected without saving presets, creating history, or acquiring an execution identity. |
+| [`PromptInspection`](../../src/rtagent/domain.py#L426) | Compiled draft projection. | Hash, compiler result, prepared body, transformations and selected schemas. | Users can inspect explicit provider adaptation while the live result remains a draft, not an execution identity. |
+| [`MemoryDocument`](../../src/rtagent/domain.py#L338) | Last-read workspace note. | Relative path, content, and canonical text hash. | The editor and model tool can detect a stale replacement without a memory database. |
+| [`MemorySave`](../../src/rtagent/domain.py#L346) | Explicit memory replacement command. | Bounded content and mandatory expected hash. | An edit acknowledges the exact prior document instead of silently overwriting another Run's notes. |
+| [`SkillInfo`](../../src/rtagent/domain.py#L353) | Catalog metadata for a discovered procedure. | Name/description/path, built-in flag, and source hash; no body. | Default model context stays small and the UI can select/inspect a source. |
+| [`SkillDocument`](../../src/rtagent/domain.py#L363) | Loaded procedure source. | Inherits metadata and adds full SKILL.md text. | Full instructions enter context only through selection or load_skill; provenance stays attached. |
+| [`SkillSave`](../../src/rtagent/domain.py#L369) | Skill authoring command. | Name, short description, Markdown instructions, optional expected hash. | The file adapter owns frontmatter serialization and protected updates, rather than accepting arbitrary filesystem destinations. |
+| [`SandboxStatus`](../../src/rtagent/domain.py#L406) | OS isolation probe result. | Backend label, readiness, network label, and diagnostic detail. | UI can report a real failed sandbox without making app startup or model configuration unavailable. |
+| [`WorkspaceView`](../../src/rtagent/domain.py#L415) | Editable project context projection. | Root, actual sandbox status, selected root instruction document/hash/path, memory, Skill metadata and invalid-source diagnostics. | Prompt composition and workspace editing expose identical sources without a second configuration store. |
+| [`Preview`](../../src/rtagent/domain.py#L436) | Expiring frozen first input. | Extends PromptInspection with a saved ID and expiry. | API clients may consume this immutable record; browser live drafts instead use side-effect-free inspection and direct Run. |
+| [`StartRun`](../../src/rtagent/domain.py#L443) | Saved-preview consumption command. | Preview ID/hash and observed session revision only. | Clients cannot replace the frozen tools, settings, or prompt at execution time. |
+| [`ApprovalDecision`](../../src/rtagent/domain.py#L451) | Human decision for one pending tool call. | Literal approve/reject value; approval ID comes from the URL. | A model cannot approve a call through its generated text. |
+| [`RecoveryDecision`](../../src/rtagent/domain.py#L457) | User reconciliation of one uncertain effect. | Explicit retry or record action plus a result string. | External effects are not treated as exactly-once; callers choose whether repetition is acceptable. |
+| [`ResumeRequest`](../../src/rtagent/domain.py#L464) | Reconciliation set for a paused Run. | Mapping from application receipt IDs to RecoveryDecision. | The application requires every unknown receipt to be resolved before graph recovery. |
+| [`RunEvent`](../../src/rtagent/domain.py#L470) | Persisted browser event envelope. | Schema version, Run ID, sequence, event type, UTC timestamp, and payload. | Reconnection has a durable cursor rather than an in-memory streaming offset. |
+| [`FolderView`](../../src/rtagent/domain.py#L481) | Stored flat folder projection. | ID/name/revision/creation timestamp. | Folders organize conversations, not workspace filesystem paths. |
+| [`FolderCreate`](../../src/rtagent/domain.py#L490) | Folder creation input. | Bounded nonempty name plus normalization validator. | A minimal contract avoids nested trees or separate folder settings. |
+| [`FolderUpdate`](../../src/rtagent/domain.py#L504) | Version-bound folder rename. | Inherits creation name and adds nonnegative expected revision. | Optimistic concurrency rejects edits based on stale sidebar state. |
+| [`ProjectCreate`](../../src/rtagent/domain.py#L510) | Register a local workspace folder. | Inherit nonempty display-name validation and accept an absolute folder string checked by Studio. | Registration is a trusted user action; the model cannot alter its root through tool arguments. |
+| [`ProjectView`](../../src/rtagent/domain.py#L530) | Stored named folder projection. | Stable ID, name, canonical workspace_root and creation timestamp. | Root selection is separate from chat-organization folders and the one shared permission/config aggregate. |
+| [`SessionUpdate`](../../src/rtagent/domain.py#L554) | Partial conversation metadata command. | Expected revision plus optional title/archive/folder/project; fields_set distinguishes omission from explicit null. | Idle workspace moves affect future Runs while saved snapshots retain their original roots. |
+| [`SessionCopy`](../../src/rtagent/domain.py#L572) | Duplicate/fork command. | Revision, operation, and optional successful Run boundary. | One evidence-copy use case covers both operations without replay or checkpoint cloning. |
+| [`SessionView`](../../src/rtagent/domain.py#L626) | Committed conversation projection. | Original messages, active Run, project/folder/archive/copy metadata and active/working compaction IDs. | Effective context is a checked projection; original chat evidence stays immutable across explicit reduction. |
+| [`PlanItem`](../../src/rtagent/domain.py#L259) | One explicit task-progress item. | A nonempty bounded step label and pending/in_progress/completed status. | Small validated values support readable task progress without database-owned jobs. |
+| [`TaskPlan`](../../src/rtagent/domain.py#L266) | A complete progress receipt. | Optional bounded explanation plus one to twelve PlanItems with at most one active item. | One update replaces the displayed plan; it cannot schedule work or grant permissions. |
+| [`RunView`](../../src/rtagent/domain.py#L643) | Public execution projection. | Status/messages/approval/unknown receipts/usage, frozen workspace/preset/provider, derived validated plan and active tool output. | Chat can inspect real streamed progress without replacing final paired receipts or changing configuration. |
+| [`CallView`](../../src/rtagent/domain.py#L696) | One durable model/tool receipt. | Application call ID, Run ID, kind/status, structured evidence, and optional result. | A receipt survives a graph-node replay and separately identifies uncertain external outcomes. |
+| [`TraceView`](../../src/rtagent/domain.py#L707) | Labeled collection of receipts. | Schema version, explicit redacted flag, and CallView list. | Sanitized evidence cannot be mistaken for an exact original request body. |
 
 ### Contract field definitions
 
 Field declarations below are extracted from the reviewed source. `Field(...)` bounds apply during validation; method-specific checks such as condition grammar and file hashes occur later. The contracts are data shapes, not database tables with identical columns. `ConfigDict` is base-model behavior, not a user-supplied field.
+
+**ErrorInfo**
+
+```python
+code: str
+message: str
+details: Any = None
+request_id: str
+```
+
+**ErrorEnvelope**
+
+```python
+error: ErrorInfo
+```
 
 **Variable**
 
@@ -395,6 +411,20 @@ expected_revision: int = Field(ge=0)
 workspace_root: str = Field(min_length=1, max_length=4096)
 ```
 
+**FolderPickerRequest**
+
+```python
+initial_path: str = Field(default='', max_length=4096)
+```
+
+**FolderSelection**
+
+```python
+status: Literal['selected', 'cancelled', 'unavailable']
+path: str | None = None
+detail: str | None = None
+```
+
 **ProjectView**
 
 ```python
@@ -402,6 +432,13 @@ id: str
 name: str
 workspace_root: str
 created_at: str
+```
+
+**SessionCreate**
+
+```python
+title: str = Field(default='New investigation', min_length=1, max_length=120)
+project_id: str | None = None
 ```
 
 **SessionUpdate**
@@ -566,7 +603,7 @@ def now() -> str
 def digest(value: Any) -> str
 def credential_reference(value: str) -> str
 def endpoint_url(value: str) -> str
-def AppError.__init__(self, code: str, message: str, status: int=422, details: Any=None)
+def AppError.__init__(self, code: str, message: str, status: int=422, details: Any=None) -> None
 def ProviderConfig.credential_name(cls, value: str) -> str
 def ProviderConfig.safe_url(cls, value: str) -> str
 def MCPServer.credential_name(cls, value: str) -> str
@@ -577,6 +614,7 @@ def TaskPlan.one_active_step(self) -> 'TaskPlan'
 def latest_plan(messages: list[Message]) -> TaskPlan | None
 def SkillPackage.bounded_files(cls, value: dict[str, str]) -> dict[str, str]
 def FolderCreate.nonempty_name(cls, value: str) -> str
+def SessionCreate.nonempty_title(cls, value: str) -> str
 def SessionUpdate.nonempty_title(cls, value: str | None) -> str | None
 ```
 
@@ -743,11 +781,21 @@ These are signature listings; qualified names identify ownership and are not exe
 
 | Type / source | Purpose | Representation / behavior | Why / architectural role |
 | --- | --- | --- | --- |
-| [`PresetPackage`](../../src/rtagent/domain.py#L363) | Versioned reusable prompt data. | Literal rtagent.preset.v1 plus the full typed Preset. | Transfer editable instructions without credentials, Run state or permission configuration. |
-| [`SkillPackage`](../../src/rtagent/domain.py#L370) | Versioned reusable procedure resources. | Literal rtagent.skill.v1, a validated lowercase hyphenated name and a bounded path-to-text mapping. | Supporting resources travel with a procedure; content never becomes automatically executed code. |
-| [`CompactRequest`](../../src/rtagent/domain.py#L536) | Explicit summarization command. | Observed session/config revisions and one to ten recent turns to keep verbatim. | The application chooses a complete-turn prefix, with no hidden automatic trimming. |
-| [`ContextRestore`](../../src/rtagent/domain.py#L544) | Explicit return to full original history. | One expected session revision. | Deactivating derived context preserves both source evidence and reduction records. |
-| [`CompactionView`](../../src/rtagent/domain.py#L550) | Summary lifecycle and provenance projection. | ID/owner/status/time, source revision/count/hash, text, copy provenance, safe error and usage/call counts. | Ordinary UI lists do not transfer full model request bodies. |
-| [`ContextView`](../../src/rtagent/domain.py#L567) | History-only context accounting. | Original/effective message and byte-estimated token counts, configured window/output reservation and summary lifecycle records. | Separate history estimates from compiler estimates that include instructions/tools; neither is actual provider usage. |
-| [`ProcessInput`](../../src/rtagent/domain.py#L624) | One explicit pipe action. | Bounded text plus an EOF flag; the live controller also enforces an 8 KiB UTF-8 byte cap. | EOF and queued input are observable user/tool actions, without implicit interactive terminal behavior. |
-| [`ProcessView`](../../src/rtagent/domain.py#L631) | Durable native-process projection. | Stable ownership/root/mode/command, status/PID, bounded output, stdin state and final result/error. | A PID is evidence, not authority to control arbitrary host processes or restart abandoned work. |
+| [`PresetPackage`](../../src/rtagent/domain.py#L378) | Versioned reusable prompt data. | Literal rtagent.preset.v1 plus the full typed Preset. | Transfer editable instructions without credentials, Run state or permission configuration. |
+| [`SkillPackage`](../../src/rtagent/domain.py#L385) | Versioned reusable procedure resources. | Literal rtagent.skill.v1, a validated lowercase hyphenated name and a bounded path-to-text mapping. | Supporting resources travel with a procedure; content never becomes automatically executed code. |
+| [`CompactRequest`](../../src/rtagent/domain.py#L580) | Explicit summarization command. | Observed session/config revisions and one to ten recent turns to keep verbatim. | The application chooses a complete-turn prefix, with no hidden automatic trimming. |
+| [`ContextRestore`](../../src/rtagent/domain.py#L588) | Explicit return to full original history. | One expected session revision. | Deactivating derived context preserves both source evidence and reduction records. |
+| [`CompactionView`](../../src/rtagent/domain.py#L594) | Summary lifecycle and provenance projection. | ID/owner/status/time, source revision/count/hash, text, copy provenance, safe error and usage/call counts. | Ordinary UI lists do not transfer full model request bodies. |
+| [`ContextView`](../../src/rtagent/domain.py#L611) | History-only context accounting. | Original/effective message and byte-estimated token counts, configured window/output reservation and summary lifecycle records. | Separate history estimates from compiler estimates that include instructions/tools; neither is actual provider usage. |
+| [`ProcessInput`](../../src/rtagent/domain.py#L668) | One explicit pipe action. | Bounded text plus an EOF flag; the live controller also enforces an 8 KiB UTF-8 byte cap. | EOF and queued input are observable user/tool actions, without implicit interactive terminal behavior. |
+| [`ProcessView`](../../src/rtagent/domain.py#L675) | Durable native-process projection. | Stable ownership/root/mode/command, status/PID, bounded output, stdin state and final result/error. | A PID is evidence, not authority to control arbitrary host processes or restart abandoned work. |
+
+### Types and ownership
+
+| Type / source | Purpose | Representation / behavior | Why / architectural role |
+| --- | --- | --- | --- |
+| [`ErrorInfo`](../../src/rtagent/domain.py#L70) | Stable public failure details. | Typed code/message/details/request_id fields describe known and internal errors. | HTTP/OpenAPI/client projections agree while diagnostic identity stays separate from submitted values. |
+| [`ErrorEnvelope`](../../src/rtagent/domain.py#L79) | HTTP failure response shape. | Wrap one ErrorInfo under error using the common extra-forbid contract. | A generated client can handle validation and business failures consistently without importing FastAPI into the domain. |
+| [`FolderPickerRequest`](../../src/rtagent/domain.py#L516) | Explicit desktop selection input. | Bounded optional initial_path defaults to an empty string. | Selecting a path is an intentional user action, independent of registration and agent permissions. |
+| [`FolderSelection`](../../src/rtagent/domain.py#L522) | Desktop chooser outcome. | selected/cancelled/unavailable plus nullable canonical path and detail. | Cancellation preserves the current field; only an unavailable desktop requires manual entry. |
+| [`SessionCreate`](../../src/rtagent/domain.py#L539) | New conversation input shared by adapters. | Bounded nonempty title and nullable registered project_id. | Transport-neutral contracts select existing workspace registrations without arbitrary model-controlled roots. |

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Plus, RefreshCw, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { request, errorMessage, type Bootstrap, type Config } from './api/client';
 import { ToolCatalog } from './ToolCatalog';
+import { useDialogFocus } from './useDialogFocus';
 
 /** Edit one versioned settings aggregate and explicitly discover configured MCP servers. */
 export function Settings({
@@ -17,6 +18,10 @@ export function Settings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocus(dialogRef, true, () => {
+    if (!busy) onClose();
+  });
   const provider = draft.provider;
   const setProvider = (patch: Partial<Config['provider']>) =>
     setDraft({ ...draft, provider: { ...provider, ...patch } });
@@ -44,10 +49,12 @@ export function Settings({
     <div
       className="modal-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className="settings-modal"
         role="dialog"
         aria-modal="true"
@@ -56,7 +63,12 @@ export function Settings({
         <header className="modal-heading">
           <SlidersHorizontal size={18} />
           <h2 id="settings-title">Workspace settings</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close settings">
+          <button
+            className="icon-button"
+            disabled={busy}
+            onClick={onClose}
+            aria-label="Close settings"
+          >
             <X size={19} />
           </button>
         </header>

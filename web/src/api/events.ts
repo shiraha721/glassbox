@@ -35,6 +35,7 @@ export function useRunEvents(runId: string | undefined, enabled: boolean): void 
       void cache.invalidateQueries({ queryKey: ['bootstrap'] });
       void cache.invalidateQueries({ queryKey: ['trace', runId] });
       void cache.invalidateQueries({ queryKey: ['processes'] });
+      void cache.invalidateQueries({ queryKey: ['context'] });
     };
     const receive = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as RunEvent;
@@ -43,6 +44,8 @@ export function useRunEvents(runId: string | undefined, enabled: boolean): void 
       // Coalesce token events into state reads instead of racing one request per token.
       timer ??= setTimeout(refresh, 80);
       if (['run.completed', 'run.failed', 'run.cancelled'].includes(event.type)) {
+        if (timer) clearTimeout(timer);
+        refresh();
         // Tool writes can change memory and the skill catalog for the next turn.
         void cache.invalidateQueries({ queryKey: ['workspace'] });
         source.close();
@@ -52,6 +55,9 @@ export function useRunEvents(runId: string | undefined, enabled: boolean): void 
     return () => {
       source.close();
       if (timer) clearTimeout(timer);
+      // A status read can finish the Run before its last SSE event arrives. Flush the final
+      // projection refresh on unsubscribe so active_run_id/revision cannot remain stale.
+      refresh();
     };
   }, [runId, enabled, cache]);
 }

@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderOpen, Plus, X } from 'lucide-react';
 import { request, type Project } from './api/client';
+import { DirectoryField } from './DirectoryField';
+import { useDialogFocus } from './useDialogFocus';
 
 /** Select named local folders and register projects without copying their workspace contents. */
 export function Projects({
@@ -26,6 +28,11 @@ export function Projects({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [root, setRoot] = useState('');
+  const [picking, setPicking] = useState(false);
+  const dialogRef = useRef<HTMLFormElement>(null);
+  useDialogFocus(dialogRef, open, () => {
+    if (!busy && !picking) setOpen(false);
+  });
   const submit = async () => {
     const created = await request<Project>('/projects', 'POST', {
       name: name.trim(),
@@ -82,20 +89,17 @@ export function Projects({
       </section>
       {open &&
         createPortal(
-          <div
-            className="modal-backdrop"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape' && !busy) setOpen(false);
-            }}
-          >
+          <div className="modal-backdrop">
             <form
+              ref={dialogRef}
+              tabIndex={-1}
               className="history-dialog"
               role="dialog"
               aria-modal="true"
               aria-labelledby="project-title"
               onSubmit={(event) => {
                 event.preventDefault();
-                void onAction(submit);
+                if (!busy && !picking) void onAction(submit);
               }}
             >
               <div className="row-between">
@@ -104,7 +108,7 @@ export function Projects({
                   type="button"
                   className="icon-button"
                   aria-label="Close project dialog"
-                  disabled={busy}
+                  disabled={busy || picking}
                   onClick={() => setOpen(false)}
                 >
                   <X size={16} />
@@ -113,7 +117,6 @@ export function Projects({
               <label>
                 Project name
                 <input
-                  autoFocus
                   required
                   maxLength={120}
                   value={name}
@@ -121,19 +124,24 @@ export function Projects({
                   disabled={busy}
                 />
               </label>
-              <label>
-                Workspace folder
-                <input
-                  required
-                  value={root}
-                  onChange={(event) => setRoot(event.target.value)}
-                  placeholder="D:\Projects\my-app"
-                  disabled={busy}
-                />
-              </label>
+              <DirectoryField
+                value={root}
+                initialPath={defaultRoot}
+                disabled={busy}
+                onBusyChange={setPicking}
+                onChange={(path) => {
+                  setRoot(path);
+                  if (!name.trim())
+                    setName(
+                      path
+                        .replace(/[\\/]+$/, '')
+                        .split(/[\\/]/)
+                        .at(-1) || 'Project',
+                    );
+                }}
+              />
               <p className="subtle">
-                Use an existing absolute folder path. New conversations use its files, instructions,
-                memory, and Skills. Tool access follows Settings.
+                Conversations use this folder's files, instructions, memory and Skills.
               </p>
               {error && (
                 <p role="alert" className="error-text">
@@ -144,7 +152,7 @@ export function Projects({
                 <button
                   type="button"
                   className="button"
-                  disabled={busy}
+                  disabled={busy || picking}
                   onClick={() => setOpen(false)}
                 >
                   Cancel
@@ -152,7 +160,7 @@ export function Projects({
                 <button
                   type="submit"
                   className="button primary"
-                  disabled={busy || !name.trim() || !root.trim()}
+                  disabled={busy || picking || !name.trim() || !root.trim()}
                 >
                   Add project
                 </button>

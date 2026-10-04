@@ -6,7 +6,7 @@ The target is an extensible everyday agent harness in the scope of [pi](https://
 
 ## Current status
 
-As of 2026-10-04, Stages 1–4 are implemented; the Windows daily-agent and extensible-harness workflows are accepted:
+As of 2026-10-05, Stages 1–4 are implemented; the Windows daily-agent and extensible-harness workflows are accepted:
 
 - Direct **Run**, streaming replies, persistent conversations, cancellation, approval, and checkpoint recovery. Preview is optional.
 - Prompt blocks with roles, ordering, conditions, variables, and source mapping; live draft inspection, including empty task input; immutable Run inputs.
@@ -14,7 +14,7 @@ As of 2026-10-04, Stages 1–4 are implemented; the Windows daily-agent and exte
 - OpenAI-compatible Chat Completions with configurable Base URL, model, and server-side API key. The real adapter is the default; a missing model produces a configuration error.
 - Twenty native tools: file/search/read/instructions, guarded writes/patches, plans, native commands, memory/Skills, background process/poll/input/stop, controlled downloads and approval-check echo.
 - Native Windows PowerShell execution in AppContainer, or Linux Bash in bubblewrap. Chat shows patch diffs and recorded task progress; Tools shows grouped schemas and effective permissions.
-- Named Projects bind conversations to local workspace folders, with project-specific instructions, files, commands, memory, and Skills. Bundled procedures include skill-creator, debugging, and code-review.
+- Named Projects bind conversations to local workspace folders, with project-specific instructions, files, commands, memory, and Skills. Registration opens the native system folder dialog; manual entry appears only when it is unavailable. Bundled procedures include skill-creator, debugging, and code-review.
 - Five editable presets: Security analysis, General agent, Coding, Debugging, and Code review. Recorded environment context tells the model its actual root, command language, tool exposure, and limits.
 - Stateless stdio/Streamable HTTP MCP, per-tool permissions, captured requests, tool results, usage, and redacted exports.
 - Explicit context compaction/accounting/restoration with original history preserved; native command output streams before completion and background commands accept bounded UTF-8 pipe input/EOF.
@@ -24,6 +24,8 @@ As of 2026-10-04, Stages 1–4 are implemented; the Windows daily-agent and exte
 Real-model acceptance completed multi-file coding, actual sandbox checks, Skill creation, evidence-based security analysis, and memory/Skill reuse after restart in a registered project. The final acceptance captured 35 model requests and 70 tool calls. Separate real HTTP checks verify native isolation, read-only mode, cancellation, project boundaries, and conversation management. See [Stage 2 acceptance](acceptance-stage2.md) for scenarios, evidence, commands, and limits.
 
 The subsequent [Codex capability review](codex-gap-review.md) closes concrete tool/prompt gaps. Its separate real-model acceptance captured 14 requests and 26 tool calls for hash-guarded multi-file repair and a read-only vulnerability review. Stage 3/4 acceptance added **41 real model requests and 63 tool calls** for multi-file CSV repair, background worker input/cleanup, three-call context reduction, continued CLI implementation, restarted approval and a real embedded extension. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md) and [Harness interfaces](harness.md). External Claude and Linux-native acceptance remain separate unperformed checks.
+
+The [2026-10-05 code and architecture review](review-2026-10-05.md) adds native folder selection and fixes submission retries, event completion, process-input races, shutdown, error contracts and dialog interaction. It records actual service/native acceptance separately from earlier real-model workloads.
 
 See [Architecture](architecture.md) for the whole-system design and the [Architecture Reference](reference/README.md) for every module, class, function, callback, and dependency role. The [Development Guide](development.md) defines repository conventions. [AGENTS.md](../AGENTS.md) is the root entry point for coding agents.
 
@@ -95,7 +97,7 @@ MCP servers run **outside the command sandbox**, under their configured transpor
 
 ## Projects and workspace selection
 
-Use **Projects → Add project** in the sidebar, enter a name and an existing absolute folder path, then select it. Each Project has one workspace root. New conversations use that folder for file tools, sandbox commands, AGENTS.md, .rtagent/MEMORY.md, and .agents/skills. Tool permissions, model settings, and limits remain shared in Settings; workspace-write permits native writes, and read-only removes model mutation tools.
+Use **Projects → Add project → Choose folder** in the sidebar. Windows opens Explorer's system folder dialog; a Linux desktop uses installed zenity or kdialog. The selected path suggests a project name that you can edit before adding it. Cancellation preserves the existing field. If desktop selection is unavailable, enter an existing absolute path manually. Each Project has one workspace root. Selecting a different Project opens a new draft; choose an existing conversation explicitly to continue its history. New conversations use that folder for file tools, sandbox commands, AGENTS.md, .rtagent/MEMORY.md, and .agents/skills. Tool permissions, model settings, and limits remain shared in Settings; workspace-write permits native writes, and read-only removes model mutation tools.
 
 **Default workspace** uses STUDIO_WORKSPACE_ROOT for existing conversations without a Project. The conversation menu's **Change workspace** moves an idle conversation to a saved Project or back to the default root. Future Runs use the new root; historical Runs and copied evidence keep their original roots. Finish/cancel active work before moving it. Duplicate/fork preserves the selected Project; workspace files are shared, not copied.
 
@@ -168,13 +170,14 @@ uv run python scripts/smoke_projects.py
 uv run python scripts/smoke_agent_tools.py
 uv run python scripts/smoke_stage3.py
 uv run python scripts/smoke_stage4.py
+uv run python scripts/smoke_desktop.py --native
 ```
 
 It temporarily binds port 8766 and uses a disposable workspace with an explicitly simulated model. It exercises Windows AppContainer/PowerShell or Linux bubblewrap/Bash. It verifies direct Run retry identity, actual command/file operations, hidden host paths, network isolation, memory/Skills, context provenance, read-only enforcement, and cancellation cleanup. It does not call a model service or modify the selected user workspace.
 
 The conversation check uses port 8767 with separate temporary data. It verifies fork boundaries, duplicate traces and provenance, stale-edit rejection, archive/restore, folder rename/delete, and continuing a fork after deleting its source.
 
-The project check uses port 8769 and sibling temporary folders to verify project-bound files, commands, instructions, memory, Skills, idle moves, frozen Run roots, and busy-session rejection.
+The project check uses port 8769 and sibling temporary folders to verify project-bound files, commands, instructions, memory, Skills, idle moves, frozen Run roots, and busy-session rejection. The desktop check uses port 8776 and isolated folders. On Windows, `--native` opens and operates only its owned system dialogs to verify selection, cancellation, disconnect and shutdown; omit that option on a headless machine. It also verifies typed errors and explicit Skill authoring under agent read-only settings.
 
 The agent-tool check uses port 8770. It verifies actual search exclusions, ranged reads and full hashes, nested instruction priority, Add/Update/Delete patches, stale/ambiguous rejection, line-ending preservation, read-only enforcement, native commands, and plan persistence/copies/restart.
 
@@ -199,6 +202,7 @@ npm --prefix web run typecheck
 npm --prefix web run test -- --run
 npm --prefix web run format:check
 npm --prefix web run build
+uv run python scripts/check_docs.py
 ```
 
 Browser checks use a separate backend and temporary data. Build first, then run `npx playwright install chromium` and `npm run test:e2e` from web/. Offline checks do not replace acceptance against a real model.

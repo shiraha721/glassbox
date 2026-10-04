@@ -2,12 +2,12 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 from anyio import CancelScope
 from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import Field
 
 from rtagent.domain import (
     ApprovalDecision,
@@ -17,7 +17,10 @@ from rtagent.domain import (
     ContextView,
     Contract,
     DraftPreviewRequest,
+    ErrorEnvelope,
     FolderCreate,
+    FolderPickerRequest,
+    FolderSelection,
     FolderUpdate,
     FolderView,
     MemoryDocument,
@@ -35,6 +38,7 @@ from rtagent.domain import (
     RunEvent,
     RunView,
     SessionCopy,
+    SessionCreate,
     SessionUpdate,
     SessionView,
     SkillDocument,
@@ -46,42 +50,61 @@ from rtagent.domain import (
     TraceView,
     WorkspaceView,
 )
-from rtagent.packages import export_skill, import_preset, import_skill
 from rtagent.processes import process_view
 from rtagent.storage import TERMINAL
 from rtagent.tracing import redact
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(
+    prefix="/api/v1",
+    responses={status: {"model": ErrorEnvelope} for status in (403, 404, 409, 422, 500)},
+)
+
+
+@router.post("/desktop/folder-picker", response_model=FolderSelection)
+async def pick_folder(body: FolderPickerRequest, request: Request) -> FolderSelection:
+    """Open the local OS dialog and dismiss it when its requesting browser disconnects."""
+    task = asyncio.create_task(request.app.state.folder_picker.choose(body.initial_path))
+    try:
+        while not task.done():
+            await asyncio.wait({task}, timeout=0.2)
+            if await request.is_disconnected():
+                task.cancel()
+                return FolderSelection(status="cancelled")
+        return await task
+    except asyncio.CancelledError:
+        if task.cancelled():
+            return FolderSelection(status="cancelled")
+        raise
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @router.get("/presets/{preset_id}/export", response_model=PresetPackage)
 async def preset_export(preset_id: str, request: Request) -> PresetPackage:
     """Export the saved prompt aggregate, excluding all configuration and execution evidence."""
-    return PresetPackage(preset=await request.app.state.studio.repository.preset(preset_id))
+    return await request.app.state.studio.export_preset(preset_id)
 
 
 @router.post("/presets/import", response_model=Preset, status_code=201)
 async def preset_import(body: PresetPackage, request: Request) -> Preset:
     """Save a reusable prompt as a new independent aggregate with fresh block IDs."""
-    return await request.app.state.studio.repository.save_preset(import_preset(body))
+    return await request.app.state.studio.import_preset(body)
 
 
 @router.get("/workspace/skills/{name}/export", response_model=SkillPackage)
 async def skill_export(name: str, request: Request, project_id: str | None = None) -> SkillPackage:
     """Export one selected workspace's Skill and bounded supporting files."""
-    registry = await request.app.state.studio.workspace_registry(project_id)
-    return await asyncio.to_thread(export_skill, registry.files, name)
+    return await request.app.state.studio.export_skill(name, project_id)
 
 
 @router.post("/workspace/skills/import", response_model=SkillDocument, status_code=201)
-async def skill_import(body: SkillPackage, request: Request, project_id: str | None = None) -> dict:
+async def skill_import(
+    body: SkillPackage, request: Request, project_id: str | None = None
+) -> SkillDocument:
     """Publish a new Skill only after all source paths and its entry document are validated."""
-    registry = await request.app.state.studio.workspace_registry(project_id)
-    from rtagent.domain import AppError
-
-    if (await request.app.state.studio.repository.config()).sandbox_mode == "read-only":
-        raise AppError("tool_denied", "The workspace is read-only.", 403)
-    return await asyncio.to_thread(import_skill, registry.files, body)
+    return await request.app.state.studio.import_skill(body, project_id)
 
 
 @router.get("/runs/{run_id}/event-log", response_model=list[RunEvent])
@@ -114,13 +137,6 @@ async def process_input(
 async def stop_process(session_id: str, identifier: str, request: Request) -> ProcessView:
     """Wait for native cleanup before returning the user's stop action."""
     return await request.app.state.studio.registry.processes.stop(identifier, session_id)
-
-
-class SessionCreate(Contract):
-    """Optional display title for a new empty conversation."""
-
-    title: str = Field(default="New investigation", min_length=1, max_length=120)
-    project_id: str | None = None
 
 
 class Bootstrap(Contract):
@@ -401,7 +417,7 @@ async def export(run_id: str, request: Request) -> Response:
 )
 async def run_events(
     run_id: str, request: Request, after: int = 0, last_event_id: str | None = Header(default=None)
-):
+) -> StreamingResponse:
     """Replay persisted SSE events; browser reconnection never resumes execution."""
     from rtagent.domain import AppError
 
@@ -414,7 +430,8 @@ async def run_events(
     if cursor < 0 or cursor > run["latest_event_seq"]:
         raise AppError("event_cursor", "Reload the Run snapshot before reconnecting.", 410)
 
-    async def stream():
+    async def stream() -> AsyncIterator[str]:
+        """Replay bounded committed event pages until terminal state or browser disconnect."""
         nonlocal cursor
         ticks = 0
         while not await request.is_disconnected():

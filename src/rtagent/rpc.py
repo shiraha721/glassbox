@@ -168,6 +168,13 @@ async def serve_rpc(client: AgentClient) -> None:
                     ),
                 },
             }
+        except Exception:
+            # One failed operation must not break framing for every subsequent client request.
+            response = {
+                "jsonrpc": "2.0",
+                "id": identifier,
+                "error": {"code": -32603, "message": "Internal error."},
+            }
         sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
         sys.stdout.flush()
         if len(line) > LINE_LIMIT:

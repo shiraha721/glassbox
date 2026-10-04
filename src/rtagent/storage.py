@@ -160,7 +160,7 @@ def _session_view(row: Any) -> dict[str, Any]:
 class Repository:
     """Persist business data with short SQLite transactions and serialized writers."""
 
-    def __init__(self, database_url: str):
+    def __init__(self, database_url: str) -> None:
         """Configure the async engine and SQLite integrity settings."""
         self.url = database_url
         self.on_event: EventHook | None = None
@@ -168,7 +168,8 @@ class Repository:
         self.lock = asyncio.Lock()
 
         @event.listens_for(self.engine.sync_engine, "connect")
-        def configure_sqlite(connection, _record):
+        def configure_sqlite(connection: Any, _record: Any) -> None:
+            """Apply SQLite connection-level integrity and local concurrency settings."""
             cursor = connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA journal_mode=WAL")
@@ -966,6 +967,7 @@ class Repository:
 
     async def list_runs(self, session_id: str) -> list[dict[str, Any]]:
         """Read conversation Runs in creation order."""
+        await self.session(session_id)
         async with self.engine.connect() as connection:
             return [
                 dict(row)

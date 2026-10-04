@@ -18,6 +18,7 @@ from rtagent.domain import (
     MemorySave,
     Message,
     Preset,
+    PresetPackage,
     Preview,
     PreviewRequest,
     ProjectCreate,
@@ -26,6 +27,7 @@ from rtagent.domain import (
     ResumeRequest,
     RunView,
     SkillDocument,
+    SkillPackage,
     SkillSave,
     StartRun,
     StudioConfig,
@@ -34,6 +36,7 @@ from rtagent.domain import (
     latest_plan,
     uid,
 )
+from rtagent.packages import export_skill, import_preset, import_skill
 from rtagent.prompts import compile_prompt
 from rtagent.providers import prepare, transformations
 from rtagent.runtime import Runner
@@ -210,6 +213,28 @@ class Studio:
         registry = await self.workspace_registry(project_id)
         await asyncio.to_thread(registry.files.save_skill, **request.model_dump())
         return await self.skill(request.name, project_id)
+
+    async def export_preset(self, identifier: str) -> PresetPackage:
+        """Package saved prompt data without settings, credentials or execution evidence."""
+        return PresetPackage(preset=await self.repository.preset(identifier))
+
+    async def import_preset(self, package: PresetPackage) -> Preset:
+        """Create independent prompt and block identities through the ordinary preset writer."""
+        return await self.repository.save_preset(import_preset(package))
+
+    async def export_skill(self, name: str, project_id: str | None = None) -> SkillPackage:
+        """Read a bounded Skill package from the selected workspace, off the event loop."""
+        registry = await self.workspace_registry(project_id)
+        return await asyncio.to_thread(export_skill, registry.files, name)
+
+    async def import_skill(
+        self, package: SkillPackage, project_id: str | None = None
+    ) -> SkillDocument:
+        """Publish an explicitly user-authored package under the same rules as the Skill editor."""
+        registry = await self.workspace_registry(project_id)
+        return SkillDocument.model_validate(
+            await asyncio.to_thread(import_skill, registry.files, package)
+        )
 
     async def _prepare(
         self,
