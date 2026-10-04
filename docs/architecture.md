@@ -21,7 +21,7 @@ This page explains the system's shape, resource ownership, data flow, and design
 
 The product takes a task, composes its initial model input from visible configuration and workspace context, executes one bounded agent loop, and preserves the evidence. A conversation organizes turns; each new turn creates a Run with its own immutable input and graph thread. Prompt editing is one way to control those inputs. It does not replace the task-to-execution workflow.
 
-The system has four concrete external boundaries: the browser talks to local HTTP/SSE; a model adapter talks to an explicitly configured endpoint; native command tools execute inside an OS sandbox; MCP talks to explicitly configured external processes/services. SQLite and ordinary context files are local persistence. Those boundaries have different permissions and lifetimes, so treating them as one universal plugin or sandbox would misdescribe the implementation.
+The browser and attached clients talk to local HTTP; model adapters talk to explicitly configured endpoints; native commands execute inside an OS sandbox; MCP talks to explicit external processes/services; bounded downloads have a separate public HTTPS boundary. Trusted local Python handlers execute inside the application. SQLite and ordinary context files are local persistence. Permissions and lifetimes differ across these paths, so one universal plugin/sandbox abstraction would misdescribe the implementation.
 
 ### Actual repository layout
 
@@ -32,17 +32,25 @@ src/rtagent/                    One installable Python package
   config.py                    Process environment/paths and secret references
   api.py                       HTTP routes, validated contracts, SSE serialization
   application.py               Studio use cases and Run command coordination
+  harness.py                   Shared Web/embedded lifecycle and typed Run facade
+  client.py, cli.py, rpc.py     Existing-service HTTP attachment, CLI and newline JSON-RPC
   domain.py                    Strict data contracts and canonical utility values
   prompts.py                   Pure compilation, conditions, variables, source mapping
   patches.py                   Pure Add/Update/Delete parsing and exact text hunks
   policies.py                  Frozen-schema argument validation and allow/ask/deny
   runtime.py                   Explicit LangGraph loop, tasks, budgets, receipts/reentry
   providers.py                 LangChain adapter, prepared/captured requests, fake stream
+  anthropic.py                 Explicit Messages text/tool serializer and SSE parser
+  context.py                   Source-bound no-tools compaction and usage receipts
+  hooks.py, execution.py       Trusted callbacks and per-dispatch Run/session ownership
   tools.py                     Native schemas, stateless MCP lifecycle, one-call dispatch
   workspace.py                 Guarded files and file-backed instructions/memory/Skills
   sandbox.py                   Linux bubblewrap/Bash and process-group cleanup
   windows_sandbox.py           Win32 AppContainer/PowerShell/Job Object lifecycle
   sandbox_files.py             Windows filtered copy and conflict-checked reconciliation
+  command_io.py, processes.py  Bounded live pipes/output and original native process ownership
+  toolchains.py, downloads.py  Trusted read-only runtime staging and pinned public HTTPS transfer
+  packages.py                  New-identity preset and validated Skill data import/export
   storage.py                   SQLAlchemy Core tables/transactions/events/copies
   tracing.py                   Sanitized evidence copies
   skills/skill-creator/         Packaged SKILL.md resource
@@ -60,6 +68,9 @@ web/src/                       React presentation and local editor state
   ToolCatalog.tsx             Grouped schemas and effective permission inspection
   TaskPlan.tsx                Recorded progress within its owning Run
   WorkspacePanel.tsx           Memory/skill editors and sandbox inspection
+  ContextPanel.tsx             Explicit compaction/accounting/restoration
+  ProcessesPanel.tsx           Owned output, pipe input/EOF and Stop
+  PackageActions.tsx           Shared explicit JSON data import/export
   api/client.ts                Same-origin JSON transport and generated type aliases
   api/events.ts                Persistent event subscription/query invalidation
   api/generated.ts             Generated type-only OpenAPI contract
@@ -281,7 +292,7 @@ Variables use declared names such as {{task_type}}, with string/number/boolean t
 
 Estimates use serialized bytes divided by four. A configured context window reserves output and rejects estimated overflow; unknown context remains unverified. There is no implicit trimming. Actual provider usage is separate and unknown values stay null.
 
-Five built-in presets use six independent editable common blocks and one task-focus block. They influence how the model works, not which tools it is allowed to execute. `Repository.initialize` seeds only missing presets and upgrades only exact unchanged historical Security analysis starters. The application adds `runtime:environment` to captured context: root, OS/native command language, configured sandbox mode, no-network command behavior, actual tool names and file/search/patch limits. This message appears in Preview, the snapshot and every canonical model request; it is not an unrecorded system instruction or a claim that a readiness probe passed.
+Five built-in presets use six independent editable common blocks and one task-focus block. They influence how the model works, not which tools it is allowed to execute. `Repository.initialize` seeds missing presets and upgrades only exact unchanged shipped fingerprints (including historical Security starters). Common blocks now describe pipes/background deadlines, trusted runtimes, explicit download policy and the uncertainty of derived history. The application adds `runtime:environment` to captured context: root, OS/native command language, sandbox mode, no-network command behavior, actual tool names, bounds, configured runtime roots/packages/download hosts and process semantics. This message appears in Preview, the snapshot and every canonical model request; it is not an unrecorded system instruction or a claim that a readiness probe passed.
 
 ## Workspace context, memory, and Skills
 
@@ -299,7 +310,7 @@ save_skill writes validated frontmatter and Markdown instructions; updates requi
 
 The model receives frozen schemas selected from the configured permission map and available catalog. Read-only mode excludes native mutation tools. Each call is JSON-schema checked and evaluated as allow, ask, or deny before effects occur. Prompt, memory, Skill, and tool-result text cannot broaden permissions.
 
-The fifteen native tools are list_files, search_files, search_text, read_text, read_instructions, write_text, edit_text, apply_patch, update_plan, powershell (Windows) or bash (Linux), read_memory, save_memory, load_skill, save_skill, and echo. The [workspace reference](reference/backend-workspace.md#native-tool-surface) lists argument/result contracts and bounds. Tools and Settings show the same catalog; read-only badges reflect actual native exposure rules, while the backend independently enforces them at dispatch.
+The twenty native tools are list_files, search_files, search_text, read_text, read_instructions, write_text, edit_text, apply_patch, update_plan, powershell (Windows) or bash (Linux), read_memory, save_memory, load_skill, save_skill, echo, start_process, poll_process, send_process_input, stop_process and fetch_url. The [workspace reference](reference/backend-workspace.md#native-tool-surface) lists contracts and bounds. Tools/Settings use the same catalog; the backend independently checks native and trusted-local mutator declarations in read-only mode.
 
 File tools require relative paths and reject traversal, links/junctions, credential paths, Git metadata, runtime data, and dependency directories. UTF-8 files and serialized outputs are bounded. Replacement uses a content hash; edits require one exact match. These application checks assume a non-hostile concurrent host environment.
 
@@ -317,7 +328,7 @@ BashSandbox runs only on Linux. Bubblewrap creates private mount/process/network
 
 Both paths use explicit host process arguments, bounded retained output, no inherited credentials, and cleanup before returning a result. Only the command supplied to the chosen shell is executable script. Results include stdout/stderr, exit code, timeout/truncation, and sandbox metadata. Timeout can leave partial edits. Missing OS support fails without unrestricted fallback. Startup upgrades the old Windows bash permission to powershell, preserving allow/ask/deny and creating a new settings revision; existing Run snapshots are unchanged. Resuming an old Bash call on Windows reports that its tool is unavailable.
 
-Network allowlists, interactive terminals, background jobs, disk quotas, and automatic import of host development toolchains remain future work. See [AppContainer isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer) for the Windows boundary.
+Background commands, explicit UTF-8 pipe input and streamed output use these same boundaries. Full PTY/ConPTY terminals, general shell networking, disk quotas and automatic host-toolchain import are outside Stage 3. See [AppContainer isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer) for the Windows boundary.
 
 MCP is outside the command sandbox: explicitly configured host processes or HTTP services use fresh SDK sessions per discovery/call. Namespaced schema hashes are checked before execution. Changed schemas stop the call, credentials use environment references, and new tools default to denied. Stateful analysis sessions are deferred.
 
@@ -333,7 +344,7 @@ The real Chat Completions adapter is default; a blank model fails clearly. Expli
 
 ## Persistence, API, and UI
 
-SQLite tables: settings, presets, conversation_folders, projects, sessions, previews, runs, events, calls. Alembic manages these; LangGraph manages its separate checkpoint database. Memory/Skills are files and plans derive from existing messages, so these capabilities need no business-table migration. UTC timestamps, stable IDs, and schema versions identify records.
+SQLite tables: settings, presets, conversation_folders, projects, sessions, previews, runs, events, calls, compactions and processes. Alembic manages these; LangGraph manages its separate checkpoint database. Migration 0005 creates the two new receipt tables and adds session selection/reservation columns in place, preserving existing parent rows and FK-owned history. Memory/Skills are files and plans derive from existing messages. UTC timestamps, stable IDs, and schema versions identify records.
 
 A state projection and its numbered event commit together. Successful completion appends history and releases the session together. A session has one active Run. Settings use optimistic revisions; Run snapshots remain immutable. SSE sequence deduplication and active-state polling keep the UI current.
 
@@ -343,13 +354,18 @@ Actual routes under /api/v1:
 | --- | --- |
 | /health, /bootstrap | Availability, saved config/presets/sessions/folders/projects, tool catalog |
 | /config, /presets/{id}, /tools/refresh | Versioned edits and explicit discovery |
+| /presets/{id}/export, /presets/import | Versioned data export and new-identity preset import |
 | /workspace, /workspace/memory, /workspace/skills | Selected-project sandbox/instructions/memory/Skills through optional project_id; /workspace/skills/{name} loads a body |
+| /workspace/skills/{name}/export, /workspace/skills/import | Selected-project text-resource packages, with new-name-only validated publication |
 | /projects | Register an existing named absolute workspace folder; membership is part of session metadata |
 | /sessions, /sessions/{id}, /sessions/{id}/runs | Conversations, versioned metadata edits, deletion, and saved Run history |
 | /sessions/{id}/copy | Duplicate all completed records or fork through a successful Run |
+| /sessions/{id}/context, /compact, /compactions/{job} | Explicit reduction/accounting/restore, captured requests and cancellation |
+| /sessions/{id}/processes | Original live process projections, /{process}/input and /{process}/stop |
 | /folders, /folders/{id} | Create, rename, or delete flat conversation folders |
 | /prompts/inspect, /prompts/preview, /runs | Nonpersisting live draft inspection, optional saved preview, or direct execution |
 | /runs/{id} subresources | State, cancel, approval, recovery, events, trace, export |
+| /runs/{id}/event-log | Finite numbered event pages for CLI/RPC/SDK reconnects |
 
 Generated /openapi.json and frontend types define exact contracts. The UI opens Prompt, Inspector, Workspace and Tools only when needed. Run is enabled for nonempty input without a preview. Draft changes request a debounced current inspection while retaining the last valid result. File editor saves use hashes.
 
@@ -367,7 +383,37 @@ Run the service and check actual behavior before growing tests. scripts/smoke_wo
 
 scripts/smoke_conversations.py checks management through a separate real HTTP server: copy boundaries, trace provenance, stale revisions, archive/restore, folder operations, and continuation after source deletion. Browser checks exercise preset switching/undo and the complete conversation-menu workflow.
 
-Substantial Windows coding/analysis acceptance has passed, including guarded multi-file patches, independent native checks, scoped instructions and a read-only review using actual search. See [Stage 2 acceptance](acceptance-stage2.md) and [Codex capability review](codex-gap-review.md) for separate evidence and remaining gaps. Next work addresses long-session context and command/process usability, followed by CLI/RPC/SDK and focused hooks. Specialized security integrations and evaluation follow real workflows; extra workers, databases or orchestration are not prerequisites for these improvements.
+Substantial Windows coding/analysis acceptance has passed, including guarded multi-file changes, independent native checks, scoped instructions and read-only review. Stage 3/4 additionally passed a real multi-file CSV repair, background worker input/cleanup, explicit summary and continued CLI implementation, restarted approval and embedded trusted extension (41 model requests, 63 tool calls). See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md), [Stage 2 acceptance](acceptance-stage2.md) and [Codex capability review](codex-gap-review.md). Specialized security integrations and evaluation remain later work; extra workers, databases or orchestration are not prerequisites.
+
+## Explicit history reduction
+
+The original committed session messages remain authoritative evidence. Context compaction is an explicit asynchronous job over a prefix of successful complete turns, retaining one to ten recent turns verbatim. Studio captures source revision/hash, configuration and any previous summary; Repository reserves the idle session so a new Run cannot race it. The reducer performs no-tools calls through the existing compiler/provider, chunks evidence at valid UTF-8 boundaries, adapts chunk size only to a declared context budget and records every canonical/prepared/actual request, offset, returned summary, metadata and usage. Call/time budgets apply. Failed, cancelled or crashed calls remain recorded; uncertain completion never retries automatically.
+
+Only a complete success with the original revision and prefix digest still matching activates a summary, advancing the session revision. Effective history becomes one **user-role derived-evidence message**, sourced `context:compaction:<id>`, plus the untouched suffix. It does not acquire system authority or pretend to be an original tool result. Inspection and new Run snapshots freeze this effective history and selected compaction ID. Restore clears selection, not evidence. Copies receive a fresh summary record with provenance only when their copied prefix includes the covered messages; they never share active job ownership. Earlier immutable Runs and original chat stay unchanged. History estimates omit instructions/tool schemas and are labeled separately from full compiler estimates and actual provider usage.
+
+## Command progress and owned processes
+
+Runner sets an immutable per-dispatch ContextVar containing trusted Run/session identity and an optional output consumer. The command adapters publish incremental UTF-8 output through OutputRelay; only retained bounded prefixes enter persistence. Foreground calls update their executing receipt and numbered `tool.output` events before a final paired result. The active Run projection exposes that output to chat.
+
+`start_process` persists intent, then starts the same native sandbox with stdin/stdout/stderr pipes. One ProcessManager owns at most four live controllers/tasks across project registries. Startup returns actual readiness/PID or a recorded setup failure; successful Runs may leave a process active. `poll_process`, explicit input/EOF and Stop act on original conversation/root ownership. Pipes have an 8 KiB input byte limit and sixteen queued frames; input receipts retain hashes/sizes/EOF/time rather than another text copy. Current read-only mode rejects input to an older writable process. Archive/delete/workspace moves reject active original writers. Conversation copies have no process rows or handles.
+
+Native stop, absolute timeout, Run failure/cancellation and service exit terminate the owned Job/process group and await cleanup before finalization. Windows output appears live while workspace edits copy back only after exit; private copies do not become live shared development directories. Restart marks unfinished records interrupted with explicit uncertainty and never launches them again. Full terminal emulation is not implemented.
+
+## Runtime and dependency boundary
+
+Settings explicitly registers at most three trusted specific runtime folders. Filtered copies (20,000 entries/256 MiB total) are readable/executable in the sandbox, with no original ACL changes, ambient PATH or credential import. Preparation is deadline/cancellation-aware and awaited before removing staging directories. Python uses UTF-8 pipes and workspace `.rtagent/packages` with bytecode/index checks disabled for offline use.
+
+`fetch_url` is a separate application tool under allow/ask/deny and read-only enforcement. Up to twenty exact configured public HTTPS hosts, port 443, a new relative destination, a 16 MiB cap and optional expected SHA-256 bound transfer. It rejects credentials, query/fragment, redirects, proxies and any non-global DNS answer. The client pins one global literal address while retaining the original Host and TLS SNI/certificate identity; DNS cannot change the destination after validation. This does not add command network capabilities. The host's VPN currently resolves some package hosts to reserved fake IPs, which production correctly refuses; the acceptance-only public-DNS fixture is documented separately.
+
+## Shared clients and trusted extensions
+
+Harness owns concrete application resources and their async lifetime. `create_app` enters that same Harness; embedded programs use their own data directory. AgentClient, CLI and JSON-RPC attach to a running owner through HTTP. They cannot open its databases as another worker or introduce a second loop. Explicit `start(request, key)` is the stable submission/retry primitive; convenience `run` captures current revisions. Disconnect/wait timeout is separate from cancellation, and clients return approval/interrupted states for explicit decisions. [Harness interfaces](harness.md) lists commands, protocol limits and examples.
+
+Hooks are narrowly scoped trusted Python callbacks. Event observers receive redacted copies after commit, with bounded best-effort delivery and recorded failures; they cannot hold a transaction or change known effect outcomes. Tool guards run after core policy/approval, receive copies and can only add denial. Explicit local tool registration requires schemas, ordinary configuration permission and frozen-hash checks, defaulting to a declared mutator for read-only enforcement. Handlers run with trusted application authority, not as untrusted sandboxed code. Skills never register Python handlers. Web integrations supply `hooks` and `configure` at composition; no dynamic loader or generic plugin marketplace is introduced.
+
+Reusable preset packages create new preset/block identities. Skill packages preflight bounded portable text paths and matching frontmatter, stage all resources and publish a new directory only after validation. Existing/bundled names remain protected. Imports do not execute resources, grant permissions or clone configuration, effects or checkpoints.
+
+The second provider is an explicit Anthropic-compatible Messages adapter. It extracts leading system text into a top-level field and maps original assistant tool IDs/results to tool_use/tool_result blocks. Both Preview and receipts disclose transformations. Interleaved system blocks, unsupported content and incomplete streams fail instead of being silently relocated/dropped. Credentials resolve only at transport I/O, actual body equality is checked before sending, and unknown usage remains null. Real local HTTP protocol acceptance is separate from an unperformed external Claude endpoint check.
 
 ## Stage 2 acceptance
 

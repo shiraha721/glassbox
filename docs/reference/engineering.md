@@ -6,7 +6,7 @@ This reference covers the supporting parts of the same repository, not additiona
 
 ## Package and dependency roles
 
-The installable backend package is **rtagent**, built from src/rtagent by Hatchling. [__init__.py](../../src/rtagent/__init__.py) contains a package docstring and version constant; it has no functions or import-time worker. All actual backend boundaries are single `.py` modules, not the hypothetical api/application/domain subpackages in the target-layout development guide. `skills/skill-creator` is packaged text, not another Python package. The browser npm package is **security-agent-studio-web**; its src/api directory holds transport code and generated type contracts.
+The installable backend package is **rtagent**, built from src/rtagent by Hatchling. [__init__.py](../../src/rtagent/__init__.py) contains a package docstring and version constant; it has no functions or import-time worker. All actual backend boundaries are single `.py` modules; Harness composes them for Web/embedding and clients attach through the existing HTTP owner. __main__.py is the CLI entry invocation, not another worker implementation. `skills/skill-creator` is packaged text, not another Python package. The browser npm package is **security-agent-studio-web**; its src/api directory holds transport code and generated type contracts.
 
 Dependency declarations are [pyproject.toml](../../pyproject.toml) and [web/package.json](../../web/package.json); resolved versions are in uv.lock/package-lock.json. The tables explain every declared direct dependency and the additional transitively supplied packages directly imported by first-party code. They do not claim to document third-party internal functions or every transitive lock entry.
 
@@ -25,8 +25,8 @@ Dependency declarations are [pyproject.toml](../../pyproject.toml) and [web/pack
 | langgraph-checkpoint-sqlite | runtime; recovery infrastructure. | AsyncSqliteSaver for graph progress and public thread deletion; no first-party checkpoint-table SQL. |
 | langchain-openai | providers; model infrastructure. | ChatOpenAI message streaming/Chat Completions serializer; no nested prebuilt agent. |
 | mcp | tools and fixture; tool infrastructure. | ClientSession/stdio/Streamable HTTP SDK lifecycle, tool schema discovery/calls; fixture FastMCP for offline contracts. |
-| httpx | providers/tools/scripts/tests; HTTP infrastructure. | Async model/MCP HTTP, pre-send request hook, real local smoke requests, and mocked/ASGI test transports. |
-| jsonschema | policies; domain policy. | Draft202012 argument validation against the frozen advertised schema before permission dispatch. |
+| httpx | providers/anthropic/downloads/client/tools/scripts/tests; HTTP infrastructure. | Async model/MCP HTTP, pre-send request hook, real local smoke requests, and mocked/ASGI test transports. |
+| jsonschema | policies/tools; contract validation. | Draft202012 argument validation against frozen schemas before dispatch, plus explicit trusted-tool schema preflight at registration. |
 | anyio | api; transport resource boundary. | Shield short database reads inside SSE cancellation handling; SDKs also use async task groups transitively. |
 | pyyaml | workspace; file adapter. | safe_load/safe_dump of the minimal skill frontmatter; no arbitrary YAML object execution. |
 | pydantic (transitive, directly imported) | domain/config/api; contracts. | BaseModel/Field/validators for strict input/output, revalidation, and JSON Schema. It is supplied by declared dependencies rather than separately declared here. |
@@ -556,7 +556,7 @@ Every function below belongs to the layer named above. The last column identifie
 | --- | --- | --- | --- |
 | [`openWorkspace`](../../web/e2e/studio.spec.ts#L6) | Open the app and create a fresh conversation. | Navigate /, assert workspace presence, open the sidebar if needed, create history, require disabled empty Run and enabled empty Preview. | System-only prompt inspection stays usable; tests begin through the actual local UI without login or a model call. |
 | [`startTask`](../../web/e2e/studio.spec.ts#L17) | Submit one task directly. | Fill Task and click Run, without clicking Preview. | Browser acceptance protects the direct operational workflow the product promises. |
-| [`actions`](../../web/e2e/studio.spec.ts#L390) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
+| [`actions`](../../web/e2e/studio.spec.ts#L450) | Find current conversation's latest action trigger. | Return last session-menu-trigger locator within the history management case. | Menu actions follow created copies/forks rather than a stale original DOM row. |
 
 ### Registered frontend verification callbacks
 
@@ -564,18 +564,19 @@ Each row describes a concrete anonymous `test`/`it` function. Nested interaction
 
 | Source / case | Mechanism | Why / architectural boundary |
 | --- | --- | --- |
-| [E2E: tool/preset/plan](../../web/e2e/studio.spec.ts#L22) | Search schemas, inspect effective read-only rules, switch Coding, inspect empty context, directly run a plan and reload it. | Tool exposure, useful preset context and durable progress work through actual UI and receipts. |
-| [E2E: project selection](../../web/e2e/studio.spec.ts#L89) | Register a folder, create a bound conversation, run native file reads, save/reload memory, inspect frozen root and move idle history. | Workspace selection binds effects and sources rather than only changing a sidebar label. |
-| [E2E: live draft](../../web/e2e/studio.spec.ts#L142) | Change task/variables/preset/Skills and clear task; inspect debounced canonical updates and absence of saved drafts/history. | Current input stays inspectable without blanking valid evidence or requiring a nonempty task. |
-| [E2E: edit/preview/file/trace/refresh](../../web/e2e/studio.spec.ts#L203) | Edit a prompt marker, compile Preview, run actual read_text, inspect/export trace and reload one saved turn. | Rendering, compilation, actual tools and refresh identity form one complete workflow. |
-| [E2E: approval after refresh](../../web/e2e/studio.spec.ts#L227) | Trigger Ask, reload, approve once and verify one paired result/turn. | Browser lifetime does not own the durable approval/checkpoint. |
-| [E2E: reject and cancel](../../web/e2e/studio.spec.ts#L241) | Reject echo, inspect tool_denied, then Stop a slow turn. | Permission and cancellation feedback remain operational in chat. |
-| [E2E: provider references and live inspection](../../web/e2e/studio.spec.ts#L254) | Save endpoint/model/reference fields, inspect the current draft and reopen Settings. | Configuration persistence requires neither a browser key nor a Preview gate. |
-| [E2E: stdio MCP](../../web/e2e/studio.spec.ts#L274) | Save/discover a fixture process, inspect default deny, explicitly allow and execute its call. | Discovery is separate from authorization with real local SDK effects. |
-| [E2E: memory/Skills direct Run](../../web/e2e/studio.spec.ts#L301) | Save note/procedure, select it, directly run a task and inspect both sources. | File editors, snapshot compilation and tool evidence form one workflow. |
-| [E2E: narrow viewport](../../web/e2e/studio.spec.ts#L331) | Use a mobile-sized page, inspect Preview and visible Run, and check layout bounds. | Optional panes cannot make task controls inaccessible. |
-| [E2E: reversible drafts](../../web/e2e/studio.spec.ts#L350) | Duplicate/switch/edit/undo/redo/discard and verify original/independent draft state. | Local editor history preserves unsaved work while selection remains usable. |
-| [E2E: conversation organization](../../web/e2e/studio.spec.ts#L380) | Rename/folder/fork/continue/duplicate/archive/restore/delete through visible menus. | Saved prefix provenance, shared-file semantics and history independence are vertical features. |
+| [E2E: context/packages/process pipes](../../web/e2e/studio.spec.ts#L22) | Compact/restore real history, import/export a fresh preset, approve a native process and send Unicode stdin/Stop through the UI. | New daily-agent controls form one working vertical workflow with original evidence and completed native cleanup. |
+| [E2E: tool/preset/plan](../../web/e2e/studio.spec.ts#L82) | Search schemas, inspect effective read-only rules, switch Coding, inspect empty context, directly run a plan and reload it. | Tool exposure, useful preset context and durable progress work through actual UI and receipts. |
+| [E2E: project selection](../../web/e2e/studio.spec.ts#L149) | Register a folder, create a bound conversation, run native file reads, save/reload memory, inspect frozen root and move idle history. | Workspace selection binds effects and sources rather than only changing a sidebar label. |
+| [E2E: live draft](../../web/e2e/studio.spec.ts#L202) | Change task/variables/preset/Skills and clear task; inspect debounced canonical updates and absence of saved drafts/history. | Current input stays inspectable without blanking valid evidence or requiring a nonempty task. |
+| [E2E: edit/preview/file/trace/refresh](../../web/e2e/studio.spec.ts#L263) | Edit a prompt marker, compile Preview, run actual read_text, inspect/export trace and reload one saved turn. | Rendering, compilation, actual tools and refresh identity form one complete workflow. |
+| [E2E: approval after refresh](../../web/e2e/studio.spec.ts#L287) | Trigger Ask, reload, approve once and verify one paired result/turn. | Browser lifetime does not own the durable approval/checkpoint. |
+| [E2E: reject and cancel](../../web/e2e/studio.spec.ts#L301) | Reject echo, inspect tool_denied, then Stop a slow turn. | Permission and cancellation feedback remain operational in chat. |
+| [E2E: provider references and live inspection](../../web/e2e/studio.spec.ts#L314) | Save endpoint/model/reference fields, inspect the current draft and reopen Settings. | Configuration persistence requires neither a browser key nor a Preview gate. |
+| [E2E: stdio MCP](../../web/e2e/studio.spec.ts#L334) | Save/discover a fixture process, inspect default deny, explicitly allow and execute its call. | Discovery is separate from authorization with real local SDK effects. |
+| [E2E: memory/Skills direct Run](../../web/e2e/studio.spec.ts#L361) | Save note/procedure, select it, directly run a task and inspect both sources. | File editors, snapshot compilation and tool evidence form one workflow. |
+| [E2E: narrow viewport](../../web/e2e/studio.spec.ts#L391) | Use a mobile-sized page, inspect Preview and visible Run, and check layout bounds. | Optional panes cannot make task controls inaccessible. |
+| [E2E: reversible drafts](../../web/e2e/studio.spec.ts#L410) | Duplicate/switch/edit/undo/redo/discard and verify original/independent draft state. | Local editor history preserves unsaved work while selection remains usable. |
+| [E2E: conversation organization](../../web/e2e/studio.spec.ts#L440) | Rename/folder/fork/continue/duplicate/archive/restore/delete through visible menus. | Saved prefix provenance, shared-file semantics and history independence are vertical features. |
 | [Component: placement reordering](../../web/src/Composer.test.tsx#L31) | Render Composer, click move, inspect emitted aggregate/order/roles/original object. | UI order normalization preserves slot/role/source semantics. |
 | [Component: malformed rule draft](../../web/src/Composer.test.tsx#L53) | Type invalid JSON, Apply rules, require no emitted aggregate and visible error. | Invalid advanced text cannot corrupt the parent's applied preset draft. |
 
@@ -718,6 +719,183 @@ Every function below belongs to the layer named above. The last column identifie
 
 ```python
 async def main() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## migrations/versions/0005_context_and_processes.py
+
+**Layer: Engineering / application schema migration.** Adds reduction and native process receipts while preserving existing conversation data.
+
+**Connections and effects:** Alembic modifies app.db only. Session columns are altered in place; checkpoint tables remain exclusively LangGraph-owned.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`upgrade`](../../migrations/versions/0005_context_and_processes.py#L12) | Add explicit reduction/process persistence. | Create session-owned compactions, add selection/reservation text columns in place and create original-Run-owned processes. | SQLite FK cascades cannot erase old history through an unnecessary parent-table rebuild. |
+| [`downgrade`](../../migrations/versions/0005_context_and_processes.py#L41) | Remove Stage 3 receipt metadata. | Drop processes, remove only the new session columns in place, then drop compactions. | Existing Runs/events/calls/previews and separate checkpoints survive metadata rollback. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def upgrade() -> None
+def downgrade() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/smoke_stage3.py
+
+**Layer: Engineering / actual local HTTP and native acceptance.** Checks daily-agent context/process/runtime/download behavior in a disposable listening service.
+
+**Connections and effects:** Uses explicit simulated model decisions on port 8771, actual Windows AppContainer or Linux bubblewrap effects, and opt-in public HTTPS/DNS fixtures. It cannot modify user conversations or selected workspaces.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`wait_until`](../../scripts/smoke_stage3.py#L23) | Bound an asynchronous acceptance observation. | Poll a supplied projection until its predicate passes inside an asyncio timeout. | A broken lifecycle fails instead of leaving acceptance indefinitely waiting. |
+| [`verify`](../../scripts/smoke_stage3.py#L33) | Accept explicit summaries and real native process effects. | Check live output before completion, immutable/copy/continued context, summary cancellation, Unicode input/EOF, owner/read-only rejection, Stop/tree cleanup and exact download policy; optional hash-verified offline dependency import. | Assertions cross HTTP/persistence/native boundaries and do not trust simulated final prose. |
+| [`verify.api`](../../scripts/smoke_stage3.py#L38) | Check one real HTTP action. | Submit JSON with a fresh Run key and assert success or the exact expected error status. | Expected policy failures remain actual server responses rather than helper-only exceptions. |
+| [`verify.run`](../../scripts/smoke_stage3.py#L54) | Complete one current-revision simulated decision. | Capture session/preset/config revisions, submit directly, optionally observe active output/events and require terminal success. | Real command progress must precede the final paired receipt; Preview is never a prerequisite. |
+| [`verify.paused_summary`](../../scripts/smoke_stage3.py#L139) | Hold a reduction call for cancellation acceptance. | Signal entry, await an unending event and expose an async-generator shape that is cancelled by the real endpoint. | The cancelled receipt must remain uncertain/inactive and preserve the previous summary. |
+| [`verify.pinned_address`](../../scripts/smoke_stage3.py#L285) | Supply a test-only public DNS fixture. | Accept only the fixture host and return a verified live global IPv4 answer. | A VPN fake-IP rejection is not weakened in production; actual TLS transfer still verifies the original public host. |
+| [`main`](../../scripts/smoke_stage3.py#L313) | Own isolated service/files and final cleanup. | Create sibling temporary workspace/data, start 8771, await readiness, run actual checks and always close the Uvicorn lifecycle. | Acceptance is repeatable without a second worker touching local user stores. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def wait_until(read, ready, seconds: float=45)
+async def verify(client: httpx.AsyncClient, workspace: Path, network: bool, public_dns: bool=False) -> None
+async def verify.api(method: str, path: str, body=None, status: int | None=None)
+async def verify.run(text: str, live_output: bool=False)
+async def verify.paused_summary(*_args)
+async def verify.pinned_address(host: str) -> str
+async def main(network: bool=False, public_dns: bool=False) -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/smoke_stage4.py
+
+**Layer: Engineering / actual client and provider-contract acceptance.** Exercises trusted hooks/tools, packages, CLI/RPC and Messages SSE over real local HTTP transports.
+
+**Connections and effects:** Explicit fake decisions and a Messages protocol fixture are labeled; they are not a claim of real Claude endpoint acceptance. Ports 8772/8773 and temporary stores are owned and closed by the script.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`command`](../../scripts/smoke_stage4.py#L22) | Execute a real client process. | Invoke python -m rtagent with bounded wait/stdio capture and kill/wait only its owned child on timeout. | CLI/RPC results are actual serialized transport outputs, including Windows UTF-8 behavior. |
+| [`embedding`](../../scripts/smoke_stage4.py#L44) | Exercise the public harness extension boundary. | Register one trusted read-only inventory tool, run it once, deny a protected-file write and collect committed hook events. | A callback adds restriction and cannot replace core permissions; one shared graph performs actual files/receipts. |
+| [`embedding.observe`](../../scripts/smoke_stage4.py#L50) | Collect committed event types. | Append the typed callback event's type to acceptance evidence. | Lifecycle hook coverage is observed after persistence, not inferred from object construction. |
+| [`embedding.guard`](../../scripts/smoke_stage4.py#L54) | Apply a protected-file restriction. | Return a concrete reason only for protected.txt. | Additional denial prevents dispatch without granting any otherwise unavailable tool. |
+| [`embedding.summary`](../../scripts/smoke_stage4.py#L60) | Inspect actual bounded project paths. | Count handler invocations and call Workspace.search_files off-thread. | Trusted registration is accepted with real use, not a generic plugin skeleton. |
+| [`embedding.uncertain_effect`](../../scripts/smoke_stage4.py#L68) | Create one actual file before an unexpected integration failure. | Write effect.txt, count dispatch, then raise; require outcome_unknown and explicitly record a verified result on resume. | An extension cannot repeat a completed partial effect through automatic model continuation or recovery. |
+| [`messages_fixture`](../../scripts/smoke_stage4.py#L165) | Build a concrete Messages test endpoint. | Own request-body evidence and register a streamed /v1/messages route. | Adapter contract behavior can be reproduced without another provider key. |
+| [`messages_fixture.messages`](../../scripts/smoke_stage4.py#L172) | Validate canonical-to-wire roles and tool pairing. | Read actual HTTP JSON/version header, require leading system extraction and matching tool_result ID/content, choose tool or text SSE fragments. | Capture equality and result pairing are verified at the receiving transport boundary. |
+| [`messages_fixture.messages.stream`](../../scripts/smoke_stage4.py#L251) | Emit genuine incremental SSE bytes. | Yield JSON data with explicit event delimiters and short delays through StreamingResponse. | The real parser must assemble partial argument JSON and wait for message_stop. |
+| [`http_workflow`](../../scripts/smoke_stage4.py#L262) | Accept external clients and package/provider reuse. | Run CLI/read tool, request RPC state/events/schema and malformed-input errors, import/export/use fresh preset/Skill identities/resources, reject traversal and complete a two-call Messages round trip. | Facades reuse one application policy/receipt path and unsupported packages cannot publish files. |
+| [`main`](../../scripts/smoke_stage4.py#L378) | Own embedded and HTTP contract acceptance resources. | Create ordinary fixture files, run embedding, start both listening servers, execute workflow and gather shutdown. | Test transport ownership and data remain separate from the user service. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def command(args: list[str], stdin: bytes | None=None) -> str
+async def embedding(root: Path) -> None
+async def embedding.observe(event: RunEvent) -> None
+async def embedding.guard(call: ToolCall, _config: StudioConfig) -> str | None
+async def embedding.summary(args: dict, workspace: Workspace) -> str
+async def embedding.uncertain_effect(_args: dict, workspace: Workspace) -> str
+def messages_fixture() -> FastAPI
+async def messages_fixture.messages(request: Request) -> StreamingResponse
+async def messages_fixture.messages.stream()
+async def http_workflow(base_url: str, fixture: FastAPI) -> None
+async def main() -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## scripts/acceptance_stage34.py
+
+**Layer: Engineering / opt-in substantial real-model acceptance.** Accepts daily coding/process/context work and the reusable harness with the configured real OpenAI-compatible model.
+
+**Connections and effects:** Requires --live on Windows. Uses port 8775, ignored sibling stores/project files, explicit native fixture approvals, immutable checker/data and retained raw evidence; it never reads/prints a key into chat.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`guard`](../../scripts/acceptance_stage34.py#L35) | Protect the independent checker at the trusted hook boundary. | Reject direct checker-path writes; unchanged-file comparisons independently verify all fixture preservation. | Acceptance cannot pass by claiming success or weakening its own checker. |
+| [`workspace_summary`](../../scripts/acceptance_stage34.py#L40) | Inspect actual source inventory through a local extension. | Call bounded Workspace.search_files off-thread and return JSON. | Stage 4 integration is a concrete useful tool reused through HTTP and embedding. |
+| [`configure`](../../scripts/acceptance_stage34.py#L45) | Register the same trusted tool on shared composition. | Supply definition/schema/handler with writes_workspace=false before harness entry. | Web, CLI/RPC and Python extension do not patch core dispatch or add a second agent loop. |
+| [`serve`](../../scripts/acceptance_stage34.py#L58) | Start and own isolated real-provider HTTP service. | Create the customized app, listen on 8775 and await actual startup under a bounded deadline. | Restart checks retain the same app/checkpoint stores without mutating main service records. |
+| [`settle`](../../scripts/acceptance_stage34.py#L77) | Wait for completion and explicit fixture approvals. | Poll state, approve only native fixture tools when requested and return terminal/attention outcomes under a deadline. | The opt-in driver accounts for human policy instead of silently disabling approval in the product. |
+| [`evidence`](../../scripts/acceptance_stage34.py#L100) | Audit completed real provider/tool evidence. | Require non-simulated successful calls, prepared/wire equality and ordered complete tool pairing, then save ignored local traces and counts. | Fluent final text alone cannot establish a real executed workload. |
+| [`main`](../../scripts/acceptance_stage34.py#L132) | Accept repair, background/pipe work, compacted CLI, restart and embedding. | Build flawed multi-file CSV fixtures, reuse imported Coding/Skill resources, run independent sandbox checks, explicitly summarize, extend CLI after summary, restart one approval and verify original data/checker/notes. | Each new Stage 3/4 path performs substantial actual work and reuses the same evidence/policy lifecycle. |
+| [`main.task`](../../scripts/acceptance_stage34.py#L193) | Continue one real conversation and retain evidence. | Submit current task/preset/Skill through AgentClient, settle approval/completion and audit the resulting trace. | Later turns use successful history and current context without replaying source effects. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def guard(call: ToolCall, _config: StudioConfig) -> str | None
+async def workspace_summary(_args: dict, workspace: Workspace) -> str
+def configure(harness: Harness) -> None
+async def serve(settings: Settings) -> tuple[uvicorn.Server, asyncio.Task]
+async def settle(client: AgentClient, run_id: str, approve: bool=True)
+async def evidence(client: AgentClient, run_id: str, root: Path, label: str) -> dict
+async def main() -> None
+async def main.task(label: str, text: str)
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## tests/test_harness.py
+
+**Layer: Engineering / focused invariants after actual acceptance.** Protects asynchronous context activation, crash receipts and trusted extension/provider boundaries.
+
+**Connections and effects:** Uses temporary stores and deterministic provider fixtures. Real HTTP/OS acceptance is the behavioral evidence; these checks pin non-obvious regressions.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`test_late_summary_does_not_activate_after_metadata_revision`](../../tests/test_harness.py#L26) | Reject stale derived context after a concurrent rename. | Complete source turns, hold a provider result, commit a real versioned metadata edit, then release and assert failed activation with unchanged messages/unknown usage. | Late successful provider output cannot overwrite a newer conversation revision. |
+| [`test_late_summary_does_not_activate_after_metadata_revision.summarizer`](../../tests/test_harness.py#L39) | Control one captured reduction race. | Capture wire callback, signal entry, await release and return known text with unknown output usage. | The test exercises actual sequencing and null accounting rather than mirroring summary text. |
+| [`test_restart_marks_reduction_and_process_intents_uncertain`](../../tests/test_harness.py#L78) | Preserve abandoned effect evidence after reopening. | Save incomplete model/process intents, close/reopen/migrate/recover and assert unknown/interrupted/closed-input state and unchanged source progress. | Startup cannot replay a paid call or restart an OS process from a persisted PID. |
+| [`test_messages_rejects_lossy_roles_and_unpaired_tool_ids`](../../tests/test_harness.py#L123) | Reject unsupported request adaptations before I/O. | Compile canonical evidence, insert an interleaved system block and orphan tool result, then require explicit adapter errors. | Provider support cannot silently alter prompt meaning or break original tool pairing. |
+| [`test_trusted_guard_is_never_called_before_core_denial`](../../tests/test_harness.py#L145) | Prove an extension cannot grant permission. | Deliberately script a request for a registered unexposed tool and assert paired denial with zero guard/handler invocations. | Core policy precedes every trusted callback and is independently enforced against a provider's unexpected call. |
+| [`test_trusted_guard_is_never_called_before_core_denial.guard`](../../tests/test_harness.py#L149) | Observe attempted guard invocation. | Append the call ID and return no extra denial. | Any invocation for the already-denied tool would reveal a boundary regression. |
+| [`test_trusted_guard_is_never_called_before_core_denial.extension`](../../tests/test_harness.py#L154) | Observe unauthorized dispatch. | Record an execution marker and return a result if reached. | The test fails if trusted registration bypasses the captured permission map. |
+| [`test_trusted_guard_is_never_called_before_core_denial.model`](../../tests/test_harness.py#L159) | Request a denied tool independently of exposure. | Return one local_effect call before a tool result and final text afterward, with explicit fake capture/usage. | Exposure alone is not authorization; malicious or inconsistent provider output still reaches core denial. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, monkeypatch)
+async def test_late_summary_does_not_activate_after_metadata_revision.summarizer(_config, _compiled, _tools, _prepared, on_wire)
+async def test_restart_marks_reduction_and_process_intents_uncertain(tmp_path)
+def test_messages_rejects_lossy_roles_and_unpaired_tool_ids()
+async def test_trusted_guard_is_never_called_before_core_denial(tmp_path, monkeypatch)
+async def test_trusted_guard_is_never_called_before_core_denial.guard(call, _config)
+async def test_trusted_guard_is_never_called_before_core_denial.extension(_args, _workspace)
+async def test_trusted_guard_is_never_called_before_core_denial.model(_config, compiled, _tools, _prepared, on_wire)
 ```
 
 These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.

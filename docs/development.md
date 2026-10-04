@@ -7,8 +7,7 @@ This guide applies to the entire repository and defines project constraints and 
 Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
 Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
 
-As of 2026-10-04, Stage 1, the Windows Stage 2 local-agent workflow, and Stage 3 conversation organization/branching, guarded patch previews and recorded plans are implemented. Real-model coding/analysis, project binding, memory/Skill reuse and native Windows checks passed; see [Stage 2 acceptance](acceptance-stage2.md) and the subsequent [Codex capability review](codex-gap-review.md). Linux acceptance requires a Linux host. The target is an everyday agent harness; consult delivery stages and actual source files.
-Inspect the actual files before starting work. Do not report the target directories, commands, or APIs below as implemented capabilities.
+As of 2026-10-04, Stages 1–4 are implemented and the Windows daily-agent/shared-harness workflows are accepted. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md), [Stage 2 acceptance](acceptance-stage2.md) and the [Codex capability review](codex-gap-review.md). Linux acceptance and an external Claude endpoint check remain unperformed. The target is an everyday agent harness; inspect actual files and documented delivery boundaries before work.
 
 The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
 Multi-agent orchestration, batch evaluation, PostgreSQL, and team deployment belong to later phases.
@@ -25,9 +24,9 @@ Read in this order:
 
 The [Architecture Reference](reference/README.md) maps every implemented module, class, function, callback, and dependency to its purpose, mechanism, design reason, architectural layer, and source location. Keep the corresponding entry and source link synchronized when changing behavior.
 
-## Target Structure and Dependency Direction
+## Module Structure and Dependency Direction
 
-The baseline uses single modules (`api.py`, `application.py`, `runtime.py`, and so on) for these responsibilities. Split a module only when its size or a concrete extension warrants it. Presets own embedded blocks; one versioned settings aggregate owns provider, MCP, permission, and limit configuration. Preserve immutable Run snapshots without adding a generic persistence or plugin framework.
+The implementation uses single modules for these responsibilities. The [architecture module map](architecture.md#what-the-application-owns) lists actual files; the responsibility sketch below is not a directory scaffolding request. Split a module only for a concrete need. Presets own embedded blocks; one versioned settings aggregate owns provider, MCP, permission, runtime/download and limit configuration. Preserve immutable Run snapshots without adding a generic persistence or plugin framework.
 
 ```text
 src/rtagent/
@@ -50,7 +49,7 @@ docs/              Project documentation, architecture, and development conventi
 
 - `api` calls `application` use cases. Keep business decisions out of HTTP routes.
 - `domain`, `prompts`, and `policies` must not depend on FastAPI, databases, MCP clients, or specific model SDKs.
-- `application` coordinates the concrete runtime, tool registry, and repository. The entry point owns their lifecycle. Introduce dependency interfaces only when a second implementation actually needs them.
+- `application` coordinates the concrete runtime, tool registry and repository. Harness owns their lifecycle for Web/embedding; AgentClient/CLI/RPC attach to a running service. Never open a second worker on the same data directory. Introduce dependency interfaces only when a second implementation actually needs them.
 - LangGraph controls execution; LangChain provides model/tool adapters. Do not nest another implicit tool loop inside a prebuilt agent.
 - The frontend obtains data, submits actions, and subscribes to events through the API. It must not connect directly to model providers, MCP, or the database.
 - Keep a modular monolith. Do not introduce microservices, message queues, vector databases, or a generic plugin marketplace for hypothetical needs.
@@ -68,7 +67,7 @@ docs/              Project documentation, architecture, and development conventi
 - Provider-required system field extraction, merging, and serialization changes must remain visible. Reject requests that cannot be adapted without loss.
 - Preview and execution share the same compilation path. Runs bind to immutable configuration, tool schemas, and session versions.
 - Insert the current user input exactly once. Do not repeatedly write rendered system blocks into conversation history.
-- Return an explainable error when context exceeds its budget. Automatic trimming and summarization require separate design and tests; they are not implicit fallbacks.
+- Return an explainable error when context exceeds its budget. Explicit compaction freezes a complete-turn prefix, revision/hash/config and every no-tools provider receipt. Activate only a complete matching result; keep originals, roles/sources/tool pairing, null usage, copy provenance and restoration. Cancelled/crashed/stale reductions never activate or replay automatically. Do not introduce hidden automatic trimming.
 
 ### Agents, Tools, and Recovery
 
@@ -78,6 +77,9 @@ docs/              Project documentation, architecture, and development conventi
 - Writes use content hashes or unambiguous exact edits. Skills and memory cannot grant permissions or bypass isolation. Explicitly configured MCP servers remain outside the command sandbox.
 - Search shares native path exclusions and reports skipped/truncated results. Ranged reads return the complete file hash even when content is partial. Patch preflight validates every operation before effects; each replacement is atomic, but later failures must retain completed paths rather than claim cross-file rollback.
 - Plans are validated paired update_plan receipts projected from Run messages. Do not add duplicate plan storage or treat completed labels as verification evidence.
+- Streaming records only bounded retained output before final paired tool receipts. Background processes belong to original Run/session/root, use bounded UTF-8 pipes and absolute deadlines, and never restart from records. Stop/failure/cancel/shutdown awaits the native tree and Windows reconciliation; copies get no process rows/handles. Active writers block archive/delete/workspace moves. Read-only cannot feed an older writable command.
+- Trusted runtime folders are explicit filtered read-only staging, without original ACL or ambient environment changes. Public downloads are a separate permissioned tool: exact HTTPS hosts, public pinned DNS/TLS identity, new destination, bounds/hash, no redirects/proxy/private addresses. Do not weaken command no-network isolation or production DNS validation to pass a fixture.
+- Trusted event hooks observe redacted copies after commit with bounded best-effort delivery; guards add denial only after core policy/approval. Registered local Python handlers have explicit permission/schema hashes and default mutator declarations; they are trusted application code, not untrusted sandboxed Skills. Reusable packages contain only validated prompt/procedure data with fresh identities/new names, never configuration, effects or executable plugin registration.
 
 - Implement a bounded `model -> policy -> tools -> model` loop for the first release. Finish when there are no tool calls.
 - Preserve the original `tool_call_id` for every model tool call. Supply a matching success or error result for each before calling the model again.
@@ -131,6 +133,8 @@ uv run python scripts/smoke_workspace.py
 uv run python scripts/smoke_conversations.py
 uv run python scripts/smoke_projects.py
 uv run python scripts/smoke_agent_tools.py
+uv run python scripts/smoke_stage3.py
+uv run python scripts/smoke_stage4.py
 uv run pytest
 uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations
@@ -156,6 +160,8 @@ Before running browser tests for the first time, install the browsers required b
 Build the frontend before browser tests; their isolated backend serves `web/dist`. Regenerate API types with `uv run python scripts/export_api.py`, then `npm --prefix web run generate:api`. Commit `web/src/api/generated.ts`; the intermediate schema is ignored.
 
 With a configured real provider and the local service running, `uv run python scripts/acceptance_stage2.py --live` and `uv run python scripts/acceptance_agent_tools.py --live` provide opt-in external acceptance. Run them separately: both own isolated port 8768 and retain evidence under ignored var. The latter independently checks guarded Coding repairs and read-only Code review findings; default tests never make these model requests.
+
+`uv run python scripts/acceptance_stage34.py --live` owns port 8775 and accepts substantive coding, background input/cleanup, explicit compaction, continued CLI work, approval restart and an embedded trusted extension using the configured real OpenAI-compatible provider. Stage 3 smoke optionally accepts `--network --public-dns` for an actual public dependency transfer/offline import with a test-only public-DNS fixture. Production still rejects reserved VPN fake-IP answers. Stage 4 smoke owns ports 8772/8773 and distinguishes genuine HTTP/CLI/Messages transport behavior from simulated model decisions. See the acceptance documents for evidence and limits.
 
 Tests should cover the actual behavior affected by a change:
 

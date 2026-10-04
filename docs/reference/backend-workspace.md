@@ -95,23 +95,25 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`native_tools`](../../src/rtagent/tools.py#L24) | Build fifteen native definitions for the current OS. | Declare bounded strict JSON schemas for search, ranged reads, scoped instructions, guarded changes, task plans, native commands, memory, Skills and echo; TaskPlan supplies the plan schema. | Capabilities remain a concrete catalog; command language follows the OS and no provider-specific tool framework is required. |
-| [`native_tools.tool`](../../src/rtagent/tools.py#L27) | Construct one native definition from schema fragments. | Wrap properties/required in an object schema and attach name/description. | Repeated schema boilerplate stays local to the fixed catalog instead of becoming a plugin framework. |
-| [`mcp_session`](../../src/rtagent/tools.py#L180) | Yield a fresh initialized SDK session and close all owned transports. | Use AsyncExitStack; stdio receives a minimal baseline environment plus resolved explicit references; HTTP receives optional Bearer credentials in a no-redirect HTTPX client; initialize ClientSession and yield it. | Connection/subprocess lifetime is bounded by discovery/invocation including cancellation. Stateful remote workflows are not assumed and ambient provider keys are not forwarded to stdio. |
-| [`ToolRegistry.__init__`](../../src/rtagent/tools.py#L221) | Bind tool catalog, file adapter, and native sandbox. | Resolve workspace, construct Workspace, lazily import WindowsSandbox only on Windows or use BashSandbox elsewhere, and seed reset. | Win32 imports stay out of Linux execution and a missing command sandbox never turns into unrestricted host execution. |
-| [`ToolRegistry.for_workspace`](../../src/rtagent/tools.py#L236) | Bind concrete native adapters to a selected root. | Cache registries by canonical Path and synchronize current catalog/errors from the process registry. | Per-project files/sandbox state remain separate; explicitly configured stateless MCP discovery is shared and remains outside command isolation. |
-| [`ToolRegistry.reset`](../../src/rtagent/tools.py#L247) | Drop stale discovery and seed native schemas. | Build native catalog keyed by name with input-schema hashes, clear server errors. | Changed MCP settings cannot leave old discovered contracts advertised; enabled unknown names fail until rediscovered. |
-| [`ToolRegistry.definition`](../../src/rtagent/tools.py#L256) | Convert one discovered MCP schema to a stable namespaced entry. | Combine server-ID hash, sanitized/truncated original tool name, and original-name hash; retain original name/server/schema/hash. | Distinct servers and sanitized collisions retain deterministic provider-compatible names; dispatch can recover the server's actual name. |
-| [`ToolRegistry.discover`](../../src/rtagent/tools.py#L275) | Refresh a bounded catalog from saved servers. | Reset, open each fresh session with a 15-second deadline, read up to 20 pages, normalize entries, and collect type-only safe server failures. | Explicit discovery is manageable without persistent connections or a broker. Results do not grant permission; newly discovered tools default deny through the config map. |
-| [`ToolRegistry.selected`](../../src/rtagent/tools.py#L296) | Compute Run-visible tool definitions. | Iterate config permissions, omit deny and native mutation tools under read-only, reject enabled unknown names, and return known allow/ask entries. | Exposure is the intersection of actual discovery and local profile; prompt text cannot create tools. MCP is separate from native read-only mode and still requires its explicit map rule. |
-| [`ToolRegistry.read_file`](../../src/rtagent/tools.py#L310) | Read just file content for internal/fixture callers. | Delegate to Workspace.read and return content. | The helper uses identical bounded path validation and does not offer a separate unrestricted read path. |
-| [`ToolRegistry.execute`](../../src/rtagent/tools.py#L314) | Dispatch one already authorized frozen tool definition. | Recheck native read-only/OS constraints, validate TaskPlan before returning its JSON receipt, execute bounded workspace functions off-thread, cap command deadlines, or recheck a stateless MCP schema before external invocation. | Runtime owns policy and effect receipts; concrete adapters own effects. Plan updates are data receipts, not commands or a second execution loop. |
+| [`native_tools`](../../src/rtagent/tools.py#L31) | Build twenty concrete native definitions for the current OS. | Declare bounded strict schemas for file/instruction/patch/plan/memory/Skill tools, native commands, background poll/input/stop, public download and echo. | The actual OS supplies command language; process/download tools retain explicit policy and separate network boundaries. |
+| [`native_tools.tool`](../../src/rtagent/tools.py#L34) | Construct one native definition from schema fragments. | Wrap properties/required in an object schema and attach name/description. | Repeated schema boilerplate stays local to the fixed catalog instead of becoming a plugin framework. |
+| [`mcp_session`](../../src/rtagent/tools.py#L230) | Yield a fresh initialized SDK session and close all owned transports. | Use AsyncExitStack; stdio receives a minimal baseline environment plus resolved explicit references; HTTP receives optional Bearer credentials in a no-redirect HTTPX client; initialize ClientSession and yield it. | Connection/subprocess lifetime is bounded by discovery/invocation including cancellation. Stateful remote workflows are not assumed and ambient provider keys are not forwarded to stdio. |
+| [`ToolRegistry.__init__`](../../src/rtagent/tools.py#L271) | Bind tool catalog, file adapter, and native sandbox. | Resolve workspace, construct Workspace, lazily import WindowsSandbox only on Windows or use BashSandbox elsewhere, and seed reset. | Win32 imports stay out of Linux execution and a missing command sandbox never turns into unrestricted host execution. |
+| [`ToolRegistry.for_workspace`](../../src/rtagent/tools.py#L288) | Bind concrete native adapters to a selected root. | Cache registries by canonical Path and synchronize current catalog/errors from the process registry. | Per-project files/sandbox state remain separate; explicitly configured stateless MCP discovery is shared and remains outside command isolation. |
+| [`ToolRegistry.reset`](../../src/rtagent/tools.py#L306) | Drop stale discovery and seed native schemas. | Build native catalog keyed by name with input-schema hashes, clear server errors. | Changed MCP settings cannot leave old discovered contracts advertised; enabled unknown names fail until rediscovered. |
+| [`ToolRegistry.definition`](../../src/rtagent/tools.py#L342) | Convert one discovered MCP schema to a stable namespaced entry. | Combine server-ID hash, sanitized/truncated original tool name, and original-name hash; retain original name/server/schema/hash. | Distinct servers and sanitized collisions retain deterministic provider-compatible names; dispatch can recover the server's actual name. |
+| [`ToolRegistry.discover`](../../src/rtagent/tools.py#L361) | Refresh a bounded catalog from saved servers. | Reset, open each fresh session with a 15-second deadline, read up to 20 pages, normalize entries, and collect type-only safe server failures. | Explicit discovery is manageable without persistent connections or a broker. Results do not grant permission; newly discovered tools default deny through the config map. |
+| [`ToolRegistry.selected`](../../src/rtagent/tools.py#L382) | Compute Run-visible tool definitions. | Iterate config permissions, omit deny and native mutation tools under read-only, reject enabled unknown names, and return known allow/ask entries. | Exposure is the intersection of actual discovery and local profile; prompt text cannot create tools. MCP is separate from native read-only mode and still requires its explicit map rule. |
+| [`ToolRegistry.read_file`](../../src/rtagent/tools.py#L402) | Read just file content for internal/fixture callers. | Delegate to Workspace.read and return content. | The helper uses identical bounded path validation and does not offer a separate unrestricted read path. |
+| [`ToolRegistry.execute`](../../src/rtagent/tools.py#L406) | Dispatch one already authorized frozen definition. | Recheck current native/local mutator and schema constraints, run trusted async handlers, native workspace/sandbox/process/download adapters or stateless MCP; bound output and deadlines. | Runtime owns receipts/core authorization; adapter errors distinguish known results from uncertain custom effects requiring recovery. |
+| [`ToolRegistry.bind_repository`](../../src/rtagent/tools.py#L301) | Bind the service's concrete process owner once. | Construct one ProcessManager and share it across project-scoped registry views. | Roots differ while live ownership/persistence remain service-wide; no extra worker or per-project subprocess service exists. |
+| [`ToolRegistry.register`](../../src/rtagent/tools.py#L315) | Register an explicitly trusted local adapter. | Validate at most twenty unique nonnative safe names and schemas, attach a handler and writes_workspace flag (true by default), and retain schema hashes/catalog entries across refresh. | Extensions require explicit configuration permission and frozen-schema checks; read-only filters known mutators and registration never executes supplied code. |
 
 ### Types and ownership
 
 | Type / source | Purpose | Representation / behavior | Why / architectural role |
 | --- | --- | --- | --- |
-| [`ToolRegistry`](../../src/rtagent/tools.py#L218) | Concrete catalog/dispatcher. | Native and discovered definitions, per-server errors, file adapter, and OS sandbox. | Only actual local/MCP integrations are needed; there is no speculative provider/plugin registry hierarchy. |
+| [`ToolRegistry`](../../src/rtagent/tools.py#L268) | Concrete catalog/dispatcher and shared native owners. | Native/MCP/trusted local definitions, errors, root-scoped file/sandbox views and one shared ProcessManager. | Explicit integration suffices without dynamic plugin loading or a generic service hierarchy. |
 
 ### Native tool surface
 
@@ -129,6 +131,11 @@ Every function below belongs to the layer named above. The last column identifie
 | powershell / bash | Command, optional cwd/timeout; JSON with stdout/stderr/exit/deadline/truncation/isolation/effect fields. | OS-specific isolation; timeout cannot exceed frozen tool_timeout. No host execution fallback. |
 | read_memory / save_memory | Read has no args; save requires content/expected_hash. | Fixed MEMORY_PATH with the same bounded file checks. |
 | load_skill / save_skill | Read name; save name/description/instructions/optional expected_hash. | Catalog-name validation, protected bundled sources, plain Markdown/YAML format. |
+| start_process | Native command/cwd/timeout; original owned process ID/status/PID. | Same OS boundary; up to four live commands, absolute timeout capped by original Run budget, pipes only. |
+| poll_process | Original process_id; bounded saved output/lifecycle. | Session/frozen-root ownership, no relaunch or copy control. |
+| send_process_input | Original process_id, text/EOF; updated projection. | 8 KiB UTF-8 frame and sixteen slots, closed-input/read-only/current ownership checked; hashes retained. |
+| stop_process | Original process_id; final cleanup projection. | Await Job/group exit; completed/partial workspace changes are not undone. |
+| fetch_url | HTTPS URL/new path/optional expected SHA-256; digest/size/provenance. | Exact allowed public host, pinned global DNS/TLS, 443, 16 MiB, no redirect/proxy/query/credentials/overwrite; commands retain no network. |
 | echo | Text up to 4,000 characters; unchanged text. | Harmless approval-development tool, default ask. |
 
 All ToolRegistry serialized native/MCP results are at most 65,536 UTF-8 bytes. Command streams retain at most 24,000 bytes each before JSON escaping; adapters shrink output again if necessary to fit the whole result. MCP discovery reads at most 20 pages but does not cap entries per server page or claim remote tools are read-only. SDK annotations are not used as authorization. Stdio baseline variables include PATH and platform/temp helpers, plus only explicitly configured environment references; command sandbox environments are more restricted.
@@ -142,7 +149,9 @@ def native_tools.tool(name: str, description: str, properties: dict, required: l
 async def mcp_session(server: MCPServer)
 def ToolRegistry.__init__(self, workspace: Path, data_dir: Path | None=None)
 def ToolRegistry.for_workspace(self, root: Path) -> 'ToolRegistry'
+def ToolRegistry.bind_repository(self, repository: Repository) -> None
 def ToolRegistry.reset(self) -> None
+def ToolRegistry.register(self, definition: ToolDefinition, handler: ToolHandler, *, writes_workspace: bool=True) -> None
 def ToolRegistry.definition(server: MCPServer, tool) -> ToolDefinition
 async def ToolRegistry.discover(self, config: StudioConfig) -> list[ToolDefinition]
 def ToolRegistry.selected(self, config: StudioConfig) -> list[ToolDefinition]
@@ -164,20 +173,21 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`BashSandbox.__init__`](../../src/rtagent/sandbox.py#L18) | Bind the file policy and initialize probe cache. | Store Workspace, backend=bubblewrap, status_cache=None. | Command-launch details remain server infrastructure rather than model-controlled host paths. |
-| [`BashSandbox._spawn`](../../src/rtagent/sandbox.py#L24) | Launch an argument-array process with captured pipes. | Use asyncio.create_subprocess_exec, optional piped stdin, stdout/stderr pipes, and start_new_session=true. | Host arguments are never concatenated into shell code; only the deliberate bash -c argument contains model commands. |
-| [`BashSandbox._hidden_paths`](../../src/rtagent/sandbox.py#L34) | Find paths that must be masked or reject links. | Walk without following links, use shared exclusions/configured data directory, prune excluded dirs, and fail for symbolic/junction paths including linked excluded roots. | Masking must not expose an indirect credential/runtime destination; unsupported layouts fail rather than falling back to host execution. |
-| [`BashSandbox._arguments`](../../src/rtagent/sandbox.py#L58) | Build bubblewrap launch arguments from command/cwd/mode. | Validate cwd; create private namespaces/session/proc/dev/tmp/home, mount read-only /usr with compatibility links, clear env, bind workspace read-only or writable, mask excluded paths, remount root read-only, then invoke Bash without profiles. | OS isolation supplies the actual process boundary. Cwd/path checks complement it; the direct workspace mount preserves local edits without a staging protocol. |
-| [`BashSandbox._stop`](../../src/rtagent/sandbox.py#L113) | Kill the whole trusted process group and wait for root exit. | SIGKILL killpg using driver-reported group or process PID, ignore already-gone group, kill remaining root, await process.wait. | A tool must not leave descendants running after normal completion, cancellation, or deadline. |
-| [`BashSandbox._drain`](../../src/rtagent/sandbox.py#L124) | Read a stream to EOF while retaining bounded output. | Read 8192-byte chunks, store only the first 24,000 bytes, mark truncation, decode with replacement. | Continued draining prevents pipe deadlock even when a command produces more output than the model can receive. |
-| [`BashSandbox.execute`](../../src/rtagent/sandbox.py#L135) | Run one isolated command and return a bounded JSON report. | Use fixed setsid driver to report trusted group before command code, start concurrent drainers, enforce timeout, shield tree cleanup even on cancellation, collect exit/output/effect fields, and shrink JSON if needed. | Untrusted stdout cannot choose which host group to kill. Cleanup finishes before Stop returns; timeout may leave workspace edits, and command deadline is reported as tool evidence. |
-| [`BashSandbox.status`](../../src/rtagent/sandbox.py#L204) | Return cached or refreshed actual isolation readiness. | Run printf sandbox-ready through read-only execute with 12-second deadline, check exact output/exit, translate AppError, and cache backend/ready/network/detail. | A probe exercises the real OS path and can fail without breaking ordinary HTTP/UI startup. |
+| [`BashSandbox.__init__`](../../src/rtagent/sandbox.py#L26) | Bind the file policy and initialize probe cache. | Store Workspace, backend=bubblewrap, status_cache=None. | Command-launch details remain server infrastructure rather than model-controlled host paths. |
+| [`BashSandbox._spawn`](../../src/rtagent/sandbox.py#L32) | Launch an argument-array process with captured pipes. | Use asyncio.create_subprocess_exec, optional piped stdin, stdout/stderr pipes, and start_new_session=true. | Host arguments are never concatenated into shell code; only the deliberate bash -c argument contains model commands. |
+| [`BashSandbox._hidden_paths`](../../src/rtagent/sandbox.py#L42) | Find paths that must be masked or reject links. | Walk without following links, use shared exclusions/configured data directory, prune excluded dirs, and fail for symbolic/junction paths including linked excluded roots. | Masking must not expose an indirect credential/runtime destination; unsupported layouts fail rather than falling back to host execution. |
+| [`BashSandbox._arguments`](../../src/rtagent/sandbox.py#L66) | Build bubblewrap launch arguments from command/cwd/mode. | Validate cwd; create private namespaces/session/proc/dev/tmp/home, mount read-only /usr with compatibility links, clear env, bind workspace read-only or writable, mask excluded paths, remount root read-only, then invoke Bash without profiles. | OS isolation supplies the actual process boundary. Cwd/path checks complement it; the direct workspace mount preserves local edits without a staging protocol. |
+| [`BashSandbox._stop`](../../src/rtagent/sandbox.py#L157) | Kill the whole trusted process group and wait for root exit. | SIGKILL killpg using driver-reported group or process PID, ignore already-gone group, kill remaining root, await process.wait. | A tool must not leave descendants running after normal completion, cancellation, or deadline. |
+| [`BashSandbox._drain`](../../src/rtagent/sandbox.py#L168) | Retain and publish bounded Linux pipe output. | Incrementally decode UTF-8 while retaining 24,000 bytes/stream and continue draining past truncation. | Progress precedes completion and capped output cannot deadlock native pipes. |
+| [`BashSandbox.execute`](../../src/rtagent/sandbox.py#L208) | Run one native namespace command with optional live pipes. | Stage explicit read-only runtimes under deadline/cancellation, launch trusted setsid marker, stream output, feed bounded input and kill/await the group before final drain/cleanup. | No unrestricted fallback or abandoned preparation thread is allowed; absolute limits and partial-effect evidence remain explicit. |
+| [`BashSandbox.status`](../../src/rtagent/sandbox.py#L324) | Return cached or refreshed actual isolation readiness. | Run printf sandbox-ready through read-only execute with 12-second deadline, check exact output/exit, translate AppError, and cache backend/ready/network/detail. | A probe exercises the real OS path and can fail without breaking ordinary HTTP/UI startup. |
+| [`BashSandbox._feed_input`](../../src/rtagent/sandbox.py#L190) | Feed owned UTF-8 bytes to namespace stdin. | Consume the bounded controller queue off-thread, write/drain until EOF/stop and close the stream in finally. | Pipe input is explicit and cannot become a host terminal or leave a writer alive after cleanup. |
 
 ### Types and ownership
 
 | Type / source | Purpose | Representation / behavior | Why / architectural role |
 | --- | --- | --- | --- |
-| [`BashSandbox`](../../src/rtagent/sandbox.py#L15) | Linux-only Bash command adapter. | Concrete bubblewrap/setsid launch, async pipe draining, kill-group cleanup, cached status. | The no-network private mount boundary is OS-enforced; it is not a cwd convention or WSL requirement. |
+| [`BashSandbox`](../../src/rtagent/sandbox.py#L23) | Linux-only Bash command adapter. | Concrete bubblewrap/setsid launch, async pipe draining, kill-group cleanup, cached status. | The no-network private mount boundary is OS-enforced; it is not a cwd convention or WSL requirement. |
 
 <details>
 <summary>Source signatures (including private and nested functions)</summary>
@@ -186,10 +196,11 @@ Every function below belongs to the layer named above. The last column identifie
 def BashSandbox.__init__(self, workspace: Workspace) -> None
 async def BashSandbox._spawn(self, args: list[str], pipe_input: bool=False) -> asyncio.subprocess.Process
 def BashSandbox._hidden_paths(self) -> list[Path]
-async def BashSandbox._arguments(self, command: str, cwd: str, mode: str, root: str) -> list[str]
+async def BashSandbox._arguments(self, command: str, cwd: str, mode: str, root: str, toolchains: list[Path] | None=None) -> list[str]
 async def BashSandbox._stop(self, process: asyncio.subprocess.Process, group: int | None) -> None
-async def BashSandbox._drain(stream: asyncio.StreamReader) -> tuple[str, bool]
-async def BashSandbox.execute(self, command: str, cwd: str='.', mode: str='workspace-write', timeout: float=60) -> str
+async def BashSandbox._drain(stream: asyncio.StreamReader, key: str, publish: Callable[[str, str, bool], None]) -> tuple[str, bool]
+async def BashSandbox._feed_input(stream: asyncio.StreamWriter, control: CommandControl) -> None
+async def BashSandbox.execute(self, command: str, cwd: str='.', mode: str='workspace-write', timeout: float=60, *, control: CommandControl | None=None, on_output: OutputCallback | None=None, toolchain_roots: list[str] | None=None) -> str
 async def BashSandbox.status(self, refresh: bool=False) -> dict
 ```
 
@@ -244,26 +255,27 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`_bind`](../../src/rtagent/windows_sandbox.py#L98) | Bind one exported Win32 function with correct ABI types. | Get the DLL symbol and assign restype/argtypes, then return the ctypes callable. | Explicit signatures preserve pointer sizes/alignment and centralize unsafe FFI setup; these callables are OS imports, not extra business functions. |
-| [`_check`](../../src/rtagent/windows_sandbox.py#L152) | Convert a false Win32 result into its last-error exception. | Call ctypes.WinError(ctypes.get_last_error()) when success is false. | Native failures cannot be ignored and leave an apparently successful unrestricted/unclean execution path. |
-| [`_grant`](../../src/rtagent/windows_sandbox.py#L157) | Grant an AppContainer SID access to disposable paths. | Invoke System32/icacls.exe by argument array with recursive inheritable access, captured output, 15-second timeout, and hidden window; reject nonzero result. | Only the created private workspace/scratch/root ACLs change, never user project or system ACLs. |
-| [`_drain`](../../src/rtagent/windows_sandbox.py#L176) | Drain one Windows pipe into a bounded output result. | A reader thread opens the descriptor, retains the first 24,000 bytes while reading to EOF, and stores UTF-8 replacement-decoded text/truncation. | Synchronous Win32 process waiting cannot deadlock on full stdout/stderr, and output remains bounded. |
-| [`WindowsSandbox.__init__`](../../src/rtagent/windows_sandbox.py#L194) | Bind host file policy and status cache. | Store Workspace; set status_cache=None; backend is windows-appcontainer. | Original host workspace identity stays separate from the private command-visible copy. |
-| [`WindowsSandbox._run_process`](../../src/rtagent/windows_sandbox.py#L199) | Launch/stop one isolated PowerShell process tree. | Build a small environment and private script/Workspace PSDrive; whitelist stdin/out/err handles; attach zero-capability SID attributes; create suspended hidden process, assign bounded kill-on-close Job, resume, poll stop/deadline, terminate whole Job and wait for child count/readers before collecting exit. | Suspended creation closes the pre-Job child-spawn race; handle whitelisting avoids leaked server resources; tree accounting catches children that close pipes but outlive the root. |
-| [`WindowsSandbox._execute`](../../src/rtagent/windows_sandbox.py#L360) | Own AppContainer identity, filtered staging, ACLs, and reconciliation. | Validate cwd, start deadline, create unique profile/SID/temp root, copy files, grant root RX/workspace RX or M/scratch M, run or honor cancellation/deadline, reconcile writable changes, then release SID/profile and validated temp root. | Native isolation works without WSL/admin/user setup. All model edits appear only after descendants stop; a timeout/cancel can still copy partial edits and is labeled accordingly. |
-| [`WindowsSandbox.execute`](../../src/rtagent/windows_sandbox.py#L427) | Adapt blocking command work to async tool execution. | Start a to_thread task with threading.Event, shield it, signal/wait for cleanup on cancellation and re-raise, then bound whole JSON output to 64 KiB. | HTTP/event loop stays responsive; cancellation cannot abandon native handles or process cleanup while the runtime settles Stop. |
-| [`WindowsSandbox.status`](../../src/rtagent/windows_sandbox.py#L447) | Probe the actual AppContainer path and cache result. | Execute an exact read-only Console.Write marker with 12-second deadline, check output/exit, turn AppError into unavailable detail, and return backend/network fields. | Readiness is evidence of real isolation, not just the existence of powershell.exe; app startup is independent of the probe. |
+| [`_bind`](../../src/rtagent/windows_sandbox.py#L104) | Bind one exported Win32 function with correct ABI types. | Get the DLL symbol and assign restype/argtypes, then return the ctypes callable. | Explicit signatures preserve pointer sizes/alignment and centralize unsafe FFI setup; these callables are OS imports, not extra business functions. |
+| [`_check`](../../src/rtagent/windows_sandbox.py#L158) | Convert a false Win32 result into its last-error exception. | Call ctypes.WinError(ctypes.get_last_error()) when success is false. | Native failures cannot be ignored and leave an apparently successful unrestricted/unclean execution path. |
+| [`_grant`](../../src/rtagent/windows_sandbox.py#L163) | Grant an AppContainer SID access to disposable paths. | Invoke System32/icacls.exe by argument array with recursive inheritable access, captured output, 15-second timeout, and hidden window; reject nonzero result. | Only the created private workspace/scratch/root ACLs change, never user project or system ACLs. |
+| [`_drain`](../../src/rtagent/windows_sandbox.py#L182) | Retain and publish bounded Windows output. | Incrementally decode a reader thread's UTF-8 stream, keep 24,000 bytes, relay retained progress/truncation and read to EOF. | Native waiting stays off-loop without deadlock; live output does not replace the final result. |
+| [`WindowsSandbox.__init__`](../../src/rtagent/windows_sandbox.py#L229) | Bind host file policy and status cache. | Store Workspace; set status_cache=None; backend is windows-appcontainer. | Original host workspace identity stays separate from the private command-visible copy. |
+| [`WindowsSandbox._run_process`](../../src/rtagent/windows_sandbox.py#L234) | Launch/stop one isolated PowerShell process tree. | Build a small environment and private script/Workspace PSDrive; whitelist stdin/out/err handles; attach zero-capability SID attributes; create suspended hidden process, assign bounded kill-on-close Job, resume, poll stop/deadline, terminate whole Job and wait for child count/readers before collecting exit. | Suspended creation closes the pre-Job child-spawn race; handle whitelisting avoids leaked server resources; tree accounting catches children that close pipes but outlive the root. |
+| [`WindowsSandbox._execute`](../../src/rtagent/windows_sandbox.py#L448) | Own AppContainer identity, private runtime/workspace staging and copy-back. | Validate cwd/deadline, create profile/SID/temp, filter copies, grant private read/execute or modify ACLs, run native Job, reconcile only after cleanup and release profile/paths. | Original runtime/project ACLs and credentials remain untouched; Windows requires neither WSL nor a host execution fallback. |
+| [`WindowsSandbox.execute`](../../src/rtagent/windows_sandbox.py#L530) | Adapt native execution to async streaming and cancellation. | Create a shielded to_thread worker, relay bounded progress, signal/wait cleanup on cancellation, flush output before final receipt and cap serialized result. | The event loop stays responsive and Stop cannot abandon owned handles/tree/copy-back. |
+| [`WindowsSandbox.status`](../../src/rtagent/windows_sandbox.py#L572) | Probe the actual AppContainer path and cache result. | Execute an exact read-only Console.Write marker with 12-second deadline, check output/exit, turn AppError into unavailable detail, and return backend/network fields. | Readiness is evidence of real isolation, not just the existence of powershell.exe; app startup is independent of the probe. |
+| [`_feed_input`](../../src/rtagent/windows_sandbox.py#L206) | Own and close the native stdin pipe. | Drain queued bytes in a dedicated thread after successful suspended launch/Job assignment; stop on EOF or input_stop and handle closed pipes. | Only explicit stdin/out/err handles are inherited, and normal EOF does not falsely signal cancellation or partial effects. |
 
 ### Types and ownership
 
 | Type / source | Purpose | Representation / behavior | Why / architectural role |
 | --- | --- | --- | --- |
-| [`StartupInfo`](../../src/rtagent/windows_sandbox.py#L34) | Win32 STARTUPINFOW layout. | ctypes.Structure includes DWORD/WORD/pointer/handle fields with native alignment. | Correct ABI memory layout is necessary for stdout/stderr/stdin configuration on 64-bit Windows. |
-| [`StartupInfoEx`](../../src/rtagent/windows_sandbox.py#L59) | Extended creation information. | Embed StartupInfo plus attribute-list pointer. | AppContainer capability SID and explicit inherited-handle list must be present at process creation, not applied after launch. |
-| [`ProcessInfo`](../../src/rtagent/windows_sandbox.py#L65) | Handles/IDs returned by CreateProcessW. | Native process/thread handles and DWORD process/thread IDs. | Suspended launch requires separate ownership of thread resume, root wait/termination, and closing both handles. |
-| [`SecurityCapabilities`](../../src/rtagent/windows_sandbox.py#L71) | AppContainer security attributes. | SID pointer, capability pointer, zero count, reserved field. | No network capability is granted; this is the OS enforcement boundary, not a prompt rule. |
-| [`JobLimits`](../../src/rtagent/windows_sandbox.py#L77) | JOBOBJECT_EXTENDED_LIMIT_INFORMATION layout. | Process/job times/flags/count, pointer-sized memory/affinity values, and I/O counters. | Set active-process limit 32 and kill-on-close in one native Job Object; memory/disk quotas are not claimed as configured. |
-| [`WindowsSandbox`](../../src/rtagent/windows_sandbox.py#L189) | Concrete native Windows execution adapter. | Per-call profile, staged files, ACLs, suspended launch/Job, threaded cleanup, and cached probe. | No Linux dependency is required and failures remain explicit rather than running model code on the host. |
+| [`StartupInfo`](../../src/rtagent/windows_sandbox.py#L40) | Win32 STARTUPINFOW layout. | ctypes.Structure includes DWORD/WORD/pointer/handle fields with native alignment. | Correct ABI memory layout is necessary for stdout/stderr/stdin configuration on 64-bit Windows. |
+| [`StartupInfoEx`](../../src/rtagent/windows_sandbox.py#L65) | Extended creation information. | Embed StartupInfo plus attribute-list pointer. | AppContainer capability SID and explicit inherited-handle list must be present at process creation, not applied after launch. |
+| [`ProcessInfo`](../../src/rtagent/windows_sandbox.py#L71) | Handles/IDs returned by CreateProcessW. | Native process/thread handles and DWORD process/thread IDs. | Suspended launch requires separate ownership of thread resume, root wait/termination, and closing both handles. |
+| [`SecurityCapabilities`](../../src/rtagent/windows_sandbox.py#L77) | AppContainer security attributes. | SID pointer, capability pointer, zero count, reserved field. | No network capability is granted; this is the OS enforcement boundary, not a prompt rule. |
+| [`JobLimits`](../../src/rtagent/windows_sandbox.py#L83) | JOBOBJECT_EXTENDED_LIMIT_INFORMATION layout. | Process/job times/flags/count, pointer-sized memory/affinity values, and I/O counters. | Set active-process limit 32 and kill-on-close in one native Job Object; memory/disk quotas are not claimed as configured. |
+| [`WindowsSandbox`](../../src/rtagent/windows_sandbox.py#L224) | Concrete native Windows execution adapter. | Per-call profile, staged files, ACLs, suspended launch/Job, threaded cleanup, and cached probe. | No Linux dependency is required and failures remain explicit rather than running model code on the host. |
 
 ### Win32 import surface
 
@@ -292,7 +304,7 @@ Every function below belongs to the layer named above. The last column identifie
 
 AppContainer may read Windows resources already available to sandboxed applications; this is not a VM and does not promise every public host file is invisible. Commands cannot use host dependency directories imported into the copy, perform downloads, or keep background jobs. No resource quotas other than command duration/output/process count and staging bounds are configured. File reconciliation assumes the host workspace is not concurrently modified by a hostile process. Its preflight protects ordinary competing edits, but is not a transactional multi-file merge.
 
-Linux provides a direct bind mount and private network namespace; Windows provides a disposable staged copy and AppContainer network restriction. Both reject an unavailable boundary and await local tree cleanup. Command tool output currently appears when the call completes; live command stdout events and interactive/background processes remain future work.
+Linux provides a direct bind mount and private network namespace; Windows provides a disposable staged copy and AppContainer network restriction. Both reject an unavailable boundary and await local tree cleanup. Foreground output updates executing receipts and numbered events before completion; owned background processes use explicit UTF-8 pipes, absolute deadlines and awaited native cleanup. Full terminal emulation is not claimed.
 
 <details>
 <summary>Source signatures (including private and nested functions)</summary>
@@ -301,12 +313,179 @@ Linux provides a direct bind mount and private network namespace; Windows provid
 def _bind(library, name, result, arguments)
 def _check(success) -> None
 def _grant(path: Path, sid: str, access: str) -> None
-def _drain(descriptor: int, result: dict, key: str) -> None
+def _drain(descriptor: int, result: dict, key: str, publish: Callable[[str, str, bool], None] | None=None) -> None
+def _feed_input(stream: BinaryIO, control: CommandControl) -> None
 def WindowsSandbox.__init__(self, workspace: Workspace) -> None
-def WindowsSandbox._run_process(self, root: Path, sid: VOID, command: str, cwd: str, deadline: float, stop: threading.Event) -> dict
-def WindowsSandbox._execute(self, command: str, cwd: str, mode: str, timeout: float, stop: threading.Event) -> dict
-async def WindowsSandbox.execute(self, command: str, cwd: str='.', mode: str='workspace-write', timeout: float=60) -> str
+def WindowsSandbox._run_process(self, root: Path, sid: VOID, command: str, cwd: str, deadline: float, stop: threading.Event, control: CommandControl | None=None, publish: Callable[[str, str, bool], None] | None=None, toolchains: list[Path] | None=None) -> dict
+def WindowsSandbox._execute(self, command: str, cwd: str, mode: str, timeout: float, stop: threading.Event, control: CommandControl | None=None, publish: Callable[[str, str, bool], None] | None=None, toolchain_roots: list[str] | None=None) -> dict
+async def WindowsSandbox.execute(self, command: str, cwd: str='.', mode: str='workspace-write', timeout: float=60, *, control: CommandControl | None=None, on_output: OutputCallback | None=None, toolchain_roots: list[str] | None=None) -> str
 async def WindowsSandbox.status(self, refresh: bool=False) -> dict
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## src/rtagent/command_io.py
+
+**Layer: Infrastructure / native pipe bridge.** Bridges Windows threads or Linux async pipes to bounded explicit input and coalesced output.
+
+**Connections and effects:** Sandboxes own OS handles and total retained output. Controllers carry only IDs/events/queues; async consumers persist progress before final receipts.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`CommandControl.started`](../../src/rtagent/command_io.py#L25) | Publish the actual launched native identity. | Assign PID and signal the owner event loop with call_soon_threadsafe. | Start returns evidence of launch, while setup errors never manufacture a PID. |
+| [`CommandControl.feed`](../../src/rtagent/command_io.py#L30) | Queue one explicit input/EOF action. | Check closed/stop state, cap encoded bytes at 8 KiB, preflight sixteen-slot queue capacity and mark stdin closed on EOF. | Backpressure and UTF-8 limits are enforced independently of UI text lengths; partial enqueue is avoided. |
+| [`OutputRelay.__init__`](../../src/rtagent/command_io.py#L53) | Bind a single command's consumer/event loop. | Allocate an async frame queue and retain an optional callback. | Native readers do not perform asynchronous database writes from OS threads. |
+| [`OutputRelay.publish`](../../src/rtagent/command_io.py#L59) | Forward only retained decoded native output. | Schedule an already bounded stream/text/truncation frame onto the event loop if a consumer exists. | Pipe draining can continue even after the retained output cap without flooding persistence. |
+| [`OutputRelay.drain`](../../src/rtagent/command_io.py#L66) | Coalesce and deliver actual progress. | Collect frames for 100 ms, group stdout/stderr and await each persistence consumer until a sentinel. | Real streaming remains responsive without one SQLite transaction per tiny chunk. |
+| [`OutputRelay.finish`](../../src/rtagent/command_io.py#L96) | Flush progress before recording command completion. | Append a sentinel and shield-await the consumer task. | Final receipts/cancellation cannot overtake their last retained output frame. |
+
+### Types and ownership
+
+| Type / source | Purpose | Representation / behavior | Why / architectural role |
+| --- | --- | --- | --- |
+| [`CommandControl`](../../src/rtagent/command_io.py#L14) | One owned command's live pipe/stop state. | Thread events, bounded byte queue, ready event, PID/closed flag and owning loop; no arbitrary host handles. | Normal input EOF and command stop are separate signals with distinct partial-effect semantics. |
+| [`OutputRelay`](../../src/rtagent/command_io.py#L50) | Thread-safe output handoff owner. | One optional async callback, event loop and coalescing queue fed by bounded drains. | OS execution/persistence remain separated without an extra streaming service. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def CommandControl.started(self, pid: int) -> None
+def CommandControl.feed(self, text: str='', eof: bool=False) -> None
+def OutputRelay.__init__(self, callback: OutputCallback | None) -> None
+def OutputRelay.publish(self, stream: str, text: str, truncated: bool=False) -> None
+async def OutputRelay.drain(self) -> None
+async def OutputRelay.finish(self, reader: asyncio.Task[None]) -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## src/rtagent/processes.py
+
+**Layer: Infrastructure / owned native process lifecycle.** Owns at most four live sandbox commands and durable process receipts.
+
+**Connections and effects:** One manager is bound to Repository and shared by project registries. Successful Runs may leave a process alive until explicit stop, absolute deadline or service exit; failed/cancelled Runs stop their original effects. Records never recreate processes after restart.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`process_view`](../../src/rtagent/processes.py#L16) | Project retained lifecycle evidence. | Extract trusted owner/root/mode/command and optional bounded PID/output/input/result/error fields. | Clients see original command evidence without private staging paths or controllable host handles. |
+| [`ProcessManager.__init__`](../../src/rtagent/processes.py#L33) | Bind one service's live controls and storage. | Initialize live task/controller/data mapping and a start lock without effects. | A concrete resource owner suffices for a local single-user harness. |
+| [`ProcessManager.owned`](../../src/rtagent/processes.py#L39) | Validate control authority. | Read durable ownership, compare session and optional current frozen workspace root; return 404 on mismatch. | Model tools cannot control another conversation's command or follow an idle workspace move into another root. |
+| [`ProcessManager.start`](../../src/rtagent/processes.py#L49) | Persist intent before bounded native launch. | Enforce four active tasks, freeze owner/root/mode/timeout/runtime roots, save starting, schedule sandbox drive and await readiness/completion briefly. | Background execution uses the same OS isolation and limits; launch failures remain records, not host fallbacks. |
+| [`ProcessManager._drive`](../../src/rtagent/processes.py#L95) | Run and finalize one sandbox command. | Stream retained output into its record, await sandbox exit/tree cleanup/copy-back, save explicit terminal status/result/error and completion time. | No PID/status claims precede native cleanup; private Windows files appear only after exit. |
+| [`ProcessManager._drive.output`](../../src/rtagent/processes.py#L100) | Commit real background output. | Append already capped stream text, retain truncation/PID/stdin state and save active progress. | Polling can inspect output while the owning tool call and later conversation turns continue. |
+| [`ProcessManager.input`](../../src/rtagent/processes.py#L142) | Deliver explicit stdin to a live owned process. | Verify ownership/active control and current read-only restrictions, feed bounded text/EOF and retain only input digest/size/EOF/time (last 100). | An older writable process cannot be fed after switching to read-only; input text is not duplicated in process records. |
+| [`ProcessManager.stop`](../../src/rtagent/processes.py#L174) | Await stop of a selected owned process. | Resolve authority, signal its controller, shield-await native drive, then read the saved final projection. | A stop response implies Job/group cleanup rather than merely setting a flag. |
+| [`ProcessManager.stop_run`](../../src/rtagent/processes.py#L184) | Stop original effects of a cancelled/failed Run. | Iterate live records and match original run_id before invoking stop. | A conversation copy cannot acquire or repeat another Run's background effects. |
+| [`ProcessManager.close`](../../src/rtagent/processes.py#L191) | Stop all owned live resources. | Signal every controller and gather drive completion before Repository closes. | Normal service shutdown leaves no owned child process running or deferred copy-back writer. |
+
+### Types and ownership
+
+| Type / source | Purpose | Representation / behavior | Why / architectural role |
+| --- | --- | --- | --- |
+| [`ProcessManager`](../../src/rtagent/processes.py#L30) | Concrete live OS-effect owner. | Shared Repository plus bounded controller/task mappings and serialized starts. | Durable process IDs identify records; live controls exist only within the owning service lifetime. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def process_view(record: dict[str, Any]) -> ProcessView
+def ProcessManager.__init__(self, repository: Repository) -> None
+async def ProcessManager.owned(self, identifier: str, session_id: str, root: Path | None=None) -> dict
+async def ProcessManager.start(self, sandbox: Any, args: dict, config: StudioConfig, owner: ToolExecution) -> str
+async def ProcessManager._drive(self, identifier: str, run_id: str, sandbox: Any, data: dict, control: CommandControl) -> None
+async def ProcessManager._drive.output(frame: dict) -> None
+async def ProcessManager.input(self, identifier: str, session_id: str, text: str, eof: bool=False, root: Path | None=None) -> ProcessView
+async def ProcessManager.stop(self, identifier: str, session_id: str, root: Path | None=None) -> ProcessView
+async def ProcessManager.stop_run(self, run_id: str) -> None
+async def ProcessManager.close(self) -> None
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## src/rtagent/toolchains.py
+
+**Layer: Infrastructure / explicit runtime staging.** Provides trusted runtime files to native sandboxes without importing the host environment or modifying original ACLs.
+
+**Connections and effects:** Settings stores at most three explicit runtime roots. Windows applies only private-copy AppContainer read/execute ACLs; Linux mounts filtered copies read-only. Commands install/use workspace packages offline.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`validate_toolchains`](../../src/rtagent/toolchains.py#L14) | Validate specific runtime registrations. | Require absolute existing unlinked directories and reject drives, home and workspace ancestors. | Narrow trusted roots avoid silently exposing all host tools, credentials or user directories. |
+| [`copy_toolchains`](../../src/rtagent/toolchains.py#L37) | Stage bounded ordinary runtime files. | Filter excluded names, reject links/special files, cap combined entries/bytes, check actual sizes and stop/deadline each entry, preserving relative paths. | Private ACL/mount grants apply to a controlled copy; preparation cancellation waits before deleting its directory. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def validate_toolchains(roots: list[str], workspace: Path) -> list[Path]
+def copy_toolchains(roots: list[str], destination: Path, workspace: Path, stop: threading.Event | None=None, deadline: float | None=None) -> list[Path]
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## src/rtagent/downloads.py
+
+**Layer: Infrastructure / bounded public dependency transfer.** Implements the separate fetch_url application tool under explicit native tool policy.
+
+**Connections and effects:** This HTTP boundary is outside command OS networking, like application file tools. It accepts only exact allowlisted public HTTPS port-443 hosts, no credentials/query/fragment/redirect/proxy, optional expected hash, and a new workspace destination.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`public_address`](../../src/rtagent/downloads.py#L18) | Resolve and pin a public destination. | Resolve DNS off-thread, require every answer to be a global IP and select one literal address. | Private/local/fake-IP resolution fails before transmission and later DNS changes cannot redirect the request. |
+| [`save_download`](../../src/rtagent/downloads.py#L27) | Persist one checked body to a new scoped file. | Validate workspace path, cap 16 MiB, open exclusively and remove a partial file after closing on write failure. | Transfer cannot overwrite project files or leave a misleading successful destination after failed I/O. |
+| [`fetch_url`](../../src/rtagent/downloads.py#L49) | Download one bounded allowlisted dependency. | Validate HTTPS/host/URL constraints, pin the public IP with original Host/TLS SNI, disable redirects/proxy/content expansion, bound streamed bytes, verify SHA-256 and save. | Commands retain no network; provenance and digest return as an ordinary tool receipt with no arbitrary internet allowance. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+async def public_address(host: str) -> str
+def save_download(workspace: Workspace, relative: str, body: bytes) -> None
+async def fetch_url(workspace: Workspace, hosts: list[str], url: str, path: str, sha256: str | None=None) -> dict
+```
+
+These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
+
+</details>
+
+## src/rtagent/packages.py
+
+**Layer: Infrastructure / reusable prompt and Skill data.** Imports/exports small explicit data packages without runtime configuration, credentials or execution state.
+
+**Connections and effects:** Preset persistence remains Repository-owned; Skill resources use validated Workspace paths and lock/staging. No installed plugin code or hidden instruction mutation occurs.
+
+Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
+
+| Function / source | Purpose and contract | How it works | Why / architectural role |
+| --- | --- | --- | --- |
+| [`import_preset`](../../src/rtagent/packages.py#L11) | Construct a new editable preset from a package. | Deep-copy data, assign fresh aggregate/block IDs, set initial revision for ordinary save and preserve explicit templates/roles/orders. | Import never overwrites existing identity or copies effects/checkpoints/configuration. |
+| [`export_skill`](../../src/rtagent/packages.py#L25) | Collect one valid procedure and its text resources. | Load validated metadata/body, walk ordinary unlinked files, reject excluded paths and enforce UTF-8 file/count/byte limits. | Reusable instructions include their supporting evidence without exporting private runtime data. |
+| [`import_skill`](../../src/rtagent/packages.py#L49) | Atomically publish a new validated procedure directory. | Reject existing/bundled names, preflight portable paths/traversal/case/file-directory aliases, stage all resources, validate frontmatter and rename under the workspace lock. | Invalid packages never leave a partially visible Skill, and publication never executes resource code or changes policy. |
+
+<details>
+<summary>Source signatures (including private and nested functions)</summary>
+
+```python
+def import_preset(package: PresetPackage) -> Preset
+def export_skill(workspace: Workspace, name: str) -> SkillPackage
+def import_skill(workspace: Workspace, package: SkillPackage) -> dict
 ```
 
 These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.

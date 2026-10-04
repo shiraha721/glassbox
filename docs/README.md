@@ -6,21 +6,24 @@ The target is an extensible everyday agent harness in the scope of [pi](https://
 
 ## Current status
 
-As of 2026-10-04, Stage 1 and the Windows Stage 2 local-agent workflow are implemented and accepted:
+As of 2026-10-04, Stages 1–4 are implemented; the Windows daily-agent and extensible-harness workflows are accepted:
 
 - Direct **Run**, streaming replies, persistent conversations, cancellation, approval, and checkpoint recovery. Preview is optional.
 - Prompt blocks with roles, ordering, conditions, variables, and source mapping; live draft inspection, including empty task input; immutable Run inputs.
 - Continuous chat history, conversation rename/duplicate/fork/archive/delete, flat folders, and reversible preset drafts.
 - OpenAI-compatible Chat Completions with configurable Base URL, model, and server-side API key. The real adapter is the default; a missing model produces a configuration error.
-- Fifteen native tools: file listing, glob/literal search, ranged reads, scoped instructions, guarded writes/edits/patches, recorded plans, native commands, memory, Skills, and the approval-check echo tool.
+- Twenty native tools: file/search/read/instructions, guarded writes/patches, plans, native commands, memory/Skills, background process/poll/input/stop, controlled downloads and approval-check echo.
 - Native Windows PowerShell execution in AppContainer, or Linux Bash in bubblewrap. Chat shows patch diffs and recorded task progress; Tools shows grouped schemas and effective permissions.
 - Named Projects bind conversations to local workspace folders, with project-specific instructions, files, commands, memory, and Skills. Bundled procedures include skill-creator, debugging, and code-review.
 - Five editable presets: Security analysis, General agent, Coding, Debugging, and Code review. Recorded environment context tells the model its actual root, command language, tool exposure, and limits.
 - Stateless stdio/Streamable HTTP MCP, per-tool permissions, captured requests, tool results, usage, and redacted exports.
+- Explicit context compaction/accounting/restoration with original history preserved; native command output streams before completion and background commands accept bounded UTF-8 pipe input/EOF.
+- Explicit trusted runtime folders and exact public HTTPS download hosts; commands keep their no-network boundary and dependencies run offline.
+- Shared Python Harness and existing-service AgentClient, CLI/JSON-RPC, committed event observation/additional tool guards, trusted local tools, new-identity prompt/Skill data packages and an explicit Messages provider adapter.
 
 Real-model acceptance completed multi-file coding, actual sandbox checks, Skill creation, evidence-based security analysis, and memory/Skill reuse after restart in a registered project. The final acceptance captured 35 model requests and 70 tool calls. Separate real HTTP checks verify native isolation, read-only mode, cancellation, project boundaries, and conversation management. See [Stage 2 acceptance](acceptance-stage2.md) for scenarios, evidence, commands, and limits.
 
-The subsequent [Codex capability review](codex-gap-review.md) closes concrete tool/prompt gaps. Its separate real-model acceptance captured 14 requests and 26 tool calls for hash-guarded multi-file repair and a read-only vulnerability review. Longer-session compaction, command streaming and persistent processes remain Stage 3 work.
+The subsequent [Codex capability review](codex-gap-review.md) closes concrete tool/prompt gaps. Its separate real-model acceptance captured 14 requests and 26 tool calls for hash-guarded multi-file repair and a read-only vulnerability review. Stage 3/4 acceptance added **41 real model requests and 63 tool calls** for multi-file CSV repair, background worker input/cleanup, three-call context reduction, continued CLI implementation, restarted approval and a real embedded extension. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md) and [Harness interfaces](harness.md). External Claude and Linux-native acceptance remain separate unperformed checks.
 
 See [Architecture](architecture.md) for the whole-system design and the [Architecture Reference](reference/README.md) for every module, class, function, callback, and dependency role. The [Development Guide](development.md) defines repository conventions. [AGENTS.md](../AGENTS.md) is the root entry point for coding agents.
 
@@ -70,13 +73,17 @@ sudo apt-get install bash bubblewrap util-linux
 - On Windows, commands run in a unique AppContainer with no network capabilities. A private workspace copy has read/write or read-only ACLs. PowerShell starts at `Workspace:\`; `$env:RTAGENT_WORKSPACE` gives the native directory. A Job Object limits the process tree to 32 processes and terminates descendants on completion, timeout, Stop, or server exit. Original project and system ACLs are not modified.
 - On Linux, private mount/process/network namespaces expose the project at /workspace, read-only system binaries/libraries, and scratch storage. The host home and network are not mounted into that environment.
 - Server credential variables and the host PATH are not forwarded. Existing .env files, Git metadata, runtime databases, the configured data directory, and dependency/cache directories are excluded. .env.example remains readable. AppContainer retains access to Windows resources normally readable by sandboxed applications; it is not a VM or a claim that every public host file is hidden.
-- Network access is disabled, including local host services and downloads. Windows uses AppContainer enforcement; Linux uses a private network namespace.
+- Command network access is disabled, including local host services. Windows uses AppContainer enforcement; Linux uses a private network namespace. The separate allowlisted fetch_url tool downloads a bounded public HTTPS file without granting commands network access.
 - **Settings → Workspace sandbox** selects workspace-write or read-only. Read-only also removes native file/memory/skill mutation tools from model exposure. Scratch storage remains writable.
 - Command deadlines, bounded stdout/stderr, and process-tree cleanup apply. Timeout/cancellation can leave partial project edits; inspect those files before repeating a write.
 
 On Windows, changed files are copied back after all command processes stop, with checks against concurrent host edits. Edits appear after the call completes. The copy is limited to 64 MiB and 10,000 entries in each direction, excluding dependencies and runtime data. Links, aliases, unsupported files, and conflicting edits fail explicitly. Copy-back is not an atomic multi-file transaction. Linux uses a direct workspace mount.
 
-Windows commands can use built-in PowerShell and permitted executables; arbitrary host development environments are not imported. Network allowlists, interactive terminals, persistent background jobs, and disk quotas remain future work. The boundary assumes the workspace is not concurrently modified by a hostile host process. See [Microsoft's AppContainer documentation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer) for the Windows security model.
+Windows commands can use built-in PowerShell and explicitly registered trusted runtimes; arbitrary host development environments are not imported. Settings accepts up to three specific runtime folders, staged read-only without modifying original ACLs (20,000 entries/256 MiB total). Python finds offline workspace packages at .rtagent/packages. **Public download hosts** accepts up to twenty exact HTTPS hostnames. fetch_url rejects private/non-global DNS answers, credentials/query/fragment, redirects/proxies and existing destinations; downloads cap at 16 MiB and can require SHA-256. General shell networking, full PTY/ConPTY terminals and disk quotas remain outside these stages. The boundary assumes the workspace is not concurrently modified by a hostile host process. See [Microsoft's AppContainer documentation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer).
+
+For a Python runtime, `uv run python -c "import sys; from pathlib import Path; print(Path(sys.base_prefix).resolve())"` prints its real folder. Enter that folder in Settings, rather than a drive/home/workspace ancestor or a linked alias. Installing dependencies remains an explicit task: download a known artifact with an expected digest, inspect it, then use an offline install/extraction in the sandbox.
+
+**Processes** shows owned background commands with bounded output, PID/status, **Send line**, **Close stdin** and **Stop process**. The model uses start_process/poll_process/send_process_input/stop_process under ordinary permissions. At most four processes run; each has an absolute deadline capped by the original Run budget. Input is a UTF-8 pipe (8 KiB/frame), not terminal emulation. Successful Runs may leave a command active for later turns. Stop, timeout, Run failure/cancellation and service exit clean up its process tree. Restart retains interrupted evidence and never relaunches it. Windows files copy back after exit. Archive/delete/workspace moves require stopping active writers; conversation copies never clone processes.
 
 Native file tools use relative paths and reject traversal/links. `read_text` reads a line range from UTF-8 files up to 2 MiB and returns the full-file hash, range/total/next-line metadata, and explicit truncation. Request another range instead of assuming a truncated result is complete. `search_files` matches relative globs; `search_text` searches literal text with line numbers, optional case sensitivity, and bounded scan/results. Neither launches an unrestricted host search process.
 
@@ -96,7 +103,7 @@ The workspace path appears in the conversation header, Workspace, and each saved
 
 ## Memory and Skills
 
-**Workspace → Memory** edits .rtagent/MEMORY.md. The agent uses read_memory/save_memory for the same file. There is no vector store or hidden automatic summarization.
+**Workspace → Memory** edits .rtagent/MEMORY.md. The agent uses read_memory/save_memory for the same file. There is no vector store or hidden automatic summarization. Conversation compaction is a separate explicit action, not an automatic memory update.
 
 Prompt composer shows the active project's selected root instruction document, memory, catalog, and selected Skill sources in their actual insertion position. At each directory, the first nonempty AGENTS.override.md takes priority over AGENTS.md. Root instructions are captured initially; `read_instructions` loads the chain from the workspace root to a requested directory or file parent, with deeper rules taking precedence and a 32 KiB combined cap. Linked Markdown documents are read only when the agent requests them.
 
@@ -129,7 +136,11 @@ Chat displays all turns together. The conversation toolbar and message input sta
 
 In **Prompt**, the **Active preset** selector stays usable with unsaved changes. **New**, **Duplicate**, and **Rename** have separate controls. Each preset keeps its draft while switching; **Undo**, **Redo**, and **Discard changes** make edits reversible. Blocks are grouped into **Before conversation** and **Before your message** positions. Saving advances the preset revision; draft edits are local to the current page and are lost on reload.
 
-The five built-in presets share six editable blocks for identity, boundaries, practical work, native tools, memory/Skills, and reporting, followed by a seventh task-focus block. Coding emphasizes implementation and verification; Debugging emphasizes reproduction and root cause; Code review emphasizes evidence and findings; General agent handles ordinary project work; Security analysis remains the default. Recognized unchanged historical starters upgrade automatically; user edits and existing Run snapshots remain unchanged. On an existing installation, missing search/instruction permissions inherit corresponding read permissions and the new patch tool starts at Ask. Explicit permission choices are preserved.
+The five built-in presets share six editable blocks for identity, boundaries, practical work, native tools, memory/Skills, and reporting, followed by a seventh task-focus block. They now include background/input/deadline, trusted-runtime/download and derived-summary instructions. Coding emphasizes implementation and verification; Debugging emphasizes reproduction and root cause; Code review emphasizes evidence and findings; General agent handles ordinary project work; Security analysis remains the default. Exact recognized unchanged shipped presets upgrade automatically; user edits and existing Run snapshots remain unchanged. New start/input/download permissions begin at Ask; poll/stop are Allowed. Explicit choices are preserved.
+
+Open **Context** to inspect original/effective history estimates and **Compact older turns**, retaining one to ten recent successful turns intact. Compaction calls the selected model with no tools and records its requests/usage. The source history and previous Run snapshots remain unchanged. New Runs use a labeled derived summary plus recent history; **Restore full context** restores all source messages. Failed/cancelled/stale reductions never activate. Estimates are history-only byte heuristics, distinct from full Prompt inspection and actual token usage. A budget error requires an explicit user action; there is no silent trimming.
+
+Prompt and Workspace Skills have bounded JSON **Import/Export** controls. Presets import with new preset/block IDs; Skills publish only new validated names with their text resources. Packages exclude settings and execution state. [Harness interfaces](harness.md) covers CLI/JSON-RPC, HTTP/Python clients, trusted tool/hooks integration, reusable formats and Messages provider setup.
 
 ## Execution records
 
@@ -155,6 +166,8 @@ uv run python scripts/smoke_workspace.py
 uv run python scripts/smoke_conversations.py
 uv run python scripts/smoke_projects.py
 uv run python scripts/smoke_agent_tools.py
+uv run python scripts/smoke_stage3.py
+uv run python scripts/smoke_stage4.py
 ```
 
 It temporarily binds port 8766 and uses a disposable workspace with an explicitly simulated model. It exercises Windows AppContainer/PowerShell or Linux bubblewrap/Bash. It verifies direct Run retry identity, actual command/file operations, hidden host paths, network isolation, memory/Skills, context provenance, read-only enforcement, and cancellation cleanup. It does not call a model service or modify the selected user workspace.
@@ -198,7 +211,7 @@ The previous foundation/compiler/conversation/tools/recovery milestones are all 
 | --- | --- | --- |
 | **1 — Inspectable execution foundation** | Web workspace, prompt blocks, provider boundary, single-agent loop, MCP, traces, persistence, approvals, recovery | Implemented locally; a basic live-model/native-tool loop has passed on Windows. |
 | **2 — Working local agent** | Direct Run, live composition, Projects/workspace binding, native commands/read/write/edit, OS isolation, instructions, memory, Skills and skill creation | Complete on Windows; real-model coding/analysis, restart reuse, and native/project boundary checks passed. See [acceptance](acceptance-stage2.md). Linux requires acceptance on its own host. |
-| **3 — Daily agent use** | Explicit context compaction, context accounting, session branching, diff review, command output streaming, interactive/background process lifecycle, practical dependency/network policies | Conversation organization/branching, guarded patch previews, recorded plans and practical working presets are implemented. Remaining context/process/dependency scope needs its own substantial-task acceptance. |
-| **4 — Extensible harness** | Stable programmatic run interface, CLI/JSON/RPC, focused lifecycle/tool hooks, reusable prompt/skill packages, more providers | Use the same loop through Web, CLI, and embedding; add integrations without patching the core. Derive hooks from real use cases. |
+| **3 — Daily agent use** | Explicit context compaction, context accounting, session branching, diff review, command output streaming, interactive/background process lifecycle, practical dependency/network policies | Complete on Windows; substantial real-model work, preserved history, native stream/Unicode pipes/tree cleanup and explicit dependency policy passed. See [acceptance](acceptance-stage3.md). Full terminal emulation and Linux-host acceptance are outside this delivery claim. |
+| **4 — Extensible harness** | Stable programmatic run interface, CLI/JSON/RPC, focused lifecycle/tool hooks, reusable prompt/skill packages, more providers | Implemented and accepted with the shared loop, actual CLI/RPC, trusted extensions and package/provider HTTP contracts. See [acceptance](acceptance-stage4.md); external Claude remains unverified. |
 | **5 — Security analysis workflows** | Stateful MCP, accepted IDA/Ghidra/debugger/browser integrations, evidence/artifacts, reusable analysis skills | Complete representative authorized reverse-engineering, debugging, and CTF tasks with real tools and inspectable evidence. |
 | **6 — Evaluation and justified scale** | Reproducible task sets, replay/comparison, A/B and ablation, usage/cost reporting; bounded delegation, more workers, PostgreSQL or teams only when needed | Give each capability a real workload and its own acceptance criteria. Preserve the simple local path. |

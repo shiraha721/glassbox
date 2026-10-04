@@ -9,17 +9,17 @@ This reference explains implemented code from the application down to individual
 | Reference | Scope | Questions it answers |
 | --- | --- | --- |
 | [Contracts and pure logic](backend-core.md) | domain, configuration, compiler, policy, redaction. | What data crosses boundaries? How are messages assembled and permissions decided? Why separate configuration references from secrets? |
-| [Composition, use cases, and HTTP](backend-application.md) | main, Studio, all routes and SSE. | Who owns resources? How does a direct task become a frozen Run? Which actions are idempotent/version-bound? |
-| [Execution and model adapters](backend-execution.md) | providers, LangGraph nodes/tasks/recovery. | What is actually sent? How do tools return to the model? How do approval, Stop, and uncertain outcomes work? |
+| [Composition, use cases, and HTTP](backend-application.md) | main/Harness, Studio, AgentClient, CLI/RPC, all routes and SSE. | Who owns resources? How does a direct task become a frozen Run? Which actions are idempotent/version-bound? |
+| [Execution and model adapters](backend-execution.md) | providers/Messages, explicit reduction, hooks/ownership, LangGraph nodes/tasks/recovery. | What is actually sent? How do tools return to the model? How do approval, Stop, and uncertain outcomes work? |
 | [Persistence and conversation copies](backend-storage.md) | every Repository method, application tables, transactions, duplicate/fork. | Which data is authoritative? Why receipts and checkpoints are separate? Why copies do not replay effects? |
-| [Workspace, tools, and isolation](backend-workspace.md) | ordinary files, memory, Skills, native/MCP dispatch, Windows/Linux sandboxes and FFI. | Where can tools read/write? How are processes isolated/cleaned? What happens to Windows staged changes? |
+| [Workspace, tools, and isolation](backend-workspace.md) | files/Skills/packages, native/MCP/trusted-local dispatch, live pipes/processes, runtimes/downloads and Windows/Linux isolation. | Where can tools read/write? How are processes isolated/cleaned? What happens to Windows staged changes? |
 | [Frontend](frontend.md) | components/hooks/transport/state/style and generated contracts. | Who owns saved state versus drafts? How do controls submit actions? Which areas scroll and which remain fixed? |
 | [Engineering](engineering.md) | declared dependency packages, config files, migrations, scripts, every named test/helper. | What does each dependency provide? How is the schema upgraded? What does each verification function actually establish? |
 | [Anonymous callbacks](callbacks.md) | all first-party Python lambdas and TypeScript callbacks. | What do the smaller predicates, renderers, event handlers, effects, and closures contribute to their owning function? |
 
 ## Coverage and boundaries
 
-The reviewed source contains **198 backend functions/methods and 59 backend classes**, **61 frontend named functions/methods and 1 frontend class**, and **91 supporting named functions/methods plus 1 supporting test class**. Each has an individual entry. The callback appendix additionally lists **11 Python lambdas and 292 TypeScript anonymous callbacks**, including verification callbacks. This totals 350 named functions/methods, 303 anonymous functions, and 61 classes.
+The reviewed source contains **289 backend functions/methods and 76 classes**; **68 frontend functions/methods and 1 classes**; **127 support functions/methods and 1 classes**. Every declaration has an individual purpose/mechanism/reason/layer/source entry. The callback appendix covers **27 Python lambdas and 333 TypeScript anonymous callbacks**, including verification callbacks. This totals **562 named declarations**.
 
 The actual Python package is `rtagent`; its responsibilities are currently single modules. The npm package is `security-agent-studio-web`. `scripts`, `migrations`, and `tests` are supporting source directories. `skills/skill-creator`, `skills/debugging` and `skills/code-review` are packaged Markdown resources. The proposed future subpackage layout in the development guide is not an implemented directory tree.
 
