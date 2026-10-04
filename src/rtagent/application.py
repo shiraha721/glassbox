@@ -7,8 +7,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from rtagent.context import compaction_view, estimated_tokens, reduce_context
 from rtagent.domain import (
     AppError,
+    CompactionView,
+    CompactRequest,
+    ContextView,
     DraftPreviewRequest,
     MemoryDocument,
     MemorySave,
@@ -26,11 +30,12 @@ from rtagent.domain import (
     StartRun,
     StudioConfig,
     WorkspaceView,
+    digest,
     latest_plan,
     uid,
 )
 from rtagent.prompts import compile_prompt
-from rtagent.providers import prepare
+from rtagent.providers import prepare, transformations
 from rtagent.runtime import Runner
 from rtagent.storage import Repository
 from rtagent.tools import ToolRegistry
@@ -45,6 +50,97 @@ class Studio:
         """Share the process-owned repository, registry, and runner between use cases."""
         self.repository, self.registry, self.runner = repository, registry, runner
         self.commands = asyncio.Lock()
+        self.compaction_tasks: dict[str, asyncio.Task[None]] = {}
+
+    async def close(self) -> None:
+        """Stop explicit reduction jobs before their repository resources are closed."""
+        tasks = list(self.compaction_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def context(self, session_id: str) -> ContextView:
+        """Expose estimated history accounting and the recorded active summary boundary."""
+        session = await self.repository.session(session_id)
+        effective = await self.repository.effective_history(session)
+        config = await self.repository.config()
+        return ContextView(
+            session_id=session_id,
+            raw_messages=len(session["messages"]),
+            effective_messages=len(effective),
+            raw_estimated_tokens=estimated_tokens(session["messages"]),
+            effective_estimated_tokens=estimated_tokens(effective),
+            context_window=config.provider.context_window,
+            reserved_output_tokens=config.provider.max_output_tokens,
+            active_compaction_id=session.get("compaction_id"),
+            compacting_id=session.get("compacting_id"),
+            compactions=[
+                compaction_view(item) for item in await self.repository.list_compactions(session_id)
+            ],
+        )
+
+    async def compact(self, session_id: str, request: CompactRequest) -> CompactionView:
+        """Start an explicit source-bound summary job while retaining every original message."""
+        async with self.commands:
+            session = await self.repository.session(session_id)
+            config = await self.repository.config()
+            if config.revision != request.config_revision:
+                raise AppError(
+                    "revision_conflict", "Settings changed. Reload before compacting.", 409
+                )
+            turns = [
+                item
+                for item in await self.repository.list_runs(session_id)
+                if item["status"] == "succeeded"
+            ]
+            if len(turns) <= request.keep_recent_turns:
+                raise AppError(
+                    "compaction_scope",
+                    "Keep fewer recent turns, or complete more turns before compacting.",
+                )
+            older = turns[: -request.keep_recent_turns]
+            count = sum(1 + len(item["messages"]) for item in older)
+            previous = (
+                await self.repository.compaction(session["compaction_id"])
+                if session.get("compaction_id")
+                else None
+            )
+            previous_data = previous["data"] if previous else {}
+            previous_count = previous_data.get("covered_messages", 0)
+            if count <= previous_count:
+                raise AppError("compaction_scope", "No additional older turns need reduction.")
+            data = {
+                "source_revision": session["revision"],
+                "covered_messages": count,
+                "source_hash": digest(session["messages"][:count]),
+                "source_messages": session["messages"][previous_count:count],
+                "previous_covered": previous_count,
+                "previous_summary": previous_data.get("summary", ""),
+                "previous_compaction_id": session.get("compaction_id"),
+                "config": config.model_dump(),
+                "calls": [],
+                "summary": "",
+                "through_run_id": older[-1]["id"],
+            }
+            record = await self.repository.begin_compaction(
+                session_id, request.expected_revision, data
+            )
+            task = asyncio.create_task(reduce_context(self.repository, record))
+            self.compaction_tasks[record["id"]] = task
+            task.add_done_callback(lambda completed: self.compaction_tasks.pop(record["id"], None))
+            return compaction_view(record)
+
+    async def stop_compaction(self, session_id: str, identifier: str) -> CompactionView:
+        """Stop a selected reduction without activating partial summary text."""
+        record = await self.repository.compaction(identifier)
+        if record["session_id"] != session_id:
+            raise AppError("not_found", "Compaction does not belong to this conversation.", 404)
+        task = self.compaction_tasks.get(identifier)
+        if task:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        return compaction_view(await self.repository.compaction(identifier))
 
     async def workspace_registry(self, project_id: str | None = None) -> ToolRegistry:
         """Resolve native files/tools from the selected project, never from model arguments."""
@@ -148,6 +244,14 @@ class Studio:
                     "Host credentials, Git metadata, runtime data, and dependencies are excluded. "
                     "MCP tools use their explicitly configured external connections.\n"
                     f"Exposed tools: {', '.join(tool.name for tool in tools) or '(none)'}.\n"
+                    f"Trusted runtime directories: {config.toolchain_roots or '(none)'}. "
+                    "Copies are read-only; use RTAGENT_TOOLCHAIN_1 etc. for their sandbox paths. "
+                    "Python workspace packages: .rtagent/packages (PYTHONPATH); pip is offline.\n"
+                    f"HTTPS download hosts: {', '.join(config.network_hosts) or '(none)'}. "
+                    "fetch_url downloads public resources separately; commands still have no network.\n"
+                    "Background commands use start_process/poll_process/send_process_input/stop_process. "
+                    "Use pipe stdin, not terminal interactions. Windows copies back after exit; "
+                    "background commands see their initial private workspace copy.\n"
                     f"Run limits: {config.max_steps} model steps, {config.max_tool_calls} tool calls, "
                     f"{config.tool_timeout:g}s per tool, {config.run_timeout:g}s active runtime."
                 ),
@@ -169,6 +273,7 @@ class Studio:
                 compiled=compiled,
                 prepared_request=prepared,
                 tools=tools,
+                transformations=transformations(config.provider.adapter),
             ),
             workspace_context,
         )
@@ -184,7 +289,7 @@ class Studio:
             session = await self.repository.session(request.session_id)
             if session["revision"] != request.expected_session_revision:
                 raise AppError("revision_conflict", "Reload the latest conversation.", 409)
-            history = session["messages"]
+            history = await self.repository.effective_history(session)
             project_id = session["project_id"]
         inspection, _ = await self._prepare(
             request.preset,
@@ -202,7 +307,7 @@ class Studio:
         session = await self.repository.session(request.session_id)
         preset = await self.repository.preset(request.preset_id)
         config = await self.repository.config()
-        if session["active_run_id"]:
+        if session["active_run_id"] or session.get("compacting_id"):
             raise AppError("session_busy", "Finish or cancel the current Run first.", 409)
         if session["archived"]:
             raise AppError(
@@ -217,10 +322,11 @@ class Studio:
                 "revision_conflict", "Reload the latest preset, settings, and session.", 409
             )
         registry = await self.workspace_registry(session["project_id"])
+        history = await self.repository.effective_history(session)
         inspection, workspace_context = await self._prepare(
             preset,
             config,
-            session["messages"],
+            history,
             request.input,
             request.variables,
             request.skills,
@@ -235,7 +341,8 @@ class Studio:
             "schema_version": 1,
             "preset": preset.model_dump(),
             "config": config.model_dump(),
-            "history": session["messages"],
+            "history": history,
+            "context_compaction_id": session.get("compaction_id"),
             "input": request.input,
             "variables": request.variables,
             "tools": [tool.model_dump() for tool in inspection.tools],
@@ -307,6 +414,19 @@ class Studio:
                 for call in await self.repository.trace(run_id)
                 if call["status"] == "outcome_unknown"
             ],
+        )
+        active = next(
+            (
+                call
+                for call in reversed(await self.repository.trace(run_id))
+                if call["kind"] == "tool" and call["status"] == "executing"
+            ),
+            None,
+        )
+        values["active_tool"] = (
+            {"id": active["id"], "name": active["data"]["name"], **active["data"].get("output", {})}
+            if active
+            else None
         )
         return RunView.model_validate(values)
 
@@ -400,6 +520,9 @@ class Studio:
     async def save_config(self, value: StudioConfig) -> StudioConfig:
         """Apply optimistic version checks and invalidate stale MCP discovery."""
         previous = await self.repository.config()
+        from rtagent.toolchains import validate_toolchains
+
+        await asyncio.to_thread(validate_toolchains, value.toolchain_roots, self.registry.workspace)
         saved = await self.repository.save_config(value)
         if saved.mcp_servers != previous.mcp_servers:
             self.registry.reset()
@@ -409,7 +532,14 @@ class Studio:
         """Remove checkpoints and owned data only after the session becomes idle."""
         async with self.commands:
             session = await self.repository.session(session_id)
-            if session["active_run_id"]:
+            if (
+                session["active_run_id"]
+                or session["compacting_id"]
+                or any(
+                    item["status"] in {"starting", "running", "stopping"}
+                    for item in await self.repository.list_processes(session_id)
+                )
+            ):
                 raise AppError(
                     "session_busy", "Cancel the active Run before deleting this session.", 409
                 )

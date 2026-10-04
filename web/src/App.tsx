@@ -43,6 +43,8 @@ import { usePresetDrafts } from './usePresetDrafts';
 import { useLivePreview } from './useLivePreview';
 import { ToolsPanel } from './ToolCatalog';
 import { TaskPlan } from './TaskPlan';
+import { ContextPanel } from './ContextPanel';
+import { ProcessesPanel } from './ProcessesPanel';
 
 const emptyRuns: Run[] = [];
 
@@ -56,6 +58,8 @@ export default function App() {
   const query = useQuery({
     queryKey: ['bootstrap'],
     queryFn: () => request<Bootstrap>('/bootstrap'),
+    refetchInterval: (state) =>
+      state.state.data?.sessions.some((item) => !!item.compacting_id) ? 1000 : false,
   });
   if (query.isPending) return <div className="loading-screen">Loading workspace…</div>;
   if (query.isError && !query.data)
@@ -94,7 +98,9 @@ function Workspace({ data }: { data: Bootstrap }) {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.matchMedia('(min-width: 761px)').matches,
   );
-  const [panel, setPanel] = useState<'prompt' | 'inspector' | 'workspace' | 'tools' | null>(null);
+  const [panel, setPanel] = useState<
+    'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes' | null
+  >(null);
   const [skills, setSkills] = useState<string[]>([]);
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -148,6 +154,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       cache.invalidateQueries({ queryKey: ['runs'] }),
       cache.invalidateQueries({ queryKey: ['trace'] }),
       cache.invalidateQueries({ queryKey: ['workspace'] }),
+      cache.invalidateQueries({ queryKey: ['context'] }),
     ]);
   };
   const perform = async (operation: () => Promise<void>) => {
@@ -346,6 +353,22 @@ function Workspace({ data }: { data: Bootstrap }) {
           <div className="topbar-actions">
             <button
               className="button quiet"
+              disabled={!session}
+              aria-pressed={panel === 'processes'}
+              onClick={() => setPanel(panel === 'processes' ? null : 'processes')}
+            >
+              <Terminal size={15} /> Processes
+            </button>
+            <button
+              className="button quiet"
+              disabled={!session || busy}
+              aria-pressed={panel === 'context'}
+              onClick={() => setPanel(panel === 'context' ? null : 'context')}
+            >
+              Context{session?.compaction_id ? ' · compacted' : ''}
+            </button>
+            <button
+              className="button quiet"
               disabled={busy}
               aria-pressed={panel === 'tools'}
               onClick={() => setPanel(panel === 'tools' ? null : 'tools')}
@@ -536,6 +559,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                         (event.ctrlKey || event.metaKey) &&
                         input.trim() &&
                         !active &&
+                        !session?.compacting_id &&
                         !busy
                       ) {
                         event.preventDefault();
@@ -595,7 +619,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                           </button>
                           <button
                             className="button primary"
-                            disabled={busy || !input.trim()}
+                            disabled={busy || !input.trim() || !!session?.compacting_id}
                             onClick={() => void perform(start)}
                           >
                             <Play size={13} />
@@ -623,6 +647,10 @@ function Workspace({ data }: { data: Bootstrap }) {
               onSkills={setSkills}
               onWorkspace={() => setPanel('workspace')}
               onRefreshContext={() => void workspaceQuery.refetch()}
+              onImported={async (value) => {
+                await refresh();
+                drafts.select(value);
+              }}
               dirty={dirty}
               busy={busy}
               onClose={() => setPanel(null)}
@@ -662,6 +690,21 @@ function Workspace({ data }: { data: Bootstrap }) {
               onClose={() => setPanel(null)}
             />
           </div>
+          {panel === 'context' && session && (
+            <div className="utility-pane">
+              <ContextPanel
+                session={session}
+                config={data.config}
+                onClose={() => setPanel(null)}
+                onChanged={refresh}
+              />
+            </div>
+          )}
+          {panel === 'processes' && session && (
+            <div className="utility-pane">
+              <ProcessesPanel session={session} onClose={() => setPanel(null)} />
+            </div>
+          )}
           {panel === 'tools' && (
             <div className="utility-pane">
               <ToolsPanel
@@ -832,6 +875,23 @@ function RunTurn({
               </Markdown>
             </div>
           </div>
+        </article>
+      )}
+      {run.active_tool && (
+        <article className="live-tool-output">
+          <div className="row">
+            <Terminal size={15} />
+            <strong>{String(run.active_tool.name)}</strong>
+            <span className="activity-dot" />
+            Running
+          </div>
+          {!!(run.active_tool.stdout || run.active_tool.stderr) && (
+            <pre>
+              {String(run.active_tool.stdout || '')}
+              {run.active_tool.stderr ? `\n[stderr]\n${String(run.active_tool.stderr)}` : ''}
+            </pre>
+          )}
+          {!!run.active_tool.truncated && <span className="subtle">Output truncated</span>}
         </article>
       )}
       {['queued', 'running'].includes(run.status) && !run.partial_output && (

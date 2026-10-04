@@ -11,6 +11,10 @@ from pydantic import Field
 
 from rtagent.domain import (
     ApprovalDecision,
+    CompactionView,
+    CompactRequest,
+    ContextRestore,
+    ContextView,
     Contract,
     DraftPreviewRequest,
     FolderCreate,
@@ -19,8 +23,11 @@ from rtagent.domain import (
     MemoryDocument,
     MemorySave,
     Preset,
+    PresetPackage,
     Preview,
     PreviewRequest,
+    ProcessInput,
+    ProcessView,
     ProjectCreate,
     ProjectView,
     PromptInspection,
@@ -31,6 +38,7 @@ from rtagent.domain import (
     SessionUpdate,
     SessionView,
     SkillDocument,
+    SkillPackage,
     SkillSave,
     StartRun,
     StudioConfig,
@@ -38,10 +46,74 @@ from rtagent.domain import (
     TraceView,
     WorkspaceView,
 )
+from rtagent.packages import export_skill, import_preset, import_skill
+from rtagent.processes import process_view
 from rtagent.storage import TERMINAL
 from rtagent.tracing import redact
 
 router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/presets/{preset_id}/export", response_model=PresetPackage)
+async def preset_export(preset_id: str, request: Request) -> PresetPackage:
+    """Export the saved prompt aggregate, excluding all configuration and execution evidence."""
+    return PresetPackage(preset=await request.app.state.studio.repository.preset(preset_id))
+
+
+@router.post("/presets/import", response_model=Preset, status_code=201)
+async def preset_import(body: PresetPackage, request: Request) -> Preset:
+    """Save a reusable prompt as a new independent aggregate with fresh block IDs."""
+    return await request.app.state.studio.repository.save_preset(import_preset(body))
+
+
+@router.get("/workspace/skills/{name}/export", response_model=SkillPackage)
+async def skill_export(name: str, request: Request, project_id: str | None = None) -> SkillPackage:
+    """Export one selected workspace's Skill and bounded supporting files."""
+    registry = await request.app.state.studio.workspace_registry(project_id)
+    return await asyncio.to_thread(export_skill, registry.files, name)
+
+
+@router.post("/workspace/skills/import", response_model=SkillDocument, status_code=201)
+async def skill_import(body: SkillPackage, request: Request, project_id: str | None = None) -> dict:
+    """Publish a new Skill only after all source paths and its entry document are validated."""
+    registry = await request.app.state.studio.workspace_registry(project_id)
+    from rtagent.domain import AppError
+
+    if (await request.app.state.studio.repository.config()).sandbox_mode == "read-only":
+        raise AppError("tool_denied", "The workspace is read-only.", 403)
+    return await asyncio.to_thread(import_skill, registry.files, body)
+
+
+@router.get("/runs/{run_id}/event-log", response_model=list[RunEvent])
+async def event_log(run_id: str, request: Request, after: int = 0) -> list[dict]:
+    """Read a finite event page for CLI/RPC clients without subscribing to SSE."""
+    await request.app.state.studio.repository.run(run_id)
+    return await request.app.state.studio.repository.read_events(run_id, max(0, after))
+
+
+@router.get("/sessions/{session_id}/processes", response_model=list[ProcessView])
+async def list_processes(session_id: str, request: Request) -> list[ProcessView]:
+    """Read lifecycle records without reconnecting to or recreating a sandbox process."""
+    return [
+        process_view(item)
+        for item in await request.app.state.studio.repository.list_processes(session_id)
+    ]
+
+
+@router.post("/sessions/{session_id}/processes/{identifier}/input", response_model=ProcessView)
+async def process_input(
+    session_id: str, identifier: str, body: ProcessInput, request: Request
+) -> ProcessView:
+    """Send the user's explicit bounded pipe input to this conversation's live process."""
+    return await request.app.state.studio.registry.processes.input(
+        identifier, session_id, body.text, body.eof
+    )
+
+
+@router.post("/sessions/{session_id}/processes/{identifier}/stop", response_model=ProcessView)
+async def stop_process(session_id: str, identifier: str, request: Request) -> ProcessView:
+    """Wait for native cleanup before returning the user's stop action."""
+    return await request.app.state.studio.registry.processes.stop(identifier, session_id)
 
 
 class SessionCreate(Contract):
@@ -155,6 +227,48 @@ async def create_project(body: ProjectCreate, request: Request) -> ProjectView:
 async def get_session(session_id: str, request: Request) -> dict[str, Any]:
     """Read committed history and the active Run identifier."""
     return await request.app.state.studio.repository.session(session_id)
+
+
+@router.get("/sessions/{session_id}/context", response_model=ContextView)
+async def session_context(session_id: str, request: Request) -> ContextView:
+    """Inspect estimated history accounting and explicit summary provenance."""
+    return await request.app.state.studio.context(session_id)
+
+
+@router.post("/sessions/{session_id}/compact", response_model=CompactionView, status_code=202)
+async def compact_session(
+    session_id: str, body: CompactRequest, request: Request
+) -> CompactionView:
+    """Explicitly reduce older turns without modifying their saved evidence."""
+    return await request.app.state.studio.compact(session_id, body)
+
+
+@router.put("/sessions/{session_id}/context", status_code=204)
+async def restore_context(session_id: str, body: ContextRestore, request: Request) -> Response:
+    """Deactivate the summary and restore original history for subsequent Runs."""
+    await request.app.state.studio.repository.reset_compaction(session_id, body.expected_revision)
+    return Response(status_code=204)
+
+
+@router.get("/sessions/{session_id}/compactions/{identifier}")
+async def compaction_evidence(
+    session_id: str, identifier: str, request: Request, redacted: bool = True
+) -> dict[str, Any]:
+    """Read original or labelled redacted model evidence for one owned reduction."""
+    from rtagent.domain import AppError
+
+    record = await request.app.state.studio.repository.compaction(identifier)
+    if record["session_id"] != session_id:
+        raise AppError("not_found", "Compaction does not belong to this conversation.", 404)
+    return {"redacted": redacted, **(redact(record) if redacted else record)}
+
+
+@router.post(
+    "/sessions/{session_id}/compactions/{identifier}/cancel", response_model=CompactionView
+)
+async def cancel_compaction(session_id: str, identifier: str, request: Request) -> CompactionView:
+    """Cancel a current reduction and keep the previous effective context."""
+    return await request.app.state.studio.stop_compaction(session_id, identifier)
 
 
 @router.patch("/sessions/{session_id}", response_model=SessionView)

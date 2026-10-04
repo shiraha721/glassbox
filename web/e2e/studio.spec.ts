@@ -19,6 +19,66 @@ async function startTask(page: Page, input: string) {
   await page.getByRole('button', { name: 'Run', exact: true }).click();
 }
 
+test('daily work compacts history, reuses preset packages and controls a native pipe process', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await openWorkspace(page);
+  for (const turn of [
+    'First source decision.',
+    'Second verified decision.',
+    'Keep this recent turn.',
+  ]) {
+    await startTask(page, turn);
+    await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  }
+  await page.getByRole('button', { name: 'Context', exact: true }).click();
+  const context = page.getByLabel('Conversation context', { exact: true });
+  await context.getByLabel('Keep recent turns').selectOption('1');
+  await context.getByRole('button', { name: 'Compact older turns' }).click();
+  await expect(context.getByText('Active summary', { exact: true })).toBeVisible();
+  await expect(page.locator('.conversation-turn')).toHaveCount(3);
+  await context.getByRole('button', { name: 'Restore full context' }).click();
+  await expect(context.getByText('Active summary', { exact: true })).not.toBeAttached();
+  await context.getByRole('button', { name: 'Close context' }).click();
+  await page.getByRole('button', { name: 'Prompt', exact: true }).click();
+  const boot = await (await page.request.get('/api/v1/bootstrap')).json();
+  const packageData = {
+    format: 'rtagent.preset.v1',
+    preset: {
+      ...boot.presets.find((item: { id: string }) => item.id === 'coding'),
+      name: 'Imported browser coding',
+    },
+  };
+  await page.getByLabel('Import preset package', { exact: true }).setInputFiles({
+    name: 'coding.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(packageData)),
+  });
+  await expect(page.getByLabel('Active preset', { exact: true })).toHaveValue(/^[a-f0-9]{32}$/);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export preset', exact: true }).click();
+  expect((await download).suggestedFilename()).toContain('preset');
+  await page.getByRole('button', { name: 'Close prompt' }).click();
+  const shell =
+    process.platform === 'win32'
+      ? "[Console]::WriteLine('browser-ready'); $line=[Console]::ReadLine(); [Console]::WriteLine('received:'+$line); Start-Sleep -Seconds 60"
+      : "printf 'browser-ready\\n'; read -r line; printf 'received:%s\\n' \"$line\"; sleep 60";
+  await startTask(page, '/tool start_process ' + JSON.stringify({ command: shell, timeout: 60 }));
+  await expect(page.getByTestId('run-status')).toHaveText('waiting approval');
+  await page.getByRole('button', { name: 'Approve once', exact: true }).click();
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await page.getByRole('button', { name: 'Processes', exact: true }).click();
+  const processes = page.getByLabel('Conversation processes', { exact: true });
+  await expect(processes.locator('.process-output')).toContainText('browser-ready');
+  await processes.getByLabel('Pipe input', { exact: true }).fill('browser input λ');
+  await processes.getByRole('button', { name: 'Send line', exact: true }).click();
+  await expect(processes.locator('.process-output')).toContainText('received:browser input λ');
+  await processes.getByRole('button', { name: 'Stop process', exact: true }).click();
+  await expect(processes.getByText('stopped', { exact: true })).toBeVisible();
+  await page.screenshot({ path: 'test-results/daily-processes.png', fullPage: true });
+});
+
 test('tools expose schemas and effective policy, presets and recorded plans remain inspectable', async ({
   page,
 }) => {

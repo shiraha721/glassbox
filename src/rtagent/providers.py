@@ -11,6 +11,7 @@ import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
+from rtagent.anthropic import prepare_anthropic, stream_anthropic
 from rtagent.config import resolve_secret
 from rtagent.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall, uid
 
@@ -102,6 +103,8 @@ def prepare(
             "messages": [message.model_dump() for message in compiled.messages],
             "tools": tools,
         }
+    if config.adapter == "anthropic":
+        return prepare_anthropic(config, compiled, tools)
     # Pinned LangChain serialization is contract-tested against the HTTP boundary.
     instance = model(config, "preview-only")
     payload = instance._get_request_payload(
@@ -150,7 +153,9 @@ async def fake_stream(
         return
     if current == "/error":
         raise AppError("provider_error", "Simulated provider failure.", 502)
-    if results:
+    if current.startswith("Earlier derived summary:\n") and not tools:
+        text = "Simulated conversation summary. Original evidence is retained; no model service was called."
+    elif results:
         result_text = results[-1].content
         text = (
             "## Tool result\n\n"
@@ -173,6 +178,20 @@ async def fake_stream(
     }
 
 
+def transformations(adapter: str) -> list[str]:
+    """Name adapter serialization changes beside the preserved canonical source mapping."""
+    if adapter == "openai":
+        return ["LangChain Chat Completions serialization"]
+    if adapter == "anthropic":
+        return [
+            "Leading system blocks extracted into Messages system array in original order",
+            "Assistant tool calls serialized as tool_use blocks with unchanged IDs/arguments",
+            "Tool results serialized as user tool_result blocks; consecutive results grouped in order",
+            "Consecutive user/assistant messages may be combined by the provider",
+        ]
+    return []
+
+
 async def generate(
     config: ProviderConfig,
     compiled: CompiledPrompt,
@@ -187,6 +206,10 @@ async def generate(
     if config.adapter == "fake":
         await on_wire(None)
         async for event in fake_stream(compiled.messages, tools):
+            yield event
+        return
+    if config.adapter == "anthropic":
+        async for event in stream_anthropic(config, prepared, on_wire):
             yield event
         return
 

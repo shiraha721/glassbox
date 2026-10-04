@@ -83,6 +83,16 @@ export function Inspector({
                 Context: {preview.compiled.budget_status}. Estimate uses a byte heuristic, not the
                 provider tokenizer.
               </p>
+              {!!preview.transformations.length && (
+                <details>
+                  <summary>Provider serialization</summary>
+                  <ul>
+                    {preview.transformations.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               <div className="hash">
                 <span>{preview.input_hash.slice(0, 20)}</span>
                 <span className="badge">

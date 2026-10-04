@@ -69,11 +69,27 @@ export function Settings({
                 <select
                   value={provider.adapter}
                   onChange={(event) =>
-                    setProvider({ adapter: event.target.value as 'fake' | 'openai' })
+                    setProvider({
+                      adapter: event.target.value as Config['provider']['adapter'],
+                      ...(event.target.value === 'anthropic'
+                        ? {
+                            base_url: 'https://api.anthropic.com/v1',
+                            credential_ref: 'ANTHROPIC_API_KEY',
+                            model: '',
+                          }
+                        : event.target.value === 'openai'
+                          ? {
+                              base_url: 'https://api.openai.com/v1',
+                              credential_ref: 'OPENAI_API_KEY',
+                              model: '',
+                            }
+                          : {}),
+                    })
                   }
                 >
                   <option value="fake">Simulated model · offline</option>
                   <option value="openai">OpenAI-compatible · Chat Completions</option>
+                  <option value="anthropic">Anthropic-compatible · Messages</option>
                 </select>
               </label>
               {provider.adapter === 'fake' ? (
@@ -89,7 +105,11 @@ export function Settings({
                       <input
                         value={provider.base_url}
                         onChange={(event) => setProvider({ base_url: event.target.value })}
-                        placeholder="https://api.openai.com/v1"
+                        placeholder={
+                          provider.adapter === 'anthropic'
+                            ? 'https://api.anthropic.com/v1'
+                            : 'https://api.openai.com/v1'
+                        }
                       />
                     </label>
                     <label>
@@ -106,13 +126,19 @@ export function Settings({
                     <input
                       value={provider.credential_ref}
                       onChange={(event) => setProvider({ credential_ref: event.target.value })}
-                      placeholder="OPENAI_API_KEY"
+                      placeholder={
+                        provider.adapter === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'
+                      }
                     />
                   </label>
                   <p className="subtle">
-                    Set OPENAI_BASE_URL, OPENAI_MODEL, and OPENAI_API_KEY in .env. Base URL and
-                    model are applied on server startup; changes here apply immediately. Enter only
-                    the key variable name above, or leave it blank for a keyless local endpoint.
+                    Set{' '}
+                    {provider.adapter === 'anthropic'
+                      ? 'ANTHROPIC_BASE_URL, ANTHROPIC_MODEL, and ANTHROPIC_API_KEY'
+                      : 'OPENAI_BASE_URL, OPENAI_MODEL, and OPENAI_API_KEY'}{' '}
+                    in .env. Base URL and model are applied on server startup; changes here apply
+                    immediately. Enter only the key variable name above, or leave it blank for a
+                    keyless local endpoint.
                   </p>
                 </>
               )}
@@ -175,6 +201,47 @@ export function Settings({
               <p className="subtle">
                 Commands use native Windows AppContainer or Linux bubblewrap. Network access is
                 disabled. Check availability in Workspace. MCP servers run outside this sandbox.
+              </p>
+              <label>
+                Trusted runtime directories · one absolute path per line
+                <textarea
+                  rows={3}
+                  value={draft.toolchain_roots.join('\n')}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      toolchain_roots: event.target.value
+                        .split('\n')
+                        .filter((line) => line.trim())
+                        .map((line) => line.trim()),
+                    })
+                  }
+                />
+              </label>
+              <p className="subtle">
+                Select specific Python/Node runtime folders. They are copied into the sandbox with
+                read-only access. Original permissions stay unchanged. Python uses .rtagent/packages
+                for workspace dependencies and pip stays offline.
+              </p>
+              <label>
+                Allowed HTTPS download hosts · one exact hostname per line
+                <textarea
+                  rows={3}
+                  value={draft.network_hosts.join('\n')}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      network_hosts: event.target.value
+                        .split('\n')
+                        .filter((line) => line.trim())
+                        .map((line) => line.trim()),
+                    })
+                  }
+                />
+              </label>
+              <p className="subtle">
+                fetch_url can download up to 16 MiB to a new workspace file. Only public HTTPS
+                addresses are accepted; no redirects or command network access.
               </p>
             </section>
             <section>

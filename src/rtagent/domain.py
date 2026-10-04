@@ -103,7 +103,7 @@ class Preset(Contract):
 class ProviderConfig(Contract):
     """Serializable provider options containing references, never API key values."""
 
-    adapter: Literal["fake", "openai"] = "openai"
+    adapter: Literal["fake", "openai", "anthropic"] = "openai"
     model: str = ""
     base_url: str = "https://api.openai.com/v1"
     credential_ref: str = "OPENAI_API_KEY"
@@ -170,6 +170,7 @@ class ToolDefinition(Contract):
     server_id: str | None = None
     original_name: str | None = None
     schema_hash: str = ""
+    writes_workspace: bool = False
 
 
 class StudioConfig(Contract):
@@ -188,6 +189,11 @@ class StudioConfig(Contract):
             "edit_text": "allow",
             "apply_patch": "allow",
             "update_plan": "allow",
+            "start_process": "ask",
+            "poll_process": "allow",
+            "send_process_input": "ask",
+            "stop_process": "allow",
+            "fetch_url": "ask",
             "powershell" if os.name == "nt" else "bash": "allow",
             "read_memory": "allow",
             "save_memory": "allow",
@@ -197,11 +203,24 @@ class StudioConfig(Contract):
         }
     )
     sandbox_mode: Literal["workspace-write", "read-only"] = "workspace-write"
+    toolchain_roots: list[str] = Field(default_factory=list, max_length=3)
+    network_hosts: list[str] = Field(default_factory=list, max_length=20)
     mcp_servers: list[MCPServer] = Field(default_factory=list, max_length=10)
     max_steps: int = Field(default=20, ge=1, le=100)
     max_tool_calls: int = Field(default=40, ge=1, le=200)
     tool_timeout: float = Field(default=60, ge=0.1, le=300)
     run_timeout: float = Field(default=600, ge=1, le=3600)
+
+    @field_validator("network_hosts")
+    @classmethod
+    def exact_hosts(cls, value: list[str]) -> list[str]:
+        """Accept exact DNS hostnames only; wildcards and URL credentials are not policy."""
+        import re
+
+        for host in value:
+            if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?", host) or ".." in host:
+                raise ValueError("Use lowercase exact hostnames without ports, URLs or wildcards.")
+        return list(dict.fromkeys(value))
 
 
 class ToolCall(Contract):
@@ -341,6 +360,34 @@ class SkillSave(Contract):
     expected_hash: str | None = None
 
 
+class PresetPackage(Contract):
+    """A reusable prompt aggregate without runtime settings, secrets, history or effects."""
+
+    format: Literal["rtagent.preset.v1"] = "rtagent.preset.v1"
+    preset: Preset
+
+
+class SkillPackage(Contract):
+    """A bounded UTF-8 Skill directory manifest; import publishes only a new validated name."""
+
+    format: Literal["rtagent.skill.v1"] = "rtagent.skill.v1"
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    files: dict[str, str]
+
+    @field_validator("files")
+    @classmethod
+    def bounded_files(cls, value: dict[str, str]) -> dict[str, str]:
+        """Bound expansion before any filesystem effects and require the actual entry document."""
+        if "SKILL.md" not in value or not 1 <= len(value) <= 50:
+            raise ValueError("Include SKILL.md and at most fifty UTF-8 files.")
+        if (
+            any(len(text.encode()) > 65536 for text in value.values())
+            or sum(len(text.encode()) for text in value.values()) > 1024 * 1024
+        ):
+            raise ValueError("Package files are limited to 64 KiB each and 1 MiB total.")
+        return value
+
+
 class SandboxStatus(Contract):
     """Report the checked OS boundary, including when it is unavailable."""
 
@@ -368,6 +415,7 @@ class PromptInspection(Contract):
     compiled: CompiledPrompt
     prepared_request: dict[str, Any]
     tools: list[ToolDefinition]
+    transformations: list[str] = Field(default_factory=list)
 
 
 class Preview(PromptInspection):
@@ -485,6 +533,52 @@ class SessionCopy(Contract):
     through_run_id: str | None = None
 
 
+class CompactRequest(Contract):
+    """Explicitly summarize older complete turns using observed session/settings revisions."""
+
+    expected_revision: int = Field(ge=0)
+    config_revision: int = Field(ge=0)
+    keep_recent_turns: int = Field(default=2, ge=1, le=10)
+
+
+class ContextRestore(Contract):
+    """Restore the complete effective history using the observed conversation revision."""
+
+    expected_revision: int = Field(ge=0)
+
+
+class CompactionView(Contract):
+    """Inspectable summary provenance; original messages and requests stay in local evidence."""
+
+    id: str
+    session_id: str
+    status: Literal["running", "succeeded", "failed", "interrupted", "cancelled"]
+    created_at: str
+    source_revision: int
+    covered_messages: int
+    source_hash: str
+    summary: str = ""
+    source_compaction_id: str | None = None
+    error: str | None = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+    model_calls: int = 0
+
+
+class ContextView(Contract):
+    """Estimated history size and explicit summary boundaries, separate from actual model usage."""
+
+    session_id: str
+    raw_messages: int
+    effective_messages: int
+    raw_estimated_tokens: int
+    effective_estimated_tokens: int
+    context_window: int | None
+    reserved_output_tokens: int
+    active_compaction_id: str | None
+    compacting_id: str | None
+    compactions: list[CompactionView]
+
+
 class SessionView(Contract):
     """Conversation history containing only committed successful turns."""
 
@@ -492,6 +586,8 @@ class SessionView(Contract):
     title: str
     revision: int
     active_run_id: str | None
+    compaction_id: str | None = None
+    compacting_id: str | None = None
     messages: list[Message]
     created_at: str
     folder_id: str | None = None
@@ -522,6 +618,35 @@ class RunView(Contract):
     source_run_id: str | None = None
     unknown_calls: list[dict[str, Any]] = Field(default_factory=list)
     plan: TaskPlan | None = None
+    active_tool: dict[str, Any] | None = None
+
+
+class ProcessInput(Contract):
+    """Send bounded UTF-8 pipe input or EOF to an explicitly owned process."""
+
+    text: str = Field(default="", max_length=8192)
+    eof: bool = False
+
+
+class ProcessView(Contract):
+    """Persist a sandbox process lifecycle independently of an already completed turn."""
+
+    id: str
+    run_id: str
+    session_id: str
+    status: str
+    created_at: str
+    command: str
+    cwd: str
+    workspace_root: str
+    mode: str
+    pid: int | None = None
+    stdin_closed: bool = False
+    stdout: str = ""
+    stderr: str = ""
+    truncated: bool = False
+    result: dict[str, Any] | None = None
+    error: str | None = None
 
 
 class CallView(Contract):

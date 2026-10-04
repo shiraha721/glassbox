@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { PackageActions } from './PackageActions';
 import {
   errorMessage,
   request,
@@ -45,6 +46,7 @@ type Props = {
   onSkills: (names: string[]) => void;
   onWorkspace: () => void;
   onRefreshContext: () => void;
+  onImported?: (preset: Preset) => Promise<void>;
 };
 
 /** Keep visual ordering aligned with the compiler's two insertion slots. */
@@ -77,6 +79,7 @@ export function Composer({
   onSkills,
   onWorkspace,
   onRefreshContext,
+  onImported,
 }: Props) {
   const [renamingId, setRenamingId] = useState('');
   const update = (blocks: Block[]) => onChange({ ...preset, blocks: ordered(blocks) });
@@ -222,6 +225,17 @@ export function Composer({
           </div>
         </div>
         <div className="block-list">
+          {onImported && (
+            <PackageActions
+              kind="preset"
+              filename={`${preset.id}.preset.json`}
+              disabled={busy}
+              exportPackage={async () => ({ format: 'rtagent.preset.v1', preset })}
+              importPackage={async (value) => {
+                await onImported(await request<Preset>('/presets/import', 'POST', value));
+              }}
+            />
+          )}
           {(['before_history', 'before_input'] as const).map((placement) => (
             <section
               className="composer-slot"

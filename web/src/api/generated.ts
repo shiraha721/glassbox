@@ -4,6 +4,166 @@
  */
 
 export interface paths {
+    "/api/v1/presets/{preset_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preset Export
+         * @description Export the saved prompt aggregate, excluding all configuration and execution evidence.
+         */
+        get: operations["preset_export_api_v1_presets__preset_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/presets/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preset Import
+         * @description Save a reusable prompt as a new independent aggregate with fresh block IDs.
+         */
+        post: operations["preset_import_api_v1_presets_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/skills/{name}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Skill Export
+         * @description Export one selected workspace's Skill and bounded supporting files.
+         */
+        get: operations["skill_export_api_v1_workspace_skills__name__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skill Import
+         * @description Publish a new Skill only after all source paths and its entry document are validated.
+         */
+        post: operations["skill_import_api_v1_workspace_skills_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/event-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Event Log
+         * @description Read a finite event page for CLI/RPC clients without subscribing to SSE.
+         */
+        get: operations["event_log_api_v1_runs__run_id__event_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/processes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Processes
+         * @description Read lifecycle records without reconnecting to or recreating a sandbox process.
+         */
+        get: operations["list_processes_api_v1_sessions__session_id__processes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/processes/{identifier}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Process Input
+         * @description Send the user's explicit bounded pipe input to this conversation's live process.
+         */
+        post: operations["process_input_api_v1_sessions__session_id__processes__identifier__input_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/processes/{identifier}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Process
+         * @description Wait for native cleanup before returning the user's stop action.
+         */
+        post: operations["stop_process_api_v1_sessions__session_id__processes__identifier__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -250,6 +410,90 @@ export interface paths {
          * @description Rename, archive, restore, or move a conversation using its observed revision.
          */
         patch: operations["update_session_api_v1_sessions__session_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Session Context
+         * @description Inspect estimated history accounting and explicit summary provenance.
+         */
+        get: operations["session_context_api_v1_sessions__session_id__context_get"];
+        /**
+         * Restore Context
+         * @description Deactivate the summary and restore original history for subsequent Runs.
+         */
+        put: operations["restore_context_api_v1_sessions__session_id__context_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compact Session
+         * @description Explicitly reduce older turns without modifying their saved evidence.
+         */
+        post: operations["compact_session_api_v1_sessions__session_id__compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/compactions/{identifier}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compaction Evidence
+         * @description Read original or labelled redacted model evidence for one owned reduction.
+         */
+        get: operations["compaction_evidence_api_v1_sessions__session_id__compactions__identifier__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/compactions/{identifier}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Compaction
+         * @description Cancel a current reduction and keep the previous effective context.
+         */
+        post: operations["cancel_compaction_api_v1_sessions__session_id__compactions__identifier__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/sessions/{session_id}/copy": {
@@ -681,6 +925,62 @@ export interface components {
             result: unknown;
         };
         /**
+         * CompactRequest
+         * @description Explicitly summarize older complete turns using observed session/settings revisions.
+         */
+        CompactRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Config Revision */
+            config_revision: number;
+            /**
+             * Keep Recent Turns
+             * @default 2
+             */
+            keep_recent_turns: number;
+        };
+        /**
+         * CompactionView
+         * @description Inspectable summary provenance; original messages and requests stay in local evidence.
+         */
+        CompactionView: {
+            /** Id */
+            id: string;
+            /** Session Id */
+            session_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed" | "interrupted" | "cancelled";
+            /** Created At */
+            created_at: string;
+            /** Source Revision */
+            source_revision: number;
+            /** Covered Messages */
+            covered_messages: number;
+            /** Source Hash */
+            source_hash: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Source Compaction Id */
+            source_compaction_id: string | null;
+            /** Error */
+            error: string | null;
+            /** Usage */
+            usage: {
+                [key: string]: unknown;
+            };
+            /**
+             * Model Calls
+             * @default 0
+             */
+            model_calls: number;
+        };
+        /**
          * CompiledPrompt
          * @description Deterministic messages, activation decisions, provenance, and budget estimate.
          */
@@ -701,6 +1001,40 @@ export interface components {
             budget_status: string;
             /** Input Hash */
             input_hash: string;
+        };
+        /**
+         * ContextRestore
+         * @description Restore the complete effective history using the observed conversation revision.
+         */
+        ContextRestore: {
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /**
+         * ContextView
+         * @description Estimated history size and explicit summary boundaries, separate from actual model usage.
+         */
+        ContextView: {
+            /** Session Id */
+            session_id: string;
+            /** Raw Messages */
+            raw_messages: number;
+            /** Effective Messages */
+            effective_messages: number;
+            /** Raw Estimated Tokens */
+            raw_estimated_tokens: number;
+            /** Effective Estimated Tokens */
+            effective_estimated_tokens: number;
+            /** Context Window */
+            context_window: number | null;
+            /** Reserved Output Tokens */
+            reserved_output_tokens: number;
+            /** Active Compaction Id */
+            active_compaction_id: string | null;
+            /** Compacting Id */
+            compacting_id: string | null;
+            /** Compactions */
+            compactions: components["schemas"]["CompactionView"][];
         };
         /**
          * DraftPreviewRequest
@@ -938,6 +1272,32 @@ export interface components {
             blocks: components["schemas"]["Block-Output"][];
         };
         /**
+         * PresetPackage
+         * @description A reusable prompt aggregate without runtime settings, secrets, history or effects.
+         */
+        "PresetPackage-Input": {
+            /**
+             * Format
+             * @default rtagent.preset.v1
+             * @constant
+             */
+            format: "rtagent.preset.v1";
+            preset: components["schemas"]["Preset-Input"];
+        };
+        /**
+         * PresetPackage
+         * @description A reusable prompt aggregate without runtime settings, secrets, history or effects.
+         */
+        "PresetPackage-Output": {
+            /**
+             * Format
+             * @default rtagent.preset.v1
+             * @constant
+             */
+            format: "rtagent.preset.v1";
+            preset: components["schemas"]["Preset-Output"];
+        };
+        /**
          * Preview
          * @description An expiring, persisted input that can be consumed by Run.
          */
@@ -951,6 +1311,8 @@ export interface components {
             };
             /** Tools */
             tools: components["schemas"]["ToolDefinition"][];
+            /** Transformations */
+            transformations: string[];
             /** Id */
             id: string;
             /** Expires At */
@@ -979,6 +1341,74 @@ export interface components {
             };
             /** Skills */
             skills?: string[];
+        };
+        /**
+         * ProcessInput
+         * @description Send bounded UTF-8 pipe input or EOF to an explicitly owned process.
+         */
+        ProcessInput: {
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /**
+             * Eof
+             * @default false
+             */
+            eof: boolean;
+        };
+        /**
+         * ProcessView
+         * @description Persist a sandbox process lifecycle independently of an already completed turn.
+         */
+        ProcessView: {
+            /** Id */
+            id: string;
+            /** Run Id */
+            run_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Status */
+            status: string;
+            /** Created At */
+            created_at: string;
+            /** Command */
+            command: string;
+            /** Cwd */
+            cwd: string;
+            /** Workspace Root */
+            workspace_root: string;
+            /** Mode */
+            mode: string;
+            /** Pid */
+            pid: number | null;
+            /**
+             * Stdin Closed
+             * @default false
+             */
+            stdin_closed: boolean;
+            /**
+             * Stdout
+             * @default
+             */
+            stdout: string;
+            /**
+             * Stderr
+             * @default
+             */
+            stderr: string;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /** Error */
+            error: string | null;
         };
         /**
          * ProjectCreate
@@ -1018,6 +1448,8 @@ export interface components {
             };
             /** Tools */
             tools: components["schemas"]["ToolDefinition"][];
+            /** Transformations */
+            transformations: string[];
         };
         /**
          * ProviderConfig
@@ -1029,7 +1461,7 @@ export interface components {
              * @default openai
              * @enum {string}
              */
-            adapter: "fake" | "openai";
+            adapter: "fake" | "openai" | "anthropic";
             /**
              * Model
              * @default
@@ -1068,7 +1500,7 @@ export interface components {
              * @default openai
              * @enum {string}
              */
-            adapter: "fake" | "openai";
+            adapter: "fake" | "openai" | "anthropic";
             /**
              * Model
              * @default
@@ -1124,6 +1556,29 @@ export interface components {
             };
         };
         /**
+         * RunEvent
+         * @description Versioned, persistent SSE envelope with a per-Run sequence number.
+         */
+        RunEvent: {
+            /**
+             * Schema Version
+             * @default 1
+             */
+            schema_version: number;
+            /** Run Id */
+            run_id: string;
+            /** Seq */
+            seq: number;
+            /** Type */
+            type: string;
+            /** Timestamp */
+            timestamp: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        /**
          * RunView
          * @description Browser projection of execution state, approvals, usage, and recovery needs.
          */
@@ -1171,6 +1626,10 @@ export interface components {
                 [key: string]: unknown;
             }[];
             plan: components["schemas"]["TaskPlan"] | null;
+            /** Active Tool */
+            active_tool: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * SandboxStatus
@@ -1243,6 +1702,10 @@ export interface components {
             revision: number;
             /** Active Run Id */
             active_run_id: string | null;
+            /** Compaction Id */
+            compaction_id: string | null;
+            /** Compacting Id */
+            compacting_id: string | null;
             /** Messages */
             messages: components["schemas"]["Message"][];
             /** Created At */
@@ -1294,6 +1757,42 @@ export interface components {
             hash: string;
         };
         /**
+         * SkillPackage
+         * @description A bounded UTF-8 Skill directory manifest; import publishes only a new validated name.
+         */
+        "SkillPackage-Input": {
+            /**
+             * Format
+             * @default rtagent.skill.v1
+             * @constant
+             */
+            format: "rtagent.skill.v1";
+            /** Name */
+            name: string;
+            /** Files */
+            files: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * SkillPackage
+         * @description A bounded UTF-8 Skill directory manifest; import publishes only a new validated name.
+         */
+        "SkillPackage-Output": {
+            /**
+             * Format
+             * @default rtagent.skill.v1
+             * @constant
+             */
+            format: "rtagent.skill.v1";
+            /** Name */
+            name: string;
+            /** Files */
+            files: {
+                [key: string]: string;
+            };
+        };
+        /**
          * SkillSave
          * @description A concise skill authored directly by the user or the skill-creator workflow.
          */
@@ -1340,6 +1839,10 @@ export interface components {
              * @enum {string}
              */
             sandbox_mode: "workspace-write" | "read-only";
+            /** Toolchain Roots */
+            toolchain_roots?: string[];
+            /** Network Hosts */
+            network_hosts?: string[];
             /** Mcp Servers */
             mcp_servers?: components["schemas"]["MCPServer-Input"][];
             /**
@@ -1384,6 +1887,10 @@ export interface components {
              * @enum {string}
              */
             sandbox_mode: "workspace-write" | "read-only";
+            /** Toolchain Roots */
+            toolchain_roots: string[];
+            /** Network Hosts */
+            network_hosts: string[];
             /** Mcp Servers */
             mcp_servers: components["schemas"]["MCPServer-Output"][];
             /**
@@ -1456,6 +1963,11 @@ export interface components {
              * @default
              */
             schema_hash: string;
+            /**
+             * Writes Workspace
+             * @default false
+             */
+            writes_workspace: boolean;
         };
         /**
          * TraceView
@@ -1540,29 +2052,6 @@ export interface components {
                 [key: string]: string;
             };
         };
-        /**
-         * RunEvent
-         * @description Versioned, persistent SSE envelope with a per-Run sequence number.
-         */
-        RunEvent: {
-            /**
-             * Schema Version
-             * @default 1
-             */
-            schema_version: number;
-            /** Run Id */
-            run_id: string;
-            /** Seq */
-            seq: number;
-            /** Type */
-            type: string;
-            /** Timestamp */
-            timestamp: string;
-            /** Payload */
-            payload: {
-                [key: string]: unknown;
-            };
-        };
     };
     responses: never;
     parameters: never;
@@ -1572,6 +2061,270 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    preset_export_api_v1_presets__preset_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetPackage-Output"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preset_import_api_v1_presets_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PresetPackage-Input"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preset-Output"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skill_export_api_v1_workspace_skills__name__export_get: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillPackage-Output"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skill_import_api_v1_workspace_skills_import_post: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillPackage-Input"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    event_log_api_v1_runs__run_id__event_log_get: {
+        parameters: {
+            query?: {
+                after?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunEvent"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_processes_api_v1_sessions__session_id__processes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    process_input_api_v1_sessions__session_id__processes__identifier__input_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                identifier: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProcessInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_process_api_v1_sessions__session_id__processes__identifier__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                identifier: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_api_v1_health_get: {
         parameters: {
             query?: never;
@@ -1985,6 +2738,173 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    session_context_api_v1_sessions__session_id__context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_context_api_v1_sessions__session_id__context_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContextRestore"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compact_session_api_v1_sessions__session_id__compact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompactionView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compaction_evidence_api_v1_sessions__session_id__compactions__identifier__get: {
+        parameters: {
+            query?: {
+                redacted?: boolean;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+                identifier: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_compaction_api_v1_sessions__session_id__compactions__identifier__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                identifier: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompactionView"];
                 };
             };
             /** @description Validation Error */

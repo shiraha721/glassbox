@@ -1,6 +1,7 @@
 """FastAPI composition root and local browser access boundary."""
 
 import secrets
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,12 +10,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from rtagent.api import router
-from rtagent.application import Studio
 from rtagent.config import Settings
 from rtagent.domain import AppError
-from rtagent.runtime import Runner
-from rtagent.storage import Repository
-from rtagent.tools import ToolRegistry
+from rtagent.harness import Harness
+from rtagent.hooks import Hooks
 
 
 def error_response(error: AppError) -> JSONResponse:
@@ -32,30 +31,25 @@ def error_response(error: AppError) -> JSONResponse:
     )
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    hooks: Hooks | None = None,
+    configure: Callable[[Harness], None] | None = None,
+) -> FastAPI:
     """Compose a local single-worker application without doing I/O at import time."""
     settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Own database, runner, and checkpoint resources for the process lifetime."""
-        settings.initialize()
-        repository = Repository(settings.database_url)
-        await repository.initialize()
-        config = await repository.config()
-        configured = settings.apply_provider(config)
-        if configured != config:
-            await repository.save_config(configured)
-        registry = ToolRegistry(settings.workspace_root, settings.data_dir)
-        runner = Runner(repository, registry, str(settings.data_dir / "checkpoints.db"))
-        app.state.settings = settings
-        app.state.studio = Studio(repository, registry, runner)
-        await runner.open()
-        try:
+        harness = Harness(settings, hooks)
+        if configure:
+            configure(harness)
+        async with harness:
+            app.state.settings = settings
+            app.state.studio = harness.studio
             yield
-        finally:
-            await runner.close()
-            await repository.close()
 
     app = FastAPI(title="Security Agent Studio", version="0.1.0", lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])

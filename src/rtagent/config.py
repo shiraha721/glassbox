@@ -27,9 +27,11 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("var")
     workspace_root: Path = Path(".")
-    provider: Literal["openai", "fake"] | None = None
+    provider: Literal["openai", "fake", "anthropic"] | None = None
     openai_base_url: str | None = Field(default=None, validation_alias="OPENAI_BASE_URL")
     openai_model: str | None = Field(default=None, validation_alias="OPENAI_MODEL")
+    anthropic_base_url: str | None = Field(default=None, validation_alias="ANTHROPIC_BASE_URL")
+    anthropic_model: str | None = Field(default=None, validation_alias="ANTHROPIC_MODEL")
     allowed_origins: list[str] = [
         "http://127.0.0.1:8001",
         "http://localhost:8001",
@@ -53,11 +55,31 @@ class Settings(BaseSettings):
         if os.name == "nt" and "bash" in values["tools"]:
             permission = values["tools"].pop("bash")
             values["tools"].setdefault("powershell", permission)
+        use_anthropic = self.provider == "anthropic" or (
+            self.provider is None
+            and (self.anthropic_base_url is not None or self.anthropic_model is not None)
+            and self.openai_base_url is None
+            and self.openai_model is None
+        )
         overrides = {
             "adapter": self.provider,
-            "base_url": self.openai_base_url,
-            "model": self.openai_model,
+            "base_url": self.anthropic_base_url if use_anthropic else self.openai_base_url,
+            "model": self.anthropic_model if use_anthropic else self.openai_model,
         }
+        if use_anthropic:
+            overrides["adapter"] = "anthropic"
+            if config.provider.adapter != "anthropic":
+                overrides["base_url"] = self.anthropic_base_url or "https://api.anthropic.com/v1"
+                overrides["model"] = self.anthropic_model or ""
+                values["provider"]["credential_ref"] = "ANTHROPIC_API_KEY"
+        elif config.provider.adapter == "anthropic" and (
+            self.provider == "openai"
+            or self.openai_base_url is not None
+            or self.openai_model is not None
+        ):
+            overrides["base_url"] = self.openai_base_url or "https://api.openai.com/v1"
+            overrides["model"] = self.openai_model or ""
+            values["provider"]["credential_ref"] = "OPENAI_API_KEY"
         values["provider"].update(
             {key: value for key, value in overrides.items() if value is not None}
         )

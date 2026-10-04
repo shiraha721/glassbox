@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, RefreshCw, X } from 'lucide-react';
+import { PackageActions } from './PackageActions';
 import {
   request,
   workspacePath,
@@ -108,6 +109,25 @@ export function WorkspacePanel({
               <p className="subtle">
                 Select skills for the next run, or mention $skill-name in your message.
               </p>
+              <PackageActions
+                kind="skill"
+                filename={`${skill?.name || 'workspace'}.skill.json`}
+                exportPackage={
+                  skill
+                    ? () => request(workspacePath(`/skills/${skill.name}/export`, projectId))
+                    : undefined
+                }
+                importPackage={async (value) => {
+                  setSkill(
+                    await request<SkillDocument>(
+                      workspacePath('/skills/import', projectId),
+                      'POST',
+                      value,
+                    ),
+                  );
+                  await changed('Skill package imported.');
+                }}
+              />
               {query.data.skills.map((item) => (
                 <div className="skill-row" key={item.name}>
                   <input

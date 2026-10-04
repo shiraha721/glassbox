@@ -4,10 +4,12 @@ import asyncio
 import json
 import os
 import re
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 import httpx
+from jsonschema import Draft202012Validator, SchemaError
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
@@ -15,10 +17,15 @@ from pydantic import ValidationError
 
 from rtagent.config import resolve_secret
 from rtagent.domain import AppError, MCPServer, StudioConfig, TaskPlan, ToolDefinition, digest
+from rtagent.downloads import fetch_url
+from rtagent.execution import current_execution
+from rtagent.processes import ProcessManager, process_view
 from rtagent.sandbox import BashSandbox
+from rtagent.storage import Repository
 from rtagent.workspace import MEMORY_PATH, Workspace
 
-WRITE_TOOLS = {"write_text", "edit_text", "apply_patch", "save_memory", "save_skill"}
+WRITE_TOOLS = {"write_text", "edit_text", "apply_patch", "save_memory", "save_skill", "fetch_url"}
+ToolHandler = Callable[[dict, Workspace], Awaitable[str]]
 
 
 def native_tools() -> list[ToolDefinition]:
@@ -28,6 +35,7 @@ def native_tools() -> list[ToolDefinition]:
         return ToolDefinition(
             name=name,
             description=description,
+            writes_workspace=name in WRITE_TOOLS,
             input_schema={
                 "type": "object",
                 "properties": properties,
@@ -119,6 +127,48 @@ def native_tools() -> list[ToolDefinition]:
                 "timeout": {"type": "number", "minimum": 0.1, "maximum": 300},
             },
             ["command"],
+        ),
+        tool(
+            "start_process",
+            "Start a background command in the native no-network sandbox, using PowerShell on Windows or Bash on Linux. Returns an owned process ID. Poll output, send stdin or stop it with process tools. Pipe input only, not a terminal. Windows workspace changes appear after exit; timeout stops the whole process tree.",
+            {
+                "command": {"type": "string", "minLength": 1, "maxLength": 16000},
+                "cwd": string,
+                "timeout": {"type": "number", "minimum": 1, "maximum": 3600},
+            },
+            ["command"],
+        ),
+        tool(
+            "poll_process",
+            "Read the recorded status and bounded output of a process in this conversation workspace.",
+            {"process_id": string},
+            ["process_id"],
+        ),
+        tool(
+            "send_process_input",
+            "Send UTF-8 stdin text (include a newline when needed) or EOF to an owned process. No terminal key sequences. Input is capped at 8 KiB.",
+            {
+                "process_id": string,
+                "text": {"type": "string", "maxLength": 8192},
+                "eof": {"type": "boolean"},
+            },
+            ["process_id"],
+        ),
+        tool(
+            "stop_process",
+            "Stop an owned process and wait for its entire sandbox process tree to be cleaned up. Does not undo completed edits.",
+            {"process_id": string},
+            ["process_id"],
+        ),
+        tool(
+            "fetch_url",
+            "Download a bounded public HTTPS resource from an explicitly allowed host to a new workspace file. No redirects, credentials, private/local addresses or command networking. Supply sha256 when known. Ask the user to allow the exact host in Settings if blocked.",
+            {
+                "url": {"type": "string", "maxLength": 2048},
+                "path": string,
+                "sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+            },
+            ["url", "path"],
         ),
         tool(
             "read_memory",
@@ -223,6 +273,8 @@ class ToolRegistry:
         self.workspace = workspace.resolve()
         self.files = Workspace(self.workspace, data_dir)
         self.workspaces: dict[Path, ToolRegistry] = {}
+        self.processes: ProcessManager | None = None
+        self.local_tools: dict[str, tuple[ToolDefinition, ToolHandler]] = {}
         if os.name == "nt":
             from rtagent.windows_sandbox import WindowsSandbox
 
@@ -242,7 +294,14 @@ class ToolRegistry:
             self.workspaces[root] = ToolRegistry(root, self.files.data_dir)
         registry = self.workspaces[root]
         registry.catalog, registry.errors = self.catalog, self.errors
+        registry.processes = self.processes
+        registry.local_tools = self.local_tools
         return registry
+
+    def bind_repository(self, repository: Repository) -> None:
+        """Share one concrete process owner across project registries in this service."""
+        if self.processes is None:
+            self.processes = ProcessManager(repository)
 
     def reset(self) -> None:
         """Discard discovered schemas when connection configuration changes."""
@@ -251,6 +310,33 @@ class ToolRegistry:
             for tool in native_tools()
         }
         self.errors = {}
+        self.catalog.update({name: value[0] for name, value in self.local_tools.items()})
+
+    def register(
+        self, definition: ToolDefinition, handler: ToolHandler, *, writes_workspace: bool = True
+    ) -> None:
+        """Register one trusted embedding tool with unchanged snapshot/schema and policy checks."""
+        if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]{0,63}", definition.name) or definition.server_id:
+            raise AppError("local_tool", "Local tools require a simple unnamespaced name.")
+        if definition.name in self.catalog or len(self.local_tools) >= 20:
+            raise AppError(
+                "local_tool", "Tool names must be unique; at most twenty local tools are supported."
+            )
+        try:
+            Draft202012Validator.check_schema(definition.input_schema)
+        except SchemaError:
+            raise AppError(
+                "local_tool_schema", "Provide a valid JSON Schema for local tools."
+            ) from None
+        captured = definition.model_copy(
+            update={
+                "schema_hash": digest(definition.input_schema),
+                "writes_workspace": writes_workspace,
+            },
+            deep=True,
+        )
+        self.local_tools[captured.name] = (captured, handler)
+        self.catalog[captured.name] = captured
 
     @staticmethod
     def definition(server: MCPServer, tool) -> ToolDefinition:
@@ -297,7 +383,13 @@ class ToolRegistry:
         """Intersect discovered tools with the locally configured permission map."""
         result = []
         for name, permission in config.tools.items():
-            if permission == "deny" or (config.sandbox_mode == "read-only" and name in WRITE_TOOLS):
+            if permission == "deny" or (
+                config.sandbox_mode == "read-only"
+                and (
+                    name in WRITE_TOOLS
+                    or (name in self.catalog and self.catalog[name].writes_workspace)
+                )
+            ):
                 continue
             if name not in self.catalog:
                 raise AppError(
@@ -314,8 +406,23 @@ class ToolRegistry:
     async def execute(self, definition: ToolDefinition, args: dict, config: StudioConfig) -> str:
         """Execute one authorized call after checking its current MCP schema."""
         name = definition.name
-        if config.sandbox_mode == "read-only" and name in WRITE_TOOLS:
+        if config.sandbox_mode == "read-only" and (
+            name in WRITE_TOOLS
+            or definition.writes_workspace
+            or (name in self.local_tools and self.local_tools[name][0].writes_workspace)
+        ):
             raise AppError("tool_denied", "The workspace is read-only.", 403)
+        if name in self.local_tools:
+            current, handler = self.local_tools[name]
+            if current.schema_hash != definition.schema_hash:
+                raise AppError("tool_schema_changed", "Local tool schema changed since this Run.")
+            text = await handler(dict(args), self.files)
+            if not isinstance(text, str) or len(text.encode()) > 65536:
+                raise AppError(
+                    "outcome_unknown",
+                    "Local tool returned an invalid result; inspect its effects before resuming.",
+                )
+            return text
         if name in {"bash", "powershell"}:
             if name != ("powershell" if os.name == "nt" else "bash"):
                 raise AppError(
@@ -323,8 +430,49 @@ class ToolRegistry:
                 )
             timeout = min(args.get("timeout", config.tool_timeout), config.tool_timeout)
             return await self.sandbox.execute(
-                args["command"], args.get("cwd", "."), config.sandbox_mode, timeout
+                args["command"],
+                args.get("cwd", "."),
+                config.sandbox_mode,
+                timeout,
+                on_output=(current_execution.get().on_output if current_execution.get() else None),
+                toolchain_roots=config.toolchain_roots,
             )
+        if name == "fetch_url":
+            return json.dumps(
+                await fetch_url(self.files, config.network_hosts, **args), ensure_ascii=False
+            )
+        if name in {"start_process", "poll_process", "send_process_input", "stop_process"}:
+            owner = current_execution.get()
+            if owner is None or self.processes is None:
+                raise AppError("process_owner", "Process tools require a recorded Run.")
+            if name == "start_process":
+                return await self.processes.start(self.sandbox, args, config, owner)
+            identifier = args["process_id"]
+            if name == "poll_process":
+                return process_view(
+                    await self.processes.owned(identifier, owner.session_id, self.workspace)
+                ).model_dump_json()
+            if name == "send_process_input":
+                if (
+                    config.sandbox_mode == "read-only"
+                    and (await self.processes.owned(identifier, owner.session_id, self.workspace))[
+                        "data"
+                    ]["mode"]
+                    != "read-only"
+                ):
+                    raise AppError(
+                        "tool_denied", "A read-only Run cannot feed a writable process.", 403
+                    )
+                view = await self.processes.input(
+                    identifier,
+                    owner.session_id,
+                    args.get("text", ""),
+                    args.get("eof", False),
+                    self.workspace,
+                )
+            else:
+                view = await self.processes.stop(identifier, owner.session_id, self.workspace)
+            return view.model_dump_json()
         if name == "echo":
             return args["text"]
         if name == "update_plan":

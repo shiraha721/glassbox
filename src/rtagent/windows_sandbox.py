@@ -5,22 +5,28 @@ a filtered workspace copy, and a kill-on-close Job Object covering its children.
 """
 
 import asyncio
+import codecs
 import ctypes as C
 import json
 import msvcrt
 import os
+import queue
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from contextlib import ExitStack
 from ctypes import wintypes as W
 from pathlib import Path
+from typing import BinaryIO
 from uuid import uuid4
 
+from rtagent.command_io import CommandControl, OutputCallback, OutputRelay
 from rtagent.domain import AppError
 from rtagent.sandbox_files import SandboxFiles
+from rtagent.toolchains import copy_toolchains
 from rtagent.workspace import Workspace
 
 OUTPUT_LIMIT = 24_000
@@ -173,17 +179,46 @@ def _grant(path: Path, sid: str, access: str) -> None:
         )
 
 
-def _drain(descriptor: int, result: dict, key: str) -> None:
+def _drain(
+    descriptor: int, result: dict, key: str, publish: Callable[[str, str, bool], None] | None = None
+) -> None:
     """Keep draining the pipe after its output limit so the child cannot deadlock."""
     data = bytearray()
     truncated = False
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
     with os.fdopen(descriptor, "rb", buffering=0) as stream:
         while chunk := stream.read(8192):
             remaining = max(0, OUTPUT_LIMIT - len(data))
-            data.extend(chunk[:remaining])
+            retained = chunk[:remaining]
+            data.extend(retained)
+            changed = len(chunk) > remaining and not truncated
             truncated |= len(chunk) > remaining
+            if publish and (retained or changed):
+                publish(key, decoder.decode(retained), truncated)
+    if publish:
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            publish(key, tail, truncated)
     result[key] = data.decode("utf-8", errors="replace")
     result[key + "_truncated"] = truncated
+
+
+def _feed_input(stream: BinaryIO, control: CommandControl) -> None:
+    """Write queued UTF-8 input only to the explicitly inherited sandbox stdin pipe."""
+    try:
+        with stream:
+            while not control.stop.is_set() and not control.input_stop.is_set():
+                try:
+                    data = control.inputs.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if data is None:
+                    break
+                stream.write(data)
+    except (BrokenPipeError, OSError):
+        pass
+    finally:
+        control.input_closed = True
 
 
 class WindowsSandbox:
@@ -197,7 +232,16 @@ class WindowsSandbox:
         self.status_cache: dict | None = None
 
     def _run_process(
-        self, root: Path, sid: VOID, command: str, cwd: str, deadline: float, stop: threading.Event
+        self,
+        root: Path,
+        sid: VOID,
+        command: str,
+        cwd: str,
+        deadline: float,
+        stop: threading.Event,
+        control: CommandControl | None = None,
+        publish: Callable[[str, str, bool], None] | None = None,
+        toolchains: list[Path] | None = None,
     ) -> dict:
         system = Path(os.environ["SystemRoot"]) / "System32"
         executable = system / "WindowsPowerShell/v1.0/powershell.exe"
@@ -211,18 +255,41 @@ class WindowsSandbox:
         }
         environment.update(
             {
-                "PATH": f"{system};{executable.parent}",
+                "PATH": ";".join(
+                    [
+                        *[
+                            str(path)
+                            for root_path in (toolchains or [])
+                            for path in (root_path, root_path / "bin")
+                        ],
+                        str(system),
+                        str(executable.parent),
+                    ]
+                ),
                 "PATHEXT": ".COM;.EXE;.BAT;.CMD",
                 "HOME": str(scratch),
                 "TEMP": str(scratch),
                 "TMP": str(scratch),
                 "RTAGENT_WORKSPACE": str(root / "workspace"),
                 "RTAGENT_CWD": cwd,
+                "PYTHONPATH": str(root / "workspace" / ".rtagent" / "packages"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONUTF8": "1",
+                "PIP_NO_INDEX": "1",
+                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            }
+        )
+        environment.update(
+            {
+                f"RTAGENT_TOOLCHAIN_{index}": str(path)
+                for index, path in enumerate(toolchains or [], 1)
             }
         )
         # A PSDrive rooted at the permitted folder avoids PowerShell traversing a host drive.
         script = (
             "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); "
+            "[Console]::InputEncoding = [Text.UTF8Encoding]::new(); "
             "$OutputEncoding = [Console]::OutputEncoding; $ErrorActionPreference = 'Stop'; "
             "$ProgressPreference = 'SilentlyContinue'; "
             "New-PSDrive -Name Workspace -PSProvider FileSystem -Root $env:RTAGENT_WORKSPACE "
@@ -263,10 +330,21 @@ class WindowsSandbox:
                 read, write = os.pipe()
                 writer = cleanup.enter_context(os.fdopen(write, "wb", buffering=0))
                 streams.append(writer)
-                reader = threading.Thread(target=_drain, args=(read, result, key), daemon=True)
+                reader = threading.Thread(
+                    target=_drain, args=(read, result, key, publish), daemon=True
+                )
                 reader.start()
                 readers.append(reader)
-            null = cleanup.enter_context(open(os.devnull, "rb"))
+            input_writer = None
+            if control:
+                read, write = os.pipe()
+                null = cleanup.enter_context(os.fdopen(read, "rb", buffering=0))
+                input_stream = cleanup.enter_context(os.fdopen(write, "wb", buffering=0))
+                input_writer = threading.Thread(
+                    target=_feed_input, args=(input_stream, control), daemon=True
+                )
+            else:
+                null = cleanup.enter_context(open(os.devnull, "rb"))
             handles = (W.HANDLE * 3)(*[msvcrt.get_osfhandle(f.fileno()) for f in (null, *streams)])
             for handle in handles:
                 os.set_handle_inheritable(handle, True)
@@ -317,6 +395,10 @@ class WindowsSandbox:
                 _check(_assign_job(job, process.process))
                 if _resume(process.thread) == 0xFFFFFFFF:
                     raise C.WinError(C.get_last_error())
+                if control:
+                    input_writer.start()
+                    control.started(process.pid)
+                    null.close()
                 for stream in streams:
                     stream.close()
                 while _wait(process.process, 50) == 0x102:
@@ -324,6 +406,8 @@ class WindowsSandbox:
                         result["timed_out"] = not stop.is_set()
                         break
             finally:
+                if control:
+                    control.input_stop.set()
                 _check(_terminate_job(job, 1))
                 # The root may still be suspended if assigning it to the Job failed.
                 if _wait(process.process, 0) == 0x102:
@@ -346,7 +430,11 @@ class WindowsSandbox:
                     stream.close()
                 for reader in readers:
                     reader.join(5)
-                if any(reader.is_alive() for reader in readers):
+                if input_writer and input_writer.ident:
+                    input_writer.join(5)
+                if any(reader.is_alive() for reader in readers) or (
+                    input_writer and input_writer.is_alive()
+                ):
                     raise AppError(
                         "sandbox_cleanup", "Sandbox output handles did not close after termination."
                     )
@@ -358,7 +446,15 @@ class WindowsSandbox:
         return result
 
     def _execute(
-        self, command: str, cwd: str, mode: str, timeout: float, stop: threading.Event
+        self,
+        command: str,
+        cwd: str,
+        mode: str,
+        timeout: float,
+        stop: threading.Event,
+        control: CommandControl | None = None,
+        publish: Callable[[str, str, bool], None] | None = None,
+        toolchain_roots: list[str] | None = None,
     ) -> dict:
         directory = self.workspace.path(cwd)
         if not directory.is_dir():
@@ -385,6 +481,11 @@ class WindowsSandbox:
             _grant(root, sid_text.value, "RX")
             _grant(root / "workspace", sid_text.value, "RX" if mode == "read-only" else "M")
             _grant(root / "scratch", sid_text.value, "M")
+            toolchains = copy_toolchains(
+                toolchain_roots or [], root / "toolchains", self.workspace.root, stop, deadline
+            )
+            if toolchains:
+                _grant(root / "toolchains", sid_text.value, "RX")
             if stop.is_set() or time.monotonic() >= deadline:
                 result = {
                     "stdout": "",
@@ -394,7 +495,9 @@ class WindowsSandbox:
                     "timed_out": not stop.is_set(),
                 }
             else:
-                result = self._run_process(root, sid, command, relative, deadline, stop)
+                result = self._run_process(
+                    root, sid, command, relative, deadline, stop, control, publish, toolchains
+                )
             result.update(
                 {
                     "sandbox": self.backend,
@@ -425,12 +528,32 @@ class WindowsSandbox:
                 shutil.rmtree(root)
 
     async def execute(
-        self, command: str, cwd: str = ".", mode: str = "workspace-write", timeout: float = 60
+        self,
+        command: str,
+        cwd: str = ".",
+        mode: str = "workspace-write",
+        timeout: float = 60,
+        *,
+        control: CommandControl | None = None,
+        on_output: OutputCallback | None = None,
+        toolchain_roots: list[str] | None = None,
     ) -> str:
         """Run blocking Win32 calls off the event loop and finish cleanup on cancellation."""
-        stop = threading.Event()
+        stop = control.stop if control else threading.Event()
+        relay = OutputRelay(on_output)
+        reader = asyncio.create_task(relay.drain())
         worker = asyncio.create_task(
-            asyncio.to_thread(self._execute, command, cwd, mode, timeout, stop)
+            asyncio.to_thread(
+                self._execute,
+                command,
+                cwd,
+                mode,
+                timeout,
+                stop,
+                control,
+                relay.publish,
+                toolchain_roots,
+            )
         )
         try:
             result = await asyncio.shield(worker)
@@ -438,6 +561,8 @@ class WindowsSandbox:
             stop.set()
             await asyncio.shield(worker)
             raise
+        finally:
+            await relay.finish(reader)
         while len(json.dumps(result, ensure_ascii=False).encode()) > 65536:
             result["stdout"] = result["stdout"][: len(result["stdout"]) // 2]
             result["stderr"] = result["stderr"][: len(result["stderr"]) // 2]

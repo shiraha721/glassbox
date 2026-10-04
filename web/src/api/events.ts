@@ -15,6 +15,7 @@ const eventTypes = [
   'model.delta',
   'model.completed',
   'tool.started',
+  'tool.output',
   'tool.completed',
   'approval.required',
   'approval.resolved',
@@ -33,6 +34,7 @@ export function useRunEvents(runId: string | undefined, enabled: boolean): void 
       void cache.invalidateQueries({ queryKey: ['runs'] });
       void cache.invalidateQueries({ queryKey: ['bootstrap'] });
       void cache.invalidateQueries({ queryKey: ['trace', runId] });
+      void cache.invalidateQueries({ queryKey: ['processes'] });
     };
     const receive = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as RunEvent;

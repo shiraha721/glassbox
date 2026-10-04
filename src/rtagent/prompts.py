@@ -10,6 +10,14 @@ from rtagent.domain import AppError, Block, CompiledPrompt, Message, Preset, Stu
 VARIABLE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z_0-9]*)\s*\}\}")
 # Canonical fingerprint of the unchanged six-block Stage 2 starter, excluding its revision.
 STAGE2_STARTER_HASH = "cb98b7f2651093ea5d0810d1b70e8be8cf76cfcab9e597bb34bc9276b0d8472a"
+# Exact unchanged Stage 2 presets; revisions are omitted so restarts never overwrite edits.
+PREVIOUS_BUILTIN_HASHES = {
+    "security-analysis": "ca78619b48f9722a2054394b3fb9fe833e1da416d92a89b57f89e7e3fafd2518",
+    "general-agent": "20f66bb93a42e943c3233c1ac44461f69064b2edb2eefd909d53bc1dde14203c",
+    "coding": "1b189ed67bae4c00d3febbe312d36f90f2e518cbdc071e1ae6fb2e0d051242c0",
+    "debugging": "9e68d9474f670cb792cc995935d6db1d8f5b742216fc83821618291d3fedb8d7",
+    "code-review": "6dae62f93a7199f6815271903abacfb0d1ab11a059753759d12a4af922e2dbe1",
+}
 
 
 def default_preset(revision: int = 1) -> Preset:
@@ -69,7 +77,16 @@ def default_preset(revision: int = 1) -> Preset:
             "host development environment exists in the sandbox. Commands have no network, "
             "and credentials, Git metadata, runtime data, and dependency directories are excluded. "
             "Use relative paths and bounded output. Inspect current files after timeout or "
-            "cancellation before repeating a write; partial changes may remain.",
+            "cancellation before repeating a write; partial changes may remain. For a long-lived "
+            "command, use start_process, retain its returned ID, poll_process for actual output, "
+            "send_process_input for bounded UTF-8 pipe input (include a newline for line readers), "
+            "and stop_process when finished. These are pipes, not a full terminal. EOF closes stdin. "
+            "Processes have absolute deadlines and belong to this conversation; never assume "
+            "they survive restart. On Windows, workspace edits copy back after process exit. "
+            "Use only explicitly exposed trusted runtimes. When enabled, fetch_url downloads a "
+            "bounded public HTTPS file from an exact approved host into a new workspace path; "
+            "verify its hash and install/use it offline in .rtagent/packages. A download allowance "
+            "does not give shell commands network access.",
         ),
         (
             "memory",
@@ -80,7 +97,10 @@ def default_preset(revision: int = 1) -> Preset:
             "durable project facts or user-requested notes with read_memory/save_memory, "
             "preserving existing notes and using their hash. Do not store transient logs or "
             "credentials. When asked to create a reusable workflow, use skill-creator, save_skill, "
-            "and load the saved result to verify it. Skills and memory never grant permissions.",
+            "and load the saved result to verify it. Skills and memory never grant permissions. "
+            "An explicit conversation summary is derived evidence, not original tool output. "
+            "Preserve its unresolved work and uncertainty; read current files or poll owned "
+            "processes before relying on old observations or repeating effects.",
         ),
         (
             "format",
@@ -209,6 +229,13 @@ def is_legacy_default(preset: Preset) -> bool:
         and (not actual.enabled or actual.order == original.order)
         for actual, original in zip(preset.blocks, originals, strict=True)
     )
+
+
+def is_previous_builtin(preset: Preset) -> bool:
+    """Upgrade only exact shipped content, keeping edited presets and frozen Runs intact."""
+    return digest(preset.model_dump(exclude={"revision"})) == PREVIOUS_BUILTIN_HASHES.get(
+        preset.id
+    ) or is_legacy_default(preset)
 
 
 def condition_value(condition: dict[str, Any], context: dict[str, Any], depth: int = 0) -> bool:

@@ -21,11 +21,12 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from rtagent.domain import (
     AppError,
     Preset,
+    RunEvent,
     SessionCopy,
     SessionUpdate,
     StudioConfig,
@@ -33,7 +34,9 @@ from rtagent.domain import (
     now,
     uid,
 )
-from rtagent.prompts import builtin_presets, default_preset, is_legacy_default
+from rtagent.hooks import EventHook
+from rtagent.prompts import builtin_presets, is_previous_builtin
+from rtagent.tracing import redact
 
 metadata = MetaData()
 settings_table = Table(
@@ -71,6 +74,8 @@ sessions = Table(
     Column("title", String, nullable=False),
     Column("revision", Integer, nullable=False),
     Column("active_run_id", String),
+    Column("compaction_id", String),
+    Column("compacting_id", String),
     Column("messages", JSON, nullable=False),
     Column("created_at", String, nullable=False),
     Column("folder_id", String, ForeignKey("conversation_folders.id", ondelete="SET NULL")),
@@ -125,6 +130,25 @@ calls = Table(
     Column("data", JSON, nullable=False),
     Column("result", JSON),
 )
+
+compactions = Table(
+    "compactions",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("session_id", String, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False),
+    Column("status", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("data", JSON, nullable=False),
+)
+processes = Table(
+    "processes",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("run_id", String, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False),
+    Column("status", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("data", JSON, nullable=False),
+)
 TERMINAL = {"succeeded", "failed", "cancelled"}
 
 
@@ -139,6 +163,7 @@ class Repository:
     def __init__(self, database_url: str):
         """Configure the async engine and SQLite integrity settings."""
         self.url = database_url
+        self.on_event: EventHook | None = None
         self.engine = create_async_engine(database_url)
         self.lock = asyncio.Lock()
 
@@ -179,6 +204,11 @@ class Repository:
                     "update_plan": "allow",
                     # Patches add deletion, so existing profiles ask before this new capability.
                     "apply_patch": "ask",
+                    "start_process": "ask",
+                    "poll_process": "allow",
+                    "send_process_input": "ask",
+                    "stop_process": "allow",
+                    "fetch_url": "ask",
                 }
                 for name, permission in additions.items():
                     permissions.setdefault(name, permission)
@@ -195,12 +225,16 @@ class Repository:
                     await connection.execute(
                         insert(presets).values(id=preset.id, data=preset.model_dump())
                     )
-                elif is_legacy_default(current):
+                elif is_previous_builtin(current):
                     # Only migrate recognized starter content, never user edits or Run snapshots.
                     await connection.execute(
                         update(presets)
                         .where(presets.c.id == current.id)
-                        .values(data=default_preset(current.revision + 1).model_dump())
+                        .values(
+                            data=preset.model_copy(
+                                update={"revision": current.revision + 1}
+                            ).model_dump()
+                        )
                     )
 
     async def close(self) -> None:
@@ -346,6 +380,201 @@ class Repository:
                 ).mappings()
             ]
 
+    async def effective_history(self, session: dict[str, Any]) -> list[dict[str, Any]]:
+        """Project an explicit summary plus untouched suffix without rewriting original history."""
+        if not session.get("compaction_id"):
+            return session["messages"]
+        record = await self.compaction(session["compaction_id"])
+        data = record["data"]
+        count = data["covered_messages"]
+        if (
+            record["status"] != "succeeded"
+            or digest(session["messages"][:count]) != data["source_hash"]
+        ):
+            raise AppError(
+                "context_changed", "The saved summary no longer matches its source history.", 409
+            )
+        return [
+            {
+                "role": "user",
+                "content": "Summary of earlier conversation (derived, not original messages):\n"
+                + data["summary"],
+                "source": "context:compaction:" + record["id"],
+                "tool_calls": [],
+                "tool_call_id": None,
+            }
+        ] + session["messages"][count:]
+
+    async def compaction(self, identifier: str) -> dict[str, Any]:
+        """Read the original summary input, provider calls and current job outcome."""
+        return await self._one(compactions, identifier)
+
+    async def _has_process(self, connection: AsyncConnection, session_id: str) -> bool:
+        """Prevent deletion/workspace moves while original native processes can still write."""
+        return (
+            await connection.execute(
+                select(processes.c.id)
+                .join(runs, processes.c.run_id == runs.c.id)
+                .where(
+                    runs.c.session_id == session_id,
+                    processes.c.status.in_(["starting", "running", "stopping"]),
+                )
+                .limit(1)
+            )
+        ).first() is not None
+
+    async def process(self, identifier: str) -> dict[str, Any]:
+        """Read one durable process intent; this record never recreates its OS handles."""
+        return await self._one(processes, identifier)
+
+    async def save_process(self, identifier: str, run_id: str, status: str, data: dict) -> None:
+        """Commit process intent/progress before effects or before returning a lifecycle result."""
+        async with self.lock, self.engine.begin() as connection:
+            existing = (
+                await connection.execute(
+                    select(processes.c.status).where(processes.c.id == identifier)
+                )
+            ).first()
+            if existing:
+                if existing[0] not in {"starting", "running", "stopping"}:
+                    return
+                await connection.execute(
+                    update(processes)
+                    .where(processes.c.id == identifier)
+                    .values(status=status, data=data)
+                )
+            else:
+                await connection.execute(
+                    insert(processes).values(
+                        id=identifier, run_id=run_id, status=status, created_at=now(), data=data
+                    )
+                )
+
+    async def list_processes(self, session_id: str) -> list[dict[str, Any]]:
+        """List original process ownership through Runs, excluding copied trace provenance."""
+        await self.session(session_id)
+        async with self.engine.connect() as connection:
+            rows = await connection.execute(
+                select(processes)
+                .join(runs, processes.c.run_id == runs.c.id)
+                .where(runs.c.session_id == session_id)
+                .order_by(processes.c.created_at)
+            )
+            return [dict(row._mapping) for row in rows]
+
+    async def list_compactions(self, session_id: str) -> list[dict[str, Any]]:
+        """List owned context-reduction evidence in chronological order."""
+        async with self.engine.connect() as connection:
+            return [
+                dict(row)
+                for row in (
+                    await connection.execute(
+                        select(compactions)
+                        .where(compactions.c.session_id == session_id)
+                        .order_by(compactions.c.created_at)
+                    )
+                ).mappings()
+            ]
+
+    async def begin_compaction(
+        self, session_id: str, expected_revision: int, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Reserve an idle conversation without changing history or its revision."""
+        value = {
+            "id": uid(),
+            "session_id": session_id,
+            "status": "running",
+            "created_at": now(),
+            "data": data,
+        }
+        async with self.lock, self.engine.begin() as connection:
+            session = (
+                (await connection.execute(select(sessions).where(sessions.c.id == session_id)))
+                .mappings()
+                .one_or_none()
+            )
+            if session is None:
+                raise AppError("not_found", "Conversation does not exist.", 404)
+            if session["revision"] != expected_revision:
+                raise AppError(
+                    "revision_conflict", "Conversation changed. Reload before compacting.", 409
+                )
+            if session["active_run_id"] or session["compacting_id"] or session["archived"]:
+                raise AppError("session_busy", "Compact an idle restored conversation.", 409)
+            await connection.execute(insert(compactions).values(**value))
+            await connection.execute(
+                update(sessions)
+                .where(sessions.c.id == session_id)
+                .values(compacting_id=value["id"])
+            )
+        return value
+
+    async def save_compaction(
+        self, identifier: str, data: dict[str, Any], status: str = "running"
+    ) -> None:
+        """Persist reduction evidence and atomically activate only a valid successful summary."""
+        async with self.lock, self.engine.begin() as connection:
+            record = (
+                (
+                    await connection.execute(
+                        select(compactions).where(compactions.c.id == identifier)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            session = (
+                (
+                    await connection.execute(
+                        select(sessions).where(sessions.c.id == record["session_id"])
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            if record["status"] != "running":
+                return
+            if status == "succeeded" and (
+                session["revision"] != data["source_revision"]
+                or digest(session["messages"][: data["covered_messages"]]) != data["source_hash"]
+            ):
+                status, data = "failed", {
+                    **data,
+                    "error": "Conversation changed during compaction; the summary was not activated.",
+                }
+            await connection.execute(
+                update(compactions)
+                .where(compactions.c.id == identifier)
+                .values(status=status, data=data)
+            )
+            if status != "running" and session["compacting_id"] == identifier:
+                changes = {"compacting_id": None}
+                if status == "succeeded":
+                    changes.update(compaction_id=identifier, revision=session["revision"] + 1)
+                await connection.execute(
+                    update(sessions).where(sessions.c.id == record["session_id"]).values(**changes)
+                )
+
+    async def reset_compaction(self, session_id: str, expected_revision: int) -> None:
+        """Restore full effective history while retaining summary and original evidence."""
+        async with self.lock, self.engine.begin() as connection:
+            session = (
+                (await connection.execute(select(sessions).where(sessions.c.id == session_id)))
+                .mappings()
+                .one_or_none()
+            )
+            if session is None:
+                raise AppError("not_found", "Conversation does not exist.", 404)
+            if session["revision"] != expected_revision:
+                raise AppError("revision_conflict", "Conversation changed. Reload first.", 409)
+            if session["active_run_id"] or session["compacting_id"]:
+                raise AppError("session_busy", "Finish current work before restoring context.", 409)
+            await connection.execute(
+                update(sessions)
+                .where(sessions.c.id == session_id)
+                .values(compaction_id=None, revision=session["revision"] + 1)
+            )
+
     async def list_folders(self) -> list[dict[str, Any]]:
         """List flat folders alphabetically, including empty folders."""
         async with self.engine.connect() as connection:
@@ -423,7 +652,11 @@ class Repository:
                 )
             changes: dict[str, Any] = {}
             if "project_id" in request.model_fields_set:
-                if current["active_run_id"]:
+                if (
+                    current["active_run_id"]
+                    or current["compacting_id"]
+                    or await self._has_process(connection, session_id)
+                ):
                     raise AppError(
                         "session_busy",
                         "Finish or cancel the active Run before changing its workspace.",
@@ -442,7 +675,11 @@ class Repository:
             if request.title is not None:
                 changes.update(title=request.title, title_locked=True)
             if request.archived is not None:
-                if current["active_run_id"]:
+                if (
+                    current["active_run_id"]
+                    or current["compacting_id"]
+                    or await self._has_process(connection, session_id)
+                ):
                     raise AppError(
                         "session_busy", "Finish or cancel the active Run before archiving.", 409
                     )
@@ -479,7 +716,7 @@ class Repository:
                 raise AppError(
                     "revision_conflict", "Conversation changed. Reload before copying.", 409
                 )
-            if source["active_run_id"]:
+            if source["active_run_id"] or source["compacting_id"]:
                 raise AppError(
                     "session_busy", "Finish or cancel the active Run before copying.", 409
                 )
@@ -542,6 +779,30 @@ class Repository:
                 "copied_from_session_id": session_id,
             }
             await connection.execute(insert(sessions).values(**copied))
+            if source["compaction_id"]:
+                reduction = (
+                    (
+                        await connection.execute(
+                            select(compactions).where(compactions.c.id == source["compaction_id"])
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                if reduction["data"]["covered_messages"] <= len(messages):
+                    copied_reduction = {
+                        **reduction,
+                        "id": uid(),
+                        "session_id": copied["id"],
+                        "data": {**reduction["data"], "source_compaction_id": reduction["id"]},
+                    }
+                    await connection.execute(insert(compactions).values(**copied_reduction))
+                    copied["compaction_id"] = copied_reduction["id"]
+                    await connection.execute(
+                        update(sessions)
+                        .where(sessions.c.id == copied["id"])
+                        .values(compaction_id=copied_reduction["id"])
+                    )
             for original in history:
                 new_id = uid()
                 # Preserve the original immutable snapshot and wire evidence. Copies own their
@@ -633,7 +894,7 @@ class Repository:
                     select(presets.c.data).where(presets.c.id == snapshot["preset"]["id"])
                 )
             ).scalar_one()
-            if session["active_run_id"]:
+            if session["active_run_id"] or session["compacting_id"]:
                 raise AppError("session_busy", "Finish or cancel the current Run first.", 409)
             if session["archived"]:
                 raise AppError(
@@ -719,7 +980,7 @@ class Repository:
 
     async def _event(
         self, connection, run_id: str, event_type: str, payload: dict[str, Any], **changes
-    ) -> None:
+    ) -> RunEvent:
         """Append a sequence-numbered event and update its projection in one transaction."""
         row = (await connection.execute(select(runs).where(runs.c.id == run_id))).mappings().one()
         seq, stamp = row["latest_event_seq"] + 1, now()
@@ -733,11 +994,30 @@ class Repository:
             .where(runs.c.id == run_id)
             .values(latest_event_seq=seq, updated_at=stamp, **changes)
         )
+        return RunEvent(run_id=run_id, seq=seq, type=event_type, timestamp=stamp, payload=payload)
+
+    async def _notify(self, value: RunEvent) -> None:
+        """Observe a redacted committed copy outside the lock; failures cannot replay effects."""
+        if self.on_event is None or value.type == "hook.failed":
+            return
+        try:
+            async with asyncio.timeout(2):
+                await self.on_event(RunEvent.model_validate(redact(value.model_dump())))
+        except Exception as exc:
+            await self.emit(
+                value.run_id,
+                "hook.failed",
+                {
+                    "event_seq": value.seq,
+                    "exception_type": type(exc).__name__,
+                },
+            )
 
     async def emit(self, run_id: str, event_type: str, payload: dict[str, Any], **changes) -> None:
         """Commit an event and associated state changes under the writer lock."""
         async with self.lock, self.engine.begin() as connection:
-            await self._event(connection, run_id, event_type, payload, **changes)
+            value = await self._event(connection, run_id, event_type, payload, **changes)
+        await self._notify(value)
 
     async def delta(self, run_id: str, call_id: str, text: str) -> None:
         """Append streamed text and persist its replay event atomically."""
@@ -745,13 +1025,14 @@ class Repository:
             previous = (
                 await connection.execute(select(runs.c.partial_output).where(runs.c.id == run_id))
             ).scalar_one()
-            await self._event(
+            value = await self._event(
                 connection,
                 run_id,
                 "model.delta",
                 {"call_id": call_id, "text": text},
                 partial_output=previous + text,
             )
+        await self._notify(value)
 
     async def finish(
         self, run_id: str, status: str, messages: list[dict], reason: str, error: str | None = None
@@ -792,7 +1073,7 @@ class Repository:
                 update(sessions).where(sessions.c.id == run["session_id"]).values(**changes)
             )
             event_type = "run.completed" if status == "succeeded" else "run." + status
-            await self._event(
+            value = await self._event(
                 connection,
                 run_id,
                 event_type,
@@ -804,6 +1085,7 @@ class Repository:
                 error=error,
                 approval=None,
             )
+        await self._notify(value)
 
     async def read_events(self, run_id: str, after: int) -> list[dict[str, Any]]:
         """Read a bounded page strictly after the supplied persistent cursor."""
@@ -862,6 +1144,45 @@ class Repository:
     async def recover(self) -> list[str]:
         """Mark abandoned effects uncertain and return work that was still queued."""
         async with self.lock, self.engine.begin() as connection:
+            # Provider completion after a crashed reduction is unknown; never replay it.
+            for record in (
+                await connection.execute(
+                    select(compactions).where(compactions.c.status == "running")
+                )
+            ).mappings():
+                data = dict(record["data"])
+                data["error"] = "Service restarted; the unfinished summary was not activated."
+                for call in data.get("calls", []):
+                    if call["status"] == "executing":
+                        call["status"] = "outcome_unknown"
+                await connection.execute(
+                    update(compactions)
+                    .where(compactions.c.id == record["id"])
+                    .values(status="interrupted", data=data)
+                )
+            await connection.execute(
+                update(sessions)
+                .where(sessions.c.compacting_id.is_not(None))
+                .values(compacting_id=None)
+            )
+            for record in (
+                await connection.execute(
+                    select(processes).where(
+                        processes.c.status.in_(["starting", "running", "stopping"])
+                    )
+                )
+            ).mappings():
+                data = {
+                    **record["data"],
+                    "stdin_closed": True,
+                    "error": "Service restarted; inspect partial workspace effects before repeating the command.",
+                    "ended_at": now(),
+                }
+                await connection.execute(
+                    update(processes)
+                    .where(processes.c.id == record["id"])
+                    .values(status="interrupted", data=data)
+                )
             await connection.execute(
                 update(calls).where(calls.c.status == "executing").values(status="outcome_unknown")
             )
@@ -898,9 +1219,13 @@ class Repository:
             )
             if session is None:
                 raise AppError("not_found", "Session does not exist.", 404)
-            if session["active_run_id"]:
+            if (
+                session["active_run_id"]
+                or session["compacting_id"]
+                or await self._has_process(connection, session_id)
+            ):
                 raise AppError(
-                    "session_busy", "Cancel the active Run before deleting this session.", 409
+                    "session_busy", "Stop active work before deleting this session.", 409
                 )
             run_ids = list(
                 (

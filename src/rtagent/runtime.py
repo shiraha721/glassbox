@@ -23,9 +23,11 @@ from rtagent.domain import (
     digest,
     now,
 )
+from rtagent.execution import ToolExecution, current_execution
+from rtagent.hooks import Hooks
 from rtagent.policies import decide
 from rtagent.prompts import compile_prompt
-from rtagent.providers import generate, prepare
+from rtagent.providers import generate, prepare, transformations
 from rtagent.storage import TERMINAL, Repository
 from rtagent.tools import ToolRegistry
 
@@ -43,9 +45,18 @@ class AgentState(TypedDict):
 class Runner:
     """Own one bounded LangGraph worker and durable per-call execution receipts."""
 
-    def __init__(self, repository: Repository, registry: ToolRegistry, checkpoint_path: str):
+    def __init__(
+        self,
+        repository: Repository,
+        registry: ToolRegistry,
+        checkpoint_path: str,
+        hooks: Hooks | None = None,
+    ):
         """Prepare lifecycle resources without opening files or starting background tasks."""
         self.repository, self.registry = repository, registry
+        self.hooks = hooks or Hooks()
+        repository.on_event = self.hooks.on_event
+        registry.bind_repository(repository)
         self.checkpoint_path = checkpoint_path
         self.stack = AsyncExitStack()
         self.tasks: dict[str, asyncio.Task] = {}
@@ -92,6 +103,7 @@ class Runner:
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+        await self.registry.processes.close()
         await self.stack.aclose()
 
     async def drive(self, run_id: str, resume: bool) -> None:
@@ -180,6 +192,8 @@ class Runner:
         finally:
             if started is not None:
                 run = await self.repository.run(run_id)
+                if run["status"] in {"failed", "cancelled", "interrupted"}:
+                    await self.registry.processes.stop_run(run_id)
                 usage = {
                     **run["usage"],
                     "active_seconds": run["usage"].get("active_seconds", 0)
@@ -204,6 +218,7 @@ class Runner:
     async def cancel(self, run_id: str) -> None:
         """Stop local execution without claiming that external effects were rolled back."""
         run = await self.repository.run(run_id)
+        await self.registry.processes.stop_run(run_id)
         if run["status"] in TERMINAL:
             return
         task = self.tasks.get(run_id)
@@ -260,11 +275,7 @@ class Runner:
                 "prepared_request": prepared,
                 "wire_request_body": None,
                 "simulated": config.provider.adapter == "fake",
-                "transformations": (
-                    ["LangChain Chat Completions serialization"]
-                    if config.provider.adapter == "openai"
-                    else []
-                ),
+                "transformations": transformations(config.provider.adapter),
                 "attempts": (existing or {}).get("data", {}).get("attempts", 0) + 1,
                 "attempt_history": (existing or {}).get("data", {}).get("attempt_history", []),
             }
@@ -401,6 +412,20 @@ class Runner:
                     data["decision"] = decision
                 if decision != "allow":
                     raise AppError("tool_denied", "Tool execution was not authorized.", 403)
+                if self.hooks.before_tool:
+                    try:
+                        async with asyncio.timeout(5):
+                            rejection = await self.hooks.before_tool(
+                                call.model_copy(deep=True), config.model_copy(deep=True)
+                            )
+                    except Exception as exc:
+                        raise AppError(
+                            "hook_failed",
+                            f"Tool guard failed ({type(exc).__name__}); no tool was dispatched.",
+                        ) from None
+                    if rejection:
+                        data["hook_rejection"] = str(rejection)[:500]
+                        raise AppError("tool_denied", data["hook_rejection"], 403)
                 await self.repository.save_call(call_id, run_id, "tool", "executing", data)
                 await self.repository.emit(
                     run_id, "tool.started", {"call_id": call_id, "name": call.name}, approval=None
@@ -414,10 +439,34 @@ class Runner:
                 async with asyncio.timeout(deadline):
                     # Session/project changes never redirect tools from the frozen Run root.
                     registry = self.registry.for_workspace(Path(run["snapshot"]["workspace_root"]))
-                    content = await registry.execute(definition, call.args, config)
+
+                    async def on_output(frame: dict[str, Any]) -> None:
+                        """Persist native output while the call is executing, before its final receipt."""
+                        output = data.setdefault(
+                            "output", {"stdout": "", "stderr": "", "truncated": False}
+                        )
+                        output[frame["stream"]] += frame["text"]
+                        output["truncated"] |= frame["truncated"]
+                        await self.repository.save_call(call_id, run_id, "tool", "executing", data)
+                        await self.repository.emit(
+                            run_id, "tool.output", {"call_id": call_id, **frame}
+                        )
+
+                    token = current_execution.set(
+                        ToolExecution(run_id, run["session_id"], on_output)
+                    )
+                    try:
+                        content = await registry.execute(definition, call.args, config)
+                    finally:
+                        current_execution.reset(token)
             except GraphInterrupt:
                 raise
             except AppError as exc:
+                if exc.code == "outcome_unknown":
+                    await self.repository.save_call(
+                        call_id, run_id, "tool", "outcome_unknown", data
+                    )
+                    raise
                 if exc.code == "tool_schema_changed":
                     await self.repository.save_call(
                         call_id,
@@ -448,13 +497,13 @@ class Runner:
                     "outcome_unknown", "Tool timed out; its external outcome is unknown."
                 ) from None
             except Exception as exc:
-                if definition and definition.server_id:
+                if definition and (definition.server_id or call.name in self.registry.local_tools):
                     await self.repository.save_call(
                         call_id, run_id, "tool", "outcome_unknown", data
                     )
                     raise AppError(
                         "outcome_unknown",
-                        "MCP connection failed during execution; the external outcome is unknown.",
+                        "Integration failed during execution; its effect outcome is unknown.",
                     ) from None
                 content, status = (
                     json.dumps(

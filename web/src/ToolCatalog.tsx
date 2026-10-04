@@ -11,11 +11,26 @@ const groups = {
     'read_instructions',
   ],
   'File changes': ['write_text', 'edit_text', 'apply_patch'],
-  Commands: ['powershell', 'bash'],
+  Commands: [
+    'powershell',
+    'bash',
+    'start_process',
+    'poll_process',
+    'send_process_input',
+    'stop_process',
+  ],
+  Downloads: ['fetch_url'],
   'Memory and Skills': ['read_memory', 'save_memory', 'load_skill', 'save_skill'],
   'Task progress': ['update_plan', 'echo'],
 };
-const writes = new Set(['write_text', 'edit_text', 'apply_patch', 'save_memory', 'save_skill']);
+const writes = new Set([
+  'write_text',
+  'edit_text',
+  'apply_patch',
+  'save_memory',
+  'save_skill',
+  'fetch_url',
+]);
 
 /** Identify the concrete capability group without treating MCP annotations as authorization. */
 function toolGroup(tool: Tool): string {
@@ -39,7 +54,7 @@ export function ToolCatalog({
   const [filter, setFilter] = useState<'all' | 'exposed' | 'disabled'>('all');
   const exposed = (tool: Tool) =>
     (config.tools[tool.name] || 'deny') !== 'deny' &&
-    !(config.sandbox_mode === 'read-only' && writes.has(tool.name));
+    !(config.sandbox_mode === 'read-only' && (writes.has(tool.name) || tool.writes_workspace));
   const visible = tools.filter((tool) => {
     const text = `${tool.name} ${tool.original_name || ''} ${tool.description}`.toLowerCase();
     return (
@@ -80,7 +95,9 @@ export function ToolCatalog({
             </h3>
             {members.map((tool) => {
               const permission = config.tools[tool.name] || 'deny';
-              const blocked = config.sandbox_mode === 'read-only' && writes.has(tool.name);
+              const blocked =
+                config.sandbox_mode === 'read-only' &&
+                (writes.has(tool.name) || tool.writes_workspace);
               return (
                 <div className="tool-setting" key={tool.name} data-tool={tool.name}>
                   <div>

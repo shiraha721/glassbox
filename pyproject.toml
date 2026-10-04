@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-rtagent = "rtagent.main:serve"
+rtagent = "rtagent.cli:main"
 
 [dependency-groups]
 dev = [
