@@ -399,10 +399,6 @@ class ToolRegistry:
             result.append(self.catalog[name])
         return result
 
-    def read_file(self, relative: str) -> str:
-        """Read at most 64 KiB of workspace UTF-8 text, excluding links and secrets."""
-        return self.files.read(relative)["content"]
-
     async def execute(self, definition: ToolDefinition, args: dict, config: StudioConfig) -> str:
         """Execute one authorized call after checking its current MCP schema."""
         name = definition.name

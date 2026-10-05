@@ -56,8 +56,8 @@ For a simple comparison or projection, the expression is the complete mechanism.
 
 | Callback / source | Purpose / contract | Mechanism excerpt | Why / role |
 | --- | --- | --- | --- |
-| [request · promise.catch · L56](../../web/src/api/client.ts#L56) | Convert a rejected operation into visible owner error state. | <code>() =&gt; ({})</code> | Failures remain inspectable instead of becoming an unhandled promise or silent provider fallback. |
-| [request · collection.map · L61](../../web/src/api/client.ts#L61) | Project each collection entry into a derived value or rendered element using its index/identity. | <code>(item: { loc: string[]; msg: string }) =&gt; `${item.loc.join(&#x27;.&#x27;)}: ${item.msg}`</code> | Small local projections keep view/draft construction near its owner; API ownership and immutable Run evidence stay on the server. |
+| [request · promise.catch · L53](../../web/src/api/client.ts#L53) | Convert a rejected operation into visible owner error state. | <code>() =&gt; ({})</code> | Failures remain inspectable instead of becoming an unhandled promise or silent provider fallback. |
+| [request · collection.map · L58](../../web/src/api/client.ts#L58) | Project each collection entry into a derived value or rendered element using its index/identity. | <code>(item: { loc: string[]; msg: string }) =&gt; `${item.loc.join(&#x27;.&#x27;)}: ${item.msg}`</code> | Small local projections keep view/draft construction near its owner; API ownership and immutable Run evidence stay on the server. |
 
 ## web/src/api/events.ts
 
@@ -563,7 +563,7 @@ For a simple comparison or projection, the expression is the complete mechanism.
 
 | Callback / source | Purpose / contract | Mechanism | Why / role |
 | --- | --- | --- | --- |
-| [Studio.compact · local expression · L134](../../src/rtagent/application/studio.py#L134) | Retire only the completed job's local task/controller entry. | <code>lambda completed: self.compaction_tasks.pop(record[&#x27;id&#x27;], None)</code> | Durable receipts remain in SQLite; a completed task cannot keep live ownership or recreate an effect. |
+| [Studio.compact · local expression · L134](../../src/rtagent/application/studio.py#L134) | Retire only the completed job's local task/controller entry. | <code>lambda _completed: self.compaction_tasks.pop(record[&#x27;id&#x27;], None)</code> | Durable receipts remain in SQLite; a completed task cannot keep live ownership or recreate an effect. |
 
 ## src/rtagent/domain/models.py
 
@@ -605,7 +605,7 @@ For a simple comparison or projection, the expression is the complete mechanism.
 
 | Callback / source | Purpose / contract | Mechanism | Why / role |
 | --- | --- | --- | --- |
-| [ProcessManager.start · local expression · L74](../../src/rtagent/infrastructure/sandbox/processes.py#L74) | Retire only the completed job's local task/controller entry. | <code>lambda completed: self.live.pop(identifier, None)</code> | Durable receipts remain in SQLite; a completed task cannot keep live ownership or recreate an effect. |
+| [ProcessManager.start · local expression · L74](../../src/rtagent/infrastructure/sandbox/processes.py#L74) | Retire only the completed job's local task/controller entry. | <code>lambda _completed: self.live.pop(identifier, None)</code> | Durable receipts remain in SQLite; a completed task cannot keep live ownership or recreate an effect. |
 
 ## src/rtagent/infrastructure/sandbox/windows.py
 

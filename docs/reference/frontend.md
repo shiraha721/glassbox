@@ -44,23 +44,23 @@ The physical layout follows app/features/shared/api. App composes features and o
 
 **Layer: Frontend transport adapter.** Offers typed domain aliases from generated schemas and one JSON fetch path.
 
-**Connections and effects:** All components use request; browser paths remain same-origin /api/v1. Types come from generated.ts, not manually copied Python models. Error construction preserves server status/code for future specific handling.
+**Connections and effects:** All components use request; browser paths remain same-origin /api/v1. This adapter exports only schema aliases consumed by the frontend; generated.ts retains the complete API contract. Error construction preserves server status/code for conflict and folder-selection handling.
 
 Every function below belongs to the layer named above. The last column identifies its specific architectural role. Private methods and nested functions are included.
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`ApiError.constructor`](../../web/src/api/client.ts#L29) | Construct a displayable API failure with status/code. | Extend Error, set its message, and retain readonly numeric status/string code constructor properties. | UI can show a useful message while preserving machine-readable conflict/validation identity. |
-| [`request`](../../web/src/api/client.ts#L39) | Fetch a typed local API resource. | Apply JSON/idempotency headers, optional AbortSignal, parse public errors, and handle empty responses. | Live inspection can cancel obsolete requests; server validation remains authoritative. |
-| [`errorMessage`](../../web/src/api/client.ts#L71) | Turn an unknown caught value into display text. | Return Error.message or a stable fallback. | Every local editor/action can handle JavaScript and HTTP failures without unsafe type assumptions. |
-| [`workspacePath`](../../web/src/api/client.ts#L76) | Address the selected project file API. | Add encoded project_id using the correct query separator while preserving explicit refresh options. | Every memory/skill/probe request uses the same root selection rather than hand-built inconsistent URLs. |
-| [`terminal`](../../web/src/api/client.ts#L81) | Check whether a Run is succeeded/failed/cancelled. | Test membership in the three terminal state names. | Controls/polling/stream ownership agree; waiting_approval/interrupted remain nonterminal and cannot be copied/deleted as active conversations. |
+| [`ApiError.constructor`](../../web/src/api/client.ts#L26) | Construct a displayable API failure with status/code. | Extend Error, set its message, and retain readonly numeric status/string code constructor properties. | UI can show a useful message while preserving machine-readable conflict/validation identity. |
+| [`request`](../../web/src/api/client.ts#L36) | Fetch a typed local API resource. | Apply JSON/idempotency headers, optional AbortSignal, parse public errors, and handle empty responses. | Live inspection can cancel obsolete requests; server validation remains authoritative. |
+| [`errorMessage`](../../web/src/api/client.ts#L68) | Turn an unknown caught value into display text. | Return Error.message or a stable fallback. | Every local editor/action can handle JavaScript and HTTP failures without unsafe type assumptions. |
+| [`workspacePath`](../../web/src/api/client.ts#L73) | Address the selected project file API. | Add encoded project_id using the correct query separator while preserving explicit refresh options. | Every memory/skill/probe request uses the same root selection rather than hand-built inconsistent URLs. |
+| [`terminal`](../../web/src/api/client.ts#L78) | Check whether a Run is succeeded/failed/cancelled. | Test membership in the three terminal state names. | Controls/polling/stream ownership agree; waiting_approval/interrupted remain nonterminal and cannot be copied/deleted as active conversations. |
 
 ### Types and ownership
 
 | Type / source | Purpose | Representation / behavior | Why / architectural role |
 | --- | --- | --- | --- |
-| [`ApiError`](../../web/src/api/client.ts#L28) | Typed transport failure. | Error message plus HTTP status/application code. | Error handling stays in the presentation boundary rather than inventing separate frontend business exceptions. |
+| [`ApiError`](../../web/src/api/client.ts#L25) | Typed transport failure. | Error message plus HTTP status/application code. | Error handling stays in the presentation boundary rather than inventing separate frontend business exceptions. |
 
 ## web/src/api/events.ts
 

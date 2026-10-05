@@ -131,7 +131,7 @@ class Studio:
             )
             task = asyncio.create_task(reduce_context(self.repository, record))
             self.compaction_tasks[record["id"]] = task
-            task.add_done_callback(lambda completed: self.compaction_tasks.pop(record["id"], None))
+            task.add_done_callback(lambda _completed: self.compaction_tasks.pop(record["id"], None))
             return compaction_view(record)
 
     async def stop_compaction(self, session_id: str, identifier: str) -> CompactionView:

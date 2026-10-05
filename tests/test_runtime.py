@@ -33,7 +33,7 @@ async def test_multiple_calls_keep_ids_and_complete_before_next_model(studio_cli
     client, _app = studio_client
     await allow_echo(client)
 
-    async def scripted_model(config, compiled, tools, prepared, on_wire):
+    async def scripted_model(_config, compiled, _tools, _prepared, on_wire):
         await on_wire(None)
         results = [message for message in compiled.messages if message.role == "tool"]
         if not results:
@@ -171,7 +171,7 @@ async def test_attempt_limits_stop_the_loop(studio_client, monkeypatch, limits, 
     client, _app = studio_client
     await allow_echo(client, **limits)
 
-    async def looping_model(config, compiled, tools, prepared, on_wire):
+    async def looping_model(_config, _compiled, _tools, _prepared, on_wire):
         await on_wire(None)
         yield {
             "kind": "result",

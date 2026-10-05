@@ -19,7 +19,7 @@ This reference explains implemented code from the application down to individual
 
 ## Coverage and boundaries
 
-The reviewed source contains **306 backend functions/methods and 82 classes**; **73 frontend functions/methods and 1 class**; **149 support functions/methods and 1 class**. Every declaration has an individual purpose/mechanism/reason/layer/source entry. The callback appendix covers **29 Python lambdas and 362 TypeScript anonymous callbacks**, including verification callbacks. This totals **612 named declarations**.
+The reviewed source contains **305 backend functions/methods and 82 classes**; **73 frontend functions/methods and 1 class**; **149 support functions/methods and 1 class**. Every declaration has an individual purpose/mechanism/reason/layer/source entry. The callback appendix covers **29 Python lambdas and 362 TypeScript anonymous callbacks**, including verification callbacks. This totals **611 named declarations**.
 
 The actual Python package is `rtagent`; its domain/application/infrastructure/interfaces packages group concrete modules with checked dependency direction. The npm package is `security-agent-studio-web`. `scripts`, `migrations`, and `tests` are supporting source directories. `skills/skill-creator`, `skills/debugging` and `skills/code-review` are packaged Markdown resources. The development guide and architecture describe the implemented packages, stable entry aliases and dependency direction.
 

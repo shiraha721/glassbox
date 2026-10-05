@@ -340,7 +340,7 @@ Every function below belongs to the layer named above. The last column identifie
 async def allow_echo(client, **limits)
 async def replace_runner(app)
 async def test_multiple_calls_keep_ids_and_complete_before_next_model(studio_client, monkeypatch)
-async def test_multiple_calls_keep_ids_and_complete_before_next_model.scripted_model(config, compiled, tools, prepared, on_wire)
+async def test_multiple_calls_keep_ids_and_complete_before_next_model.scripted_model(_config, compiled, _tools, _prepared, on_wire)
 async def test_unknown_effect_requires_explicit_result_before_resume(studio_client, monkeypatch)
 async def test_unknown_effect_requires_explicit_result_before_resume.uncertain_execute(*_args)
 async def test_receipt_survives_interruption_before_checkpoint(studio_client, monkeypatch)
@@ -349,7 +349,7 @@ async def test_receipt_survives_interruption_before_checkpoint.interrupted_emit(
 async def test_tool_timeout_is_uncertain_and_can_be_cancelled(studio_client, monkeypatch)
 async def test_tool_timeout_is_uncertain_and_can_be_cancelled.slow_execute(*_args)
 async def test_attempt_limits_stop_the_loop(studio_client, monkeypatch, limits, reason)
-async def test_attempt_limits_stop_the_loop.looping_model(config, compiled, tools, prepared, on_wire)
+async def test_attempt_limits_stop_the_loop.looping_model(_config, _compiled, _tools, _prepared, on_wire)
 ```
 
 These are signature listings; qualified names identify ownership and are not executable declarations. Methods include `self`; validators include `cls`.
@@ -492,7 +492,7 @@ Every function below belongs to the layer named above. The last column identifie
 
 | Function / source | Purpose and contract | How it works | Why / architectural role |
 | --- | --- | --- | --- |
-| [`test_file_tool_boundaries`](../../tests/test_tools.py#L20) | Protect native bounded path reads. | Read known text, reject uppercase .ENV/.DB, binary and oversized files, and traversal. | File helpers cannot bypass exclusions merely through casing or alternate caller paths. |
+| [`test_file_tool_boundaries`](../../tests/test_tools.py#L20) | Protect native bounded path reads. | Call the actual Workspace reader; read known text, reject uppercase .ENV/.DB, binary and oversized files, and traversal. | File helpers cannot bypass exclusions merely through casing or alternate caller paths; a test-only registry wrapper is unnecessary. |
 | [`test_mcp_discovery_and_execution`](../../tests/test_tools.py#L39) | Protect SDK session/discovery/call and stdio environment scoping. | Parameterize stdio/HTTP, launch local fixture, discover namespaced tools, call echo, verify explicit env reference present/ambient key absent, finally terminate listener. | Real transport contracts work without provider credentials, and configured references do not forward arbitrary server environment secrets. |
 | [`test_partial_patch_reports_completed_files`](../../tests/test_tools.py#L113) | Protect evidence after a later patch write fails. | Inject a failure on the second guarded replacement; assert first file changed, second unchanged, and partial_patch identifies completed and failed paths. | A coordinated patch cannot claim workspace-wide atomicity or lose known effects during error recovery. |
 | [`test_partial_patch_reports_completed_files.fail_second`](../../tests/test_tools.py#L118) | Reproduce a deterministic second-file I/O failure. | Raise for the second.txt destination and delegate other replacements to the real writer. | The test crosses the actual per-file commit boundary without a destructive external fixture. |

@@ -71,7 +71,7 @@ class ProcessManager:
                 self._drive(identifier, owner.run_id, sandbox, data, control)
             )
             self.live[identifier] = (control, task, data)
-            task.add_done_callback(lambda completed: self.live.pop(identifier, None))
+            task.add_done_callback(lambda _completed: self.live.pop(identifier, None))
         # Return actual launch identity or setup failure; do not wait for the command to finish.
         ready = asyncio.create_task(control.ready.wait())
         try:

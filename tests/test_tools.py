@@ -19,9 +19,9 @@ FIXTURE = Path(__file__).parent / "fixtures" / "mcp_server.py"
 
 def test_file_tool_boundaries(tmp_path):
     """Reject traversal, credential names, binary text, and oversized output."""
-    registry = ToolRegistry(tmp_path)
+    workspace = Workspace(tmp_path)
     (tmp_path / "sample.txt").write_text("Evidence", encoding="utf-8")
-    assert registry.read_file("sample.txt") == "Evidence"
+    assert workspace.read("sample.txt")["content"] == "Evidence"
     for name, value in [
         (".ENV", b"secret"),
         ("sample.DB", b"secret"),
@@ -30,9 +30,9 @@ def test_file_tool_boundaries(tmp_path):
     ]:
         (tmp_path / name).write_bytes(value)
         with pytest.raises(AppError):
-            registry.read_file(name)
+            workspace.read(name)
     with pytest.raises(AppError, match="outside"):
-        registry.read_file("../outside.txt")
+        workspace.read("../outside.txt")
 
 
 @pytest.mark.parametrize("transport", ["stdio", "streamable_http"])
