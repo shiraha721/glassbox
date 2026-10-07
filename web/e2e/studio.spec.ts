@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 
 /** Open the local workspace directly and create a fresh conversation. */
 async function openWorkspace(page: Page) {
@@ -697,4 +697,26 @@ test('global skills from Settings are available in every project', async ({ page
     `/api/v1/skills/browser-global?expected_hash=${saved.hash}`,
   );
   expect(removed.status()).toBe(204);
+});
+
+test('a typed project folder is created only when requested', async ({ page }) => {
+  await openWorkspace(page);
+  const boot = await (await page.request.get('/api/v1/bootstrap')).json();
+  const root = path.join(path.dirname(boot.workspace_root), `created-${Date.now()}`, 'app');
+  await page.getByRole('button', { name: 'Add project', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Enter a path', exact: true }).click();
+  await dialog.getByLabel('Workspace folder', { exact: true }).fill(root);
+  await dialog.getByLabel('Project name', { exact: true }).fill('Created app');
+  await dialog.getByRole('button', { name: 'Add project', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('does not exist');
+  expect(existsSync(root)).toBe(false);
+  await dialog.getByLabel('Create the folder if it does not exist', { exact: true }).check();
+  await dialog.getByRole('button', { name: 'Add project', exact: true }).click();
+  await expect(dialog).not.toBeAttached();
+  await expect(page.getByRole('button', { name: 'Created app', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  expect(existsSync(root)).toBe(true);
 });

@@ -116,7 +116,11 @@ Long conversations can be summarized: **Context** shows estimated history size a
 
 ## Projects, memory and Skills
 
-A **project** is a registered folder. **Projects → + (Add project) → Choose folder** opens your system's folder picker (Windows Explorer, or zenity/kdialog on Linux; manual entry when unavailable). Each conversation belongs to one project, or to the default workspace (`STUDIO_WORKSPACE_ROOT`, the current directory by default). Selecting a project starts a new conversation there; an idle conversation can be moved with **Change workspace**. Each Run records the folder it used.
+A **project** is a registered folder. **Projects → + (Add project) → Choose folder** opens the folder picker of the computer running the service: Windows Explorer on Windows and under WSL, zenity or kdialog on a Linux desktop. **Enter a path** types a path instead (also the fallback when no picker is available); tick **Create the folder if it does not exist** to start a project in a new folder. A path that does not exist is otherwise reported rather than created, so a typo does not become an empty project.
+
+Under WSL, a folder chosen in Explorer is translated to its Linux path: `\\wsl.localhost\<distro>\home\you\app` becomes `/home/you/app`, and `C:\work\app` becomes `/mnt/c/work/app`. Prefer folders inside the distribution; Windows drives are much slower to read from WSL. Folders in another distribution or on a network share cannot be used.
+
+Each conversation belongs to one project, or to the default workspace (`STUDIO_WORKSPACE_ROOT`, the current directory by default). Selecting a project starts a new conversation there; an idle conversation can be moved with **Change workspace**. Each Run records the folder it used.
 
 At the start of each Run, the agent receives:
 

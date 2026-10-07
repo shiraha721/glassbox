@@ -229,22 +229,41 @@ class Studio:
         return config.model_copy(update=update)
 
     async def create_project(self, request: ProjectCreate) -> ProjectView:
-        """Register an existing absolute workspace folder without creating or copying files."""
+        """Register an absolute workspace folder without copying files.
+
+        A missing folder is created only when the request asks for it, so a mistyped path is
+        reported instead of silently becoming an empty workspace."""
         root = Path(request.workspace_root).expanduser()
         if not root.is_absolute():
-            raise AppError(
-                "workspace_path", "Use an absolute path to an existing workspace folder."
-            )
+            raise AppError("workspace_path", "Use an absolute path to a workspace folder.")
+        data_dir = self.registry.files.data_dir
+        if request.create:
+            # Check the target before creating anything; links resolve to their destination.
+            target = await asyncio.to_thread(root.resolve)
+            if target.is_relative_to(data_dir):
+                raise AppError("workspace_path", "Application runtime data cannot be a workspace.")
+            try:
+                await asyncio.to_thread(target.mkdir, parents=True, exist_ok=True)
+            except FileExistsError as exc:
+                raise AppError("workspace_path", "The workspace path must be a directory.") from exc
+            except OSError as exc:
+                raise AppError(
+                    "workspace_path",
+                    f"The folder could not be created: {exc.strerror or type(exc).__name__}.",
+                ) from exc
         try:
             root = await asyncio.to_thread(root.resolve, strict=True)
             is_directory = await asyncio.to_thread(root.is_dir)
-        except OSError as exc:
+        except FileNotFoundError as exc:
             raise AppError(
-                "workspace_path", "The workspace folder does not exist or is inaccessible."
+                "workspace_missing",
+                f"The folder {root} does not exist. Choose another folder, or create it.",
             ) from exc
+        except OSError as exc:
+            raise AppError("workspace_path", "The workspace folder is inaccessible.") from exc
         if not is_directory:
             raise AppError("workspace_path", "The workspace path must be a directory.")
-        if root.is_relative_to(self.registry.files.data_dir):
+        if root.is_relative_to(data_dir):
             raise AppError("workspace_path", "Application runtime data cannot be a workspace.")
         return ProjectView.model_validate(
             await self.repository.create_project(request.name, str(root))

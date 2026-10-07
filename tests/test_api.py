@@ -424,3 +424,26 @@ async def test_global_skills_are_shared_by_projects(studio_client, tmp_path):
     assert (
         await client.delete("/api/v1/skills/debugging", params={"expected_hash": "x"})
     ).status_code == 404
+
+
+async def test_projects_create_a_missing_folder_only_when_asked(studio_client, tmp_path):
+    client, _app = studio_client
+    target = tmp_path / "new" / "project"
+    body = {"name": "New", "workspace_root": str(target)}
+    missing = await client.post("/api/v1/projects", json=body)
+    # A mistyped path is reported, not turned into an empty workspace.
+    assert missing.json()["error"]["code"] == "workspace_missing" and not target.exists()
+    created = await client.post("/api/v1/projects", json={**body, "create": True})
+    assert created.status_code == 201 and target.is_dir()
+    assert created.json()["workspace_root"] == str(target)
+    inside = tmp_path / "data" / "projects" / "x"
+    refused = await client.post(
+        "/api/v1/projects", json={"name": "Data", "workspace_root": str(inside), "create": True}
+    )
+    assert refused.status_code == 422 and not inside.exists()
+    file = tmp_path / "file.txt"
+    file.write_text("x", encoding="utf-8")
+    not_folder = await client.post(
+        "/api/v1/projects", json={"name": "File", "workspace_root": str(file), "create": True}
+    )
+    assert "must be a directory" in not_folder.json()["error"]["message"]

@@ -1,14 +1,31 @@
 """Own the short-lived desktop folder dialog used by the local Web application."""
 
 import asyncio
+import base64
 import json
 import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from rtagent.domain import AppError, FolderSelection
+
+UNREACHABLE = (
+    "The selected folder is not reachable from WSL. Choose a folder on a Windows drive or in "
+    "this Linux distribution."
+)
+
+
+@dataclass(frozen=True)
+class DialogCommand:
+    """A dialog process and the format of the path it prints."""
+
+    argv: list[str]
+    output: Literal["text", "json", "wsl"] = "text"
+    env: dict[str, str] | None = None
 
 
 class FolderPicker:
@@ -50,10 +67,11 @@ class FolderPicker:
                 # Spawn is shielded so cancellation during process creation cannot lose its handle.
                 spawning = asyncio.create_task(
                     asyncio.create_subprocess_exec(
-                        *command,
+                        *command.argv,
                         stdin=asyncio.subprocess.DEVNULL,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.DEVNULL,
+                        env=command.env,
                         **(
                             {"creationflags": subprocess.CREATE_NO_WINDOW}
                             if os.name == "nt"
@@ -77,7 +95,14 @@ class FolderPicker:
                         detail="The system folder dialog could not open. Enter a folder path.",
                     )
                 value = output.decode("utf-8").rstrip("\r\n")
-                path = json.loads(value)["path"] if os.name == "nt" else value
+                if command.output == "json":
+                    path = json.loads(value)["path"]
+                elif command.output == "wsl":
+                    path = await linux_path(base64.b64decode(value, validate=True).decode("utf-8"))
+                    if path is None:
+                        return FolderSelection(status="unavailable", detail=UNREACHABLE)
+                else:
+                    path = value
                 if not path:
                     return FolderSelection(status="cancelled")
                 return FolderSelection(status="selected", path=str(Path(path).resolve(strict=True)))
@@ -102,33 +127,82 @@ class FolderPicker:
                 self.task = None
 
     @staticmethod
-    def _command(initial_path: str) -> list[str] | None:
-        """Use the Windows Shell API or an installed Linux desktop dialog, without shell parsing."""
+    def _command(initial_path: str) -> DialogCommand | None:
+        """Use the Windows Shell dialog (natively or from WSL) or a Linux desktop dialog.
+
+        Under WSL the browser runs on Windows, so the Windows dialog is preferred over a Linux
+        one. No command line passes through a shell."""
         if os.name == "nt":
             # Windows venv python.exe is a redirector; its child would survive killing the stub.
             # The GUI helper uses only stdlib, so launch the real interpreter and source directly.
             executable = Path(getattr(sys, "_base_executable", sys.executable)).resolve()
-            return [
-                str(executable),
-                str(Path(__file__).with_name("windows_dialog.py")),
-                initial_path,
-            ]
+            return DialogCommand(
+                [
+                    str(executable),
+                    str(Path(__file__).with_name("windows_dialog.py")),
+                    initial_path,
+                ],
+                output="json",
+            )
+        if os.environ.get("WSL_DISTRO_NAME") and (executable := shutil.which("powershell.exe")):
+            script = Path(__file__).with_name("wsl_dialog.ps1").read_text(encoding="utf-8")
+            # WSLENV passes the variable to Windows and translates it to a Windows path (/p),
+            # so the path never needs quoting inside the script.
+            forwarded = ":".join(
+                filter(None, ["RTAGENT_DIALOG_INITIAL/p", os.environ.get("WSLENV")])
+            )
+            return DialogCommand(
+                [
+                    executable,
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Sta",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-EncodedCommand",
+                    base64.b64encode(script.encode("utf-16-le")).decode("ascii"),
+                ],
+                output="wsl",
+                env={**os.environ, "RTAGENT_DIALOG_INITIAL": initial_path, "WSLENV": forwarded},
+            )
         if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
             return None
         if executable := shutil.which("zenity"):
-            return [
-                executable,
-                "--file-selection",
-                "--directory",
-                "--title=Select workspace folder",
-                "--filename=" + initial_path.rstrip("/") + "/",
-            ]
+            return DialogCommand(
+                [
+                    executable,
+                    "--file-selection",
+                    "--directory",
+                    "--title=Select workspace folder",
+                    "--filename=" + initial_path.rstrip("/") + "/",
+                ]
+            )
         if executable := shutil.which("kdialog"):
-            return [
-                executable,
-                "--title",
-                "Select workspace folder",
-                "--getexistingdirectory",
-                initial_path,
-            ]
+            return DialogCommand(
+                [
+                    executable,
+                    "--title",
+                    "Select workspace folder",
+                    "--getexistingdirectory",
+                    initial_path,
+                ]
+            )
         return None
+
+
+async def linux_path(windows_path: str) -> str | None:
+    """Translate a path chosen in Windows to its WSL path, or None when WSL cannot reach it.
+
+    Drive paths map to their mount (C:\\x -> /mnt/c/x) and \\\\wsl.localhost paths of this
+    distribution to Linux paths; other distributions and network shares are rejected."""
+    process = await asyncio.create_subprocess_exec(
+        "wslpath",
+        "-u",
+        windows_path,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    output, _ = await process.communicate()
+    path = output.decode("utf-8").rstrip("\n")
+    return path if process.returncode == 0 and path.startswith("/") else None

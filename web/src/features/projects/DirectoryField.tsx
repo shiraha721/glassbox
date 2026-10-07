@@ -2,18 +2,25 @@ import { useEffect, useRef, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 import { ApiError, errorMessage, request, type FolderSelection } from '../../api/client';
 
-/** Select a real server-side folder through the desktop, with manual entry only on unavailability. */
+/** Select a server-side folder through the system dialog, or type a path that may be created.
+ *
+ * Manual entry opens on request or when no dialog is available. Only a typed path can name a
+ * folder that does not exist yet; `create` asks the server to create it. */
 export function DirectoryField({
   value,
   initialPath,
   disabled,
+  create,
   onChange,
+  onCreateChange,
   onBusyChange,
 }: {
   value: string;
   initialPath: string;
   disabled: boolean;
+  create: boolean;
   onChange: (path: string) => void;
+  onCreateChange: (create: boolean) => void;
   onBusyChange: (busy: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -39,6 +46,7 @@ export function DirectoryField({
       if (result.status === 'selected' && result.path) {
         onChange(result.path);
         setManual(false);
+        onCreateChange(false);
         setNotice('');
       } else if (result.status === 'unavailable') {
         setManual(true);
@@ -92,7 +100,31 @@ export function DirectoryField({
             Cancel selection
           </button>
         )}
+        {!busy && !manual && (
+          <button
+            className="text-button"
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              setManual(true);
+              setNotice('');
+            }}
+          >
+            Enter a path
+          </button>
+        )}
       </div>
+      {manual && (
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={create}
+            disabled={disabled || busy}
+            onChange={(event) => onCreateChange(event.target.checked)}
+          />
+          Create the folder if it does not exist
+        </label>
+      )}
       {notice && (
         <p className="subtle" role="status">
           {notice}

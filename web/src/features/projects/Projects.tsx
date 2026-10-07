@@ -28,6 +28,7 @@ export function Projects({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [root, setRoot] = useState('');
+  const [create, setCreate] = useState(false);
   const [picking, setPicking] = useState(false);
   const dialogRef = useRef<HTMLFormElement>(null);
   useDialogFocus(dialogRef, open, () => {
@@ -37,6 +38,7 @@ export function Projects({
     const created = await request<Project>('/projects', 'POST', {
       name: name.trim(),
       workspace_root: root.trim(),
+      create,
     });
     await onUpdated();
     onSelect(created.id);
@@ -55,6 +57,7 @@ export function Projects({
             onClick={() => {
               setName('');
               setRoot('');
+              setCreate(false);
               setOpen(true);
             }}
           >
@@ -128,6 +131,8 @@ export function Projects({
                 value={root}
                 initialPath={defaultRoot}
                 disabled={busy}
+                create={create}
+                onCreateChange={setCreate}
                 onBusyChange={setPicking}
                 onChange={(path) => {
                   setRoot(path);

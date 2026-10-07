@@ -1646,13 +1646,18 @@ export interface components {
         };
         /**
          * ProjectCreate
-         * @description Register an existing local folder as a conversation workspace.
+         * @description Register a local folder as a conversation workspace, optionally creating it first.
          */
         ProjectCreate: {
             /** Name */
             name: string;
             /** Workspace Root */
             workspace_root: string;
+            /**
+             * Create
+             * @default false
+             */
+            create: boolean;
         };
         /**
          * ProjectView

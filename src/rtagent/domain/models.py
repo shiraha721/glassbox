@@ -672,9 +672,10 @@ class FolderUpdate(FolderCreate):
 
 
 class ProjectCreate(FolderCreate):
-    """Register an existing local folder as a conversation workspace."""
+    """Register a local folder as a conversation workspace, optionally creating it first."""
 
     workspace_root: str = Field(min_length=1, max_length=4096)
+    create: bool = False
 
 
 class FolderPickerRequest(Contract):
