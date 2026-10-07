@@ -774,6 +774,21 @@ class CompactionView(Contract):
     model_calls: int = 0
 
 
+class ContextUsage(Contract):
+    """Provider-reported accounting for the conversation's most recent model request.
+
+    Each request resends the whole conversation prefix, so the latest one reports the live
+    context size. `prompt_tokens` is the total sent (cached and uncached); `cache_read_tokens`
+    is the part served from the provider's prompt cache. Fields are null when unreported."""
+
+    model: str | None = None
+    prompt_tokens: int | None = None
+    input_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    output_tokens: int | None = None
+
+
 class ContextView(Contract):
     """Estimated history size and explicit summary boundaries, separate from actual model usage."""
 
@@ -784,6 +799,7 @@ class ContextView(Contract):
     effective_estimated_tokens: int
     context_window: int | None
     reserved_output_tokens: int
+    live_usage: ContextUsage | None
     active_compaction_id: str | None
     compacting_id: str | None
     compactions: list[CompactionView]

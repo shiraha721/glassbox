@@ -12,6 +12,73 @@ import type { components } from '../../api/generated';
 
 type Context = components['schemas']['ContextView'];
 
+/** Show the provider's accounting for the latest request: how much of the window it filled and
+ * how much of its prompt the model's cache served, with provider-truthful numbers only. */
+function ContextUsagePanel({ context }: { context: Context }) {
+  const usage = context.live_usage;
+  if (!usage)
+    return (
+      <p className="subtle">
+        Live usage from the provider appears after the first model request in this conversation.
+      </p>
+    );
+  if (usage.prompt_tokens === null)
+    return (
+      <p className="subtle">
+        The last request ran{usage.model ? ` on ${usage.model}` : ''}, but this provider reported no
+        token usage.
+      </p>
+    );
+  const window = context.context_window;
+  const used = usage.prompt_tokens;
+  const fill = window ? Math.min(100, Math.round((used / window) * 100)) : null;
+  // Cache reads are a subset of the prompt; the rate is meaningful only when both are reported.
+  const cached = usage.cache_read_tokens;
+  const rate = cached !== null && used > 0 ? Math.round((cached / used) * 100) : null;
+  return (
+    <section className="context-usage">
+      <div className="context-usage-head">
+        <span>Last request{usage.model ? ` · ${usage.model}` : ''}</span>
+        <strong>
+          {used.toLocaleString()}
+          {window ? ` / ${window.toLocaleString()}` : ''} tokens
+        </strong>
+      </div>
+      {fill !== null && (
+        <div
+          className="usage-bar"
+          role="progressbar"
+          aria-valuenow={fill}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Context window used"
+        >
+          <span style={{ width: `${fill}%` }} data-high={fill >= 85 || undefined} />
+        </div>
+      )}
+      <div className="usage-metrics">
+        <div>
+          <strong>{window ? `${fill}%` : '—'}</strong>
+          <span>Window used</span>
+        </div>
+        <div>
+          <strong>{rate !== null ? `${rate}%` : '—'}</strong>
+          <span>Cache hit rate</span>
+        </div>
+        <div>
+          <strong>{usage.output_tokens?.toLocaleString() ?? '—'}</strong>
+          <span>Output tokens</span>
+        </div>
+      </div>
+      <p className="subtle">
+        {cached !== null ? `${cached.toLocaleString()} prompt tokens served from cache` : 'Cache'}
+        {usage.cache_write_tokens ? `, ${usage.cache_write_tokens.toLocaleString()} written` : ''}
+        {cached === null ? ' not reported by this provider' : ''}.
+      </p>
+    </section>
+  );
+}
+
 /** Inspect history accounting and explicitly summarize or restore older complete turns. */
 export function ContextPanel({
   session,
@@ -70,6 +137,7 @@ export function ContextPanel({
         )}
         {context && (
           <>
+            <ContextUsagePanel context={context} />
             <div className="context-accounting">
               <div>
                 <strong>{context.raw_messages}</strong>

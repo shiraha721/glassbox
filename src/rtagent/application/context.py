@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any
 
-from rtagent.domain import AppError, Block, CompactionView, Preset, StudioConfig
+from rtagent.domain import AppError, Block, CompactionView, ContextUsage, Preset, StudioConfig
 from rtagent.domain.prompts import compile_prompt
 from rtagent.infrastructure.credentials import CredentialStore
 from rtagent.infrastructure.providers.chat import generate, prepare, transformations
@@ -42,6 +42,32 @@ def compaction_view(record: dict[str, Any]) -> CompactionView:
 def estimated_tokens(messages: list[dict[str, Any]]) -> int:
     """Return the same byte heuristic used for compilation, without claiming tokenizer accuracy."""
     return (len(json.dumps(messages, ensure_ascii=False).encode()) + 3) // 4
+
+
+def context_usage(row: dict[str, Any] | None, model: str) -> ContextUsage | None:
+    """Turn the latest model call's recorded usage into live context accounting.
+
+    The Messages API reports `input_tokens` as the uncached part, so the full prompt is their
+    sum with the cache tokens; Chat Completions already counts the cache inside `input_tokens`.
+    `None` prompt fields stay `None` rather than collapsing to zero."""
+    if row is None:
+        return None
+    read, write = row.get("cache_read"), row.get("cache_write")
+    inputs = row.get("input_tokens")
+    if inputs is None:
+        prompt = None
+    elif row.get("adapter") == "anthropic":
+        prompt = inputs + (read or 0) + (write or 0)
+    else:
+        prompt = inputs
+    return ContextUsage(
+        model=row.get("model") or model or None,
+        prompt_tokens=prompt,
+        input_tokens=inputs,
+        cache_read_tokens=read,
+        cache_write_tokens=write,
+        output_tokens=row.get("output_tokens"),
+    )
 
 
 async def reduce_context(

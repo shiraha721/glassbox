@@ -110,7 +110,7 @@ When a tool requires approval, the Run pauses with an **Approve once / Reject** 
 
 The sidebar's **Conversations** section lists the selected workspace's conversations, with **New conversation** to start another there, search, an **Archived** filter and flat folders. A conversation's **…** menu can rename, move to a folder, change its workspace, duplicate, fork from an earlier turn, archive or delete it. **Fork here** on a turn does the same from that point. Copies share no state with the original and never repeat model or tool calls.
 
-Long conversations can be summarized: **Context** shows estimated history size and **Compact older turns** asks the model for a summary of all but the most recent turns. The original messages are kept, and **Restore full context** switches back.
+**Context** reports how the conversation uses the model. After the first request it shows the provider's accounting for the latest one: the prompt size against the model's context window (with a fill bar), the share of that prompt the provider served from its cache (cache hit rate), and the output tokens; a provider that reports no usage, including the simulated model, says so rather than showing zeros. Below that, estimated history size, and **Compact older turns** asks the model for a summary of all but the most recent turns. The original messages are kept, and **Restore full context** switches back.
 
 **Processes** lists background commands the agent started, with their output, and lets you send input lines, close stdin or stop them.
 

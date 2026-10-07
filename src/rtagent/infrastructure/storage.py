@@ -1106,6 +1106,38 @@ class Repository:
         async with self.engine.connect() as connection:
             return [dict(row) for row in (await connection.execute(query)).mappings()]
 
+    async def latest_model_usage(self, session_id: str) -> dict[str, Any] | None:
+        """Read the most recent succeeded model call's usage and model for a conversation.
+
+        Each request resends the whole conversation prefix, so the latest request's reported
+        prompt size is the live context usage; summing across calls would multiply-count it."""
+        data = calls.c.data
+        # Calls carry no timestamp; their IDs encode run step order (call_order). The latest
+        # request is the highest-step model call of the most recently created run.
+        query = (
+            select(
+                calls.c.id.label("call_id"),
+                runs.c.created_at.label("run_created"),
+                func.json_extract(data, "$.usage.input_tokens").label("input_tokens"),
+                func.json_extract(data, "$.usage.output_tokens").label("output_tokens"),
+                func.json_extract(data, "$.usage.cache_read_input_tokens").label("cache_read"),
+                func.json_extract(data, "$.usage.cache_creation_input_tokens").label("cache_write"),
+                func.json_extract(data, "$.response_metadata.model").label("model"),
+                func.json_extract(runs.c.snapshot, "$.config.provider.adapter").label("adapter"),
+            )
+            .select_from(calls.join(runs, calls.c.run_id == runs.c.id))
+            .where(
+                runs.c.session_id == session_id,
+                calls.c.kind == "model",
+                calls.c.status == "succeeded",
+            )
+        )
+        async with self.engine.connect() as connection:
+            rows = [dict(row) for row in (await connection.execute(query)).mappings()]
+        if not rows:
+            return None
+        return max(rows, key=lambda row: (row["run_created"], call_order(row["call_id"])))
+
     async def list_runs(self, session_id: str) -> list[dict[str, Any]]:
         """Read conversation Runs in creation order."""
         await self.session(session_id)

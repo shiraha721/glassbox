@@ -720,3 +720,45 @@ test('a typed project folder is created only when requested', async ({ page }) =
   );
   expect(existsSync(root)).toBe(true);
 });
+
+test('conversations start under the workspace and context reports live request usage', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  // New conversation lives inside the Conversations section, which names the active workspace.
+  const conversations = page.locator('.history-controls');
+  await expect(conversations.getByText('Conversations', { exact: true })).toBeVisible();
+  await expect(conversations.getByText('Default workspace', { exact: true })).toBeVisible();
+  await expect(
+    conversations.getByRole('button', { name: 'New conversation', exact: true }),
+  ).toBeVisible();
+
+  await startTask(page, '/read README.md');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await page.getByRole('button', { name: 'Context', exact: true }).click();
+  // The simulated provider reports no tokens; the panel says so rather than inventing numbers.
+  await expect(page.getByLabel('Conversation context')).toContainText('reported no token usage');
+
+  // A provider that does report usage fills the window bar, cache-hit rate and output metrics.
+  await page.route('**/api/v1/sessions/*/context', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.context_window = 200000;
+    body.live_usage = {
+      model: 'test-model',
+      prompt_tokens: 50000,
+      input_tokens: 5000,
+      cache_read_tokens: 45000,
+      cache_write_tokens: 0,
+      output_tokens: 800,
+    };
+    await route.fulfill({ response, json: body });
+  });
+  await page.getByRole('button', { name: 'Close context', exact: true }).click();
+  await page.getByRole('button', { name: 'Context', exact: true }).click();
+  const usage = page.locator('.context-usage');
+  await expect(usage).toContainText('50,000 / 200,000 tokens');
+  await expect(usage).toContainText('25%'); // window used
+  await expect(usage).toContainText('90%'); // cache hit rate
+  await expect(usage.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25');
+});

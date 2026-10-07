@@ -1150,6 +1150,28 @@ export interface components {
             expected_revision: number;
         };
         /**
+         * ContextUsage
+         * @description Provider-reported accounting for the conversation's most recent model request.
+         *
+         *     Each request resends the whole conversation prefix, so the latest one reports the live
+         *     context size. `prompt_tokens` is the total sent (cached and uncached); `cache_read_tokens`
+         *     is the part served from the provider's prompt cache. Fields are null when unreported.
+         */
+        ContextUsage: {
+            /** Model */
+            model: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number | null;
+            /** Input Tokens */
+            input_tokens: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens: number | null;
+            /** Cache Write Tokens */
+            cache_write_tokens: number | null;
+            /** Output Tokens */
+            output_tokens: number | null;
+        };
+        /**
          * ContextView
          * @description Estimated history size and explicit summary boundaries, separate from actual model usage.
          */
@@ -1168,6 +1190,7 @@ export interface components {
             context_window: number | null;
             /** Reserved Output Tokens */
             reserved_output_tokens: number;
+            live_usage: components["schemas"]["ContextUsage"] | null;
             /** Active Compaction Id */
             active_compaction_id: string | null;
             /** Compacting Id */

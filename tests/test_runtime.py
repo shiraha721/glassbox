@@ -5,8 +5,57 @@ import asyncio
 import pytest
 from test_api import start, wait_state
 
+from rtagent.application.context import context_usage
 from rtagent.application.runner import Runner
 from rtagent.domain import Message, ToolCall
+
+
+def test_context_usage_counts_cached_prompt_tokens_per_adapter():
+    """Messages reports uncached input, so the full prompt is its sum with the cache tokens."""
+    anthropic = context_usage(
+        {
+            "adapter": "anthropic",
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "cache_read": 900,
+            "cache_write": 50,
+            "model": "claude-x",
+        },
+        "default-model",
+    )
+    assert anthropic.prompt_tokens == 1050 and anthropic.cache_read_tokens == 900
+    assert anthropic.model == "claude-x"
+    # Chat Completions already counts cached tokens inside input_tokens; do not double-count.
+    openai = context_usage(
+        {"adapter": "openai", "input_tokens": 1000, "output_tokens": 20, "cache_read": 900},
+        "gpt-x",
+    )
+    assert openai.prompt_tokens == 1000 and openai.model == "gpt-x"
+    # No call, or a provider that omits usage: null prompt rather than a misleading zero.
+    assert context_usage(None, "m") is None
+    assert context_usage({"adapter": "fake", "input_tokens": None}, "sim").prompt_tokens is None
+
+
+async def test_context_reports_the_latest_request_usage(studio_client, monkeypatch):
+    """The context view surfaces the provider's accounting for the most recent model request."""
+    client, _app = studio_client
+
+    async def scripted_model(_config, _compiled, _tools, _prepared, on_wire, _key=""):
+        await on_wire(None)
+        yield {
+            "kind": "result",
+            "message": Message(role="assistant", content="Done."),
+            "usage": {"input_tokens": 321, "output_tokens": 45, "cache_read_input_tokens": 200},
+        }
+
+    monkeypatch.setattr("rtagent.application.runner.generate", scripted_model)
+    run, _body, session_id, _preview = await start(client)
+    await wait_state(client, run["id"], {"succeeded"})
+    usage = (await client.get(f"/api/v1/sessions/{session_id}/context")).json()["live_usage"]
+    assert usage["input_tokens"] == 321 and usage["output_tokens"] == 45
+    assert usage["cache_read_tokens"] == 200
+    # The default test provider is the fake adapter, where input already counts any cache.
+    assert usage["prompt_tokens"] == 321
 
 
 async def allow_echo(client, **limits):

@@ -7,7 +7,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from rtagent.application.context import compaction_view, estimated_tokens, reduce_context
+from rtagent.application.context import (
+    compaction_view,
+    context_usage,
+    estimated_tokens,
+    reduce_context,
+)
 from rtagent.application.runner import Runner
 from rtagent.domain import (
     AppError,
@@ -112,6 +117,7 @@ class Studio:
         session = await self.repository.session(session_id)
         effective = await self.repository.effective_history(session)
         config = await self.repository.config()
+        usage = await self.repository.latest_model_usage(session_id)
         return ContextView(
             session_id=session_id,
             raw_messages=len(session["messages"]),
@@ -120,6 +126,7 @@ class Studio:
             effective_estimated_tokens=estimated_tokens(effective),
             context_window=config.provider.context_window,
             reserved_output_tokens=config.provider.max_output_tokens,
+            live_usage=context_usage(usage, config.provider.model),
             active_compaction_id=session.get("compaction_id"),
             compacting_id=session.get("compacting_id"),
             compactions=[

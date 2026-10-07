@@ -261,7 +261,15 @@ async def generate(
         ids = [call.id for call in message.tool_calls]
         if len(set(ids)) != len(ids) or any(not identifier for identifier in ids):
             raise AppError("provider_protocol", "Tool call IDs must be present and unique.", 502)
-        usage = total.usage_metadata or {"input_tokens": None, "output_tokens": None}
+        usage = dict(total.usage_metadata or {"input_tokens": None, "output_tokens": None})
+        # Surface cached-prompt tokens at the top level so context accounting does not have to
+        # know each provider's nesting. Chat Completions reports them under input_token_details,
+        # where input_tokens already includes the cached part (unlike the Messages API).
+        details = usage.get("input_token_details") or {}
+        if "cache_read" in details:
+            usage["cache_read_input_tokens"] = details["cache_read"]
+        if "cache_creation" in details:
+            usage["cache_creation_input_tokens"] = details["cache_creation"]
         yield {
             "kind": "result",
             "message": message,
