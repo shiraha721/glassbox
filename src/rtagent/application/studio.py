@@ -33,6 +33,8 @@ from rtagent.domain import (
     EvalUpdate,
     FileChange,
     FileChanges,
+    GitDiff,
+    GitStatus,
     MemoryDocument,
     MemorySave,
     Message,
@@ -72,6 +74,7 @@ from rtagent.infrastructure.providers.chat import prepare, transformations
 from rtagent.infrastructure.storage import Repository
 from rtagent.infrastructure.tools import ToolRegistry
 from rtagent.infrastructure.tracing import redact
+from rtagent.infrastructure.workspace import git
 from rtagent.infrastructure.workspace.files import MEMORY_PATH
 from rtagent.infrastructure.workspace.toolchains import validate_toolchains
 
@@ -489,6 +492,16 @@ class Studio:
             CommandInfo.model_validate({key: item[key] for key in CommandInfo.model_fields})
             for item in found
         ]
+
+    async def git_status(self, project_id: str | None = None) -> GitStatus:
+        """Read the selected workspace's Git branch and changed files for the user."""
+        registry = await self.workspace_registry(project_id)
+        return await git.status(registry.files)
+
+    async def git_diff(self, project_id: str | None = None, path: str | None = None) -> GitDiff:
+        """Read uncommitted changes in one file or the whole workspace, without private files."""
+        registry = await self.workspace_registry(project_id)
+        return await git.diff(registry.files, path)
 
     @staticmethod
     def _effective_config(

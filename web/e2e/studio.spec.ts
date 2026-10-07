@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 /** Open the local workspace directly and create a fresh conversation. */
 async function openWorkspace(page: Page) {
@@ -1006,5 +1007,36 @@ test('a hook added in Settings runs when a run ends', async ({ page }) => {
   } finally {
     const config = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
     await page.request.put('/api/v1/config', { data: { ...config, hooks: [] } });
+  }
+});
+
+test('the Changes panel shows Git changes and prepares a review task', async ({ page }) => {
+  const boot = await (await page.request.get('/api/v1/bootstrap')).json();
+  const root: string = boot.workspace_root;
+  const readme = path.join(root, 'README.md');
+  const original = readFileSync(readme, 'utf8');
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.name=E2E', '-c', 'user.email=e2e@example.com', ...args], {
+      cwd: root,
+    });
+  git('init', '-q', '-b', 'main');
+  try {
+    git('add', 'README.md');
+    git('commit', '-q', '-m', 'start');
+    writeFileSync(readme, original + '\nreview me\n');
+    await openWorkspace(page);
+    await page.getByRole('button', { name: 'Changes', exact: true }).click();
+    const panel = page.getByLabel('Git changes', { exact: true });
+    await expect(panel.getByText('main', { exact: true })).toBeVisible();
+    await panel.getByRole('button', { name: /README\.md/ }).click();
+    await expect(panel.locator('.patch-diff')).toContainText('+review me');
+    await panel.getByRole('button', { name: 'Review changes', exact: true }).click();
+    const task = page.getByLabel('Task', { exact: true });
+    await expect(task).toHaveValue(/^Review the uncommitted changes/);
+    await expect(task).toHaveValue(/\+review me/);
+    await expect(page.getByLabel('Prompt preset', { exact: true })).toHaveValue('code-review');
+  } finally {
+    writeFileSync(readme, original);
+    rmSync(path.join(root, '.git'), { recursive: true, force: true });
   }
 });

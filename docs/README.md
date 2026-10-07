@@ -118,6 +118,8 @@ With prices set, each Run's cost appears in **Inspector → Run trace**, **Conte
 
 **Preview** (or **Inspector → Prompt preview**) compiles the current draft without running anything: final message sequence, block activation, prepared request and the tool schemas the model would receive. It updates as you edit and never blocks **Run**.
 
+**Changes** shows the workspace's uncommitted Git changes: branch and upstream (with commits ahead ↑ and behind ↓), each changed file with its status letters, and a file's diff against the last commit when you select it. **Review changes** switches to the Code review preset and puts a review task with the whole diff (up to about 90,000 characters) in the message box for you to check and send, because the agent itself cannot run Git. The studio runs Git on this computer read-only, with your Git configuration but with repository-provided programs (hooks, fsmonitor, external diff and textconv drivers) disabled. Private files such as `.env` are listed but their content is never shown or included.
+
 ### Edit prompts
 
 **Prompt** opens the preset editor. Blocks have a role (system, user or assistant), a position (before the conversation history or just before your message), optional `{{variables}}` and activation rules. Workspace instructions, memory and Skills appear in their real position between the blocks. Edits are drafts with **Undo**, **Redo** and **Discard** until you **Save preset**; saving creates a new revision, and earlier Runs keep the version they used. **Export**/**Import** moves presets between installations.

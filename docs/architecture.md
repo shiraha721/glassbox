@@ -59,7 +59,7 @@ web/src/
   app/App.tsx        Workspace shell: selection, submission, panels, composer
   features/          chat, composer (model and access pickers), evaluation, history, projects,
                      prompts, inspection, workspace, settings, tools
-  shared/            Json, StatusBadge, PackageActions, Popover, useDialogFocus
+  shared/            Json, Diff, StatusBadge, PackageActions, Popover, useDialogFocus
   api/               Generated types, HTTP client, SSE subscription
 ```
 
@@ -212,6 +212,8 @@ Each Run binds to one absolute workspace root, resolved from its conversation's 
 
 Exclusions come from two lists: **private names** (`.env`, `.env.*` except `.env.example`, `.git`, `access-token`, database files) are hidden from everything, including commands; **dependency folders** (`.venv`, `node_modules`, `__pycache__`) are skipped by file tools and Windows copies but stay visible to Linux commands. The studio's own data directory is always hidden.
 
+**Git status and diffs** (`infrastructure/workspace/git.py`) are for the user: the sandbox hides `.git`, so the agent never runs Git, and the Changes panel's review task carries the diff in its input. The studio runs `git` on the host with `-c core.fsmonitor=false -c core.hooksPath=<null device>`, `--no-ext-diff --no-textconv`, `GIT_OPTIONAL_LOCKS=0`, a minimal environment (paths, home and locale, so the user's global configuration still applies) and a 15-second timeout; it never writes. Status uses `--porcelain=v2 --branch -z --untracked-files=all` limited to the workspace folder (`domain/git.parse_status` strips the repository prefix; at most 2,000 files). Diffs compare the worktree with `HEAD` (the empty tree before the first commit), add untracked text files as new-file diffs, and are cut at 512 KB. Sections for private names (`private_name` on any path component), and for headers Git had to quote, are dropped and their paths listed as `omitted`; a single-file diff takes only a path the file tools could open.
+
 ## Command sandboxes
 
 Both sandboxes take the same inputs (command, working directory, mode, timeout, trusted runtimes) and return the same JSON result: stdout, stderr, exit code, timeout and truncation flags.
@@ -264,7 +266,7 @@ All routes live under `/api/v1` (`interfaces/http/api.py`); `/openapi.json` is t
 | Settings and tools | `PUT /config`, `POST /tools/refresh`, `PUT /presets/{id}`, preset export/import |
 | Models and keys | `POST /providers/models` (list a provider's models), `GET /credentials?name=…` (status only), `PUT/DELETE /credentials/{name}` |
 | Global Skills | `GET /skills`, `GET/DELETE /skills/{name}`, `PUT /skills` |
-| Workspace | `GET /workspace`, `PUT /workspace/memory`, Skill get/save/export/import, `GET /workspace/commands`, all with optional `project_id` |
+| Workspace | `GET /workspace`, `PUT /workspace/memory`, Skill get/save/export/import, `GET /workspace/commands`, `GET /workspace/git`, `GET /workspace/git/diff` (optional `path`), all with optional `project_id` |
 | Projects | `POST /projects`, `POST /desktop/folder-picker` |
 | Conversations | `POST /sessions`, `GET/PATCH/DELETE /sessions/{id}`, `/copy`, `/runs`, `/context`, `/compact`, `/compactions/{id}`, `/processes` |
 | Folders | `POST /folders`, `PATCH/DELETE /folders/{id}` |
@@ -280,11 +282,11 @@ Errors share one envelope: `{"error": {"code", "message", "details", "request_id
 
 ## Frontend
 
-React with TanStack Query; `api/generated.ts` types every request. `App.tsx` owns the selection (project and conversation), the composer, the pending submission and which side panel is open. Server state is cached per query: `bootstrap`, `runs/<conversation>`, `trace/<run>`, `workspace/<project>`, `context/<conversation>`, `processes/<conversation>`.
+React with TanStack Query; `api/generated.ts` types every request. `App.tsx` owns the selection (project and conversation), the composer, the pending submission and which side panel is open. Server state is cached per query: `bootstrap`, `runs/<conversation>`, `trace/<run>`, `workspace/<project>`, `context/<conversation>`, `processes/<conversation>`, `git/<project>`, `run-files/<run>`, `commands/<project>`.
 
 While a Run is active, `useRunEvents` follows its SSE stream and refetches only that Run's projection (at most one request in flight, coalesced to 100 ms); broader queries refresh at lifecycle boundaries (tool completion, approvals) and when the Run ends. A slower poll covers a lost event stream. The Inspector loads the trace, which can be large, only while it is visible.
 
-Settings (sidebar) edit global configuration in pages: Providers and keys, Models, Tools, MCP servers, Skills, Sandbox and Run limits. Configuration pages share one versioned draft saved together; keys and global Skills save immediately through their own routes. The notification preference (`studio.notify`) lives in `localStorage` too; notifications fire only for status changes observed after the page loaded, and only while the page is hidden. The composer's model and access pickers hold the choice for the next Run in `localStorage` (`studio.choice`, IDs only) and adopt the last Run's choice when a conversation opens; the Tools panel shows permissions with the selected access applied, mirroring the server's transformation.
+Settings (sidebar) edit global configuration in pages: Providers and keys, Models, Tools, MCP servers, Skills, Sandbox, Context, Hooks and Run limits. Configuration pages share one versioned draft saved together; keys and global Skills save immediately through their own routes. The notification preference (`studio.notify`) lives in `localStorage` too; notifications fire only for status changes observed after the page loaded, and only while the page is hidden. The composer's model and access pickers hold the choice for the next Run in `localStorage` (`studio.choice`, IDs only) and adopt the last Run's choice when a conversation opens; the Tools panel shows permissions with the selected access applied, mirroring the server's transformation.
 
 A lost submission response is retried with the same body and idempotency key, even if the conversation advanced meanwhile, so it cannot create a second Run. Prompt edits are page-local drafts with undo history until saved. Styles use CSS custom properties with light and dark themes following the system setting.
 

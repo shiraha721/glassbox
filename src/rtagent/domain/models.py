@@ -1149,6 +1149,43 @@ class RunView(Contract):
     changed_files: list[str] = Field(default_factory=list)
 
 
+class GitFile(Contract):
+    """One changed path in the workspace's Git repository, relative to the workspace folder."""
+
+    path: str
+    original_path: str | None = None
+    # Porcelain status letters for the index and the working tree; "." means unchanged.
+    index: str
+    worktree: str
+    kind: Literal["changed", "renamed", "unmerged", "untracked"]
+    # Credentials, Git metadata and databases are listed but their content is never sent.
+    private: bool = False
+
+
+class GitStatus(Contract):
+    """The workspace's Git state as read on this computer; the agent itself never runs Git."""
+
+    repository: bool
+    reason: str | None = None
+    branch: str | None = None
+    upstream: str | None = None
+    ahead: int = 0
+    behind: int = 0
+    files: list[GitFile] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class GitDiff(Contract):
+    """Uncommitted changes against HEAD for one path or the whole workspace, bounded."""
+
+    path: str | None = None
+    diff: str
+    truncated: bool = False
+    # Paths left out: private content, or new files the file tools cannot open (links,
+    # dependency folders).
+    omitted: list[str] = Field(default_factory=list)
+
+
 class FileChange(Contract):
     """One workspace file a Run changed with its file tools, and where that file stands now.
 

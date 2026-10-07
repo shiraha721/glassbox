@@ -9,6 +9,7 @@ import {
   Eye,
   FlaskConical,
   FolderOpen,
+  GitCompare,
   Layers,
   PanelLeft,
   Pencil,
@@ -55,8 +56,9 @@ import { effectiveConfig } from '../features/composer/choices';
 import type { SettingsPage } from '../features/settings/pages';
 import { matchingCommands, useCommands } from '../features/composer/commands';
 import { CommandSuggestions } from '../features/composer/CommandSuggestions';
+import { GitPanel } from '../features/workspace/GitPanel';
 
-type Panel = 'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes';
+type Panel = 'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes' | 'changes';
 
 const emptyRuns: Run[] = [];
 const starters = [
@@ -429,6 +431,7 @@ function Workspace({ data }: { data: Bootstrap }) {
             </span>
           </div>
           <nav className="topbar-actions" aria-label="Panels">
+            {panelButton('changes', 'Changes', <GitCompare size={15} />, busy)}
             {panelButton('processes', 'Processes', <Terminal size={15} />, !session)}
             {panelButton('context', 'Context', <Layers size={15} />, !session || busy)}
             {panelButton('tools', 'Tools', <Wrench size={15} />, busy)}
@@ -809,6 +812,22 @@ function Workspace({ data }: { data: Bootstrap }) {
                 onSettings={() => {
                   setPanel(null);
                   setSettings('tools');
+                }}
+              />
+            </div>
+          )}
+          {panel === 'changes' && (
+            <div className="utility-pane">
+              <GitPanel
+                key={projectId}
+                projectId={projectId}
+                onClose={() => setPanel(null)}
+                onReview={(task) => {
+                  const reviewer = drafts.presets.find((item) => item.id === 'code-review');
+                  if (reviewer) drafts.select(reviewer);
+                  setInput(task);
+                  setPanel(null);
+                  document.getElementById('task-input')?.focus();
                 }}
               />
             </div>

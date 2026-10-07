@@ -34,6 +34,8 @@ from rtagent.domain import (
     FolderSelection,
     FolderUpdate,
     FolderView,
+    GitDiff,
+    GitStatus,
     MemoryDocument,
     MemorySave,
     Preset,
@@ -292,6 +294,20 @@ async def save_memory(
 ) -> MemoryDocument:
     """Save explicitly edited project notes."""
     return await request.app.state.studio.save_memory(body, project_id)
+
+
+@router.get("/workspace/git", response_model=GitStatus)
+async def git_status(request: Request, project_id: str | None = None) -> GitStatus:
+    """Show the workspace's Git branch and changed files; Git runs read-only on the host."""
+    return await request.app.state.studio.git_status(project_id)
+
+
+@router.get("/workspace/git/diff", response_model=GitDiff)
+async def git_diff(
+    request: Request, project_id: str | None = None, path: str | None = None
+) -> GitDiff:
+    """Show uncommitted changes against HEAD; private files are listed, never shown."""
+    return await request.app.state.studio.git_diff(project_id, path)
 
 
 @router.get("/workspace/commands", response_model=list[CommandInfo])

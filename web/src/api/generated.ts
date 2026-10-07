@@ -396,6 +396,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspace/git": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Git Status
+         * @description Show the workspace's Git branch and changed files; Git runs read-only on the host.
+         */
+        get: operations["git_status_api_v1_workspace_git_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/git/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Git Diff
+         * @description Show uncommitted changes against HEAD; private files are listed, never shown.
+         */
+        get: operations["git_diff_api_v1_workspace_git_diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspace/commands": {
         parameters: {
             query?: never;
@@ -1920,6 +1960,78 @@ export interface components {
             revision: number;
             /** Created At */
             created_at: string;
+        };
+        /**
+         * GitDiff
+         * @description Uncommitted changes against HEAD for one path or the whole workspace, bounded.
+         */
+        GitDiff: {
+            /** Path */
+            path: string | null;
+            /** Diff */
+            diff: string;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Omitted */
+            omitted: string[];
+        };
+        /**
+         * GitFile
+         * @description One changed path in the workspace's Git repository, relative to the workspace folder.
+         */
+        GitFile: {
+            /** Path */
+            path: string;
+            /** Original Path */
+            original_path: string | null;
+            /** Index */
+            index: string;
+            /** Worktree */
+            worktree: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "changed" | "renamed" | "unmerged" | "untracked";
+            /**
+             * Private
+             * @default false
+             */
+            private: boolean;
+        };
+        /**
+         * GitStatus
+         * @description The workspace's Git state as read on this computer; the agent itself never runs Git.
+         */
+        GitStatus: {
+            /** Repository */
+            repository: boolean;
+            /** Reason */
+            reason: string | null;
+            /** Branch */
+            branch: string | null;
+            /** Upstream */
+            upstream: string | null;
+            /**
+             * Ahead
+             * @default 0
+             */
+            ahead: number;
+            /**
+             * Behind
+             * @default 0
+             */
+            behind: number;
+            /** Files */
+            files: components["schemas"]["GitFile"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /**
          * Grant
@@ -4692,6 +4804,141 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryDocument"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    git_status_api_v1_workspace_git_get: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitStatus"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    git_diff_api_v1_workspace_git_diff_get: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+                path?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitDiff"];
                 };
             };
             /** @description Forbidden */

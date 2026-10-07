@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import Markdown, { type Components } from 'react-markdown';
 import { Json } from '../../shared/Json';
+import { Diff } from '../../shared/Diff';
 import { TaskPlan } from './TaskPlan';
 import { RunFiles } from './RunFiles';
 import { StatusBadge } from '../../shared/StatusBadge';
@@ -451,29 +452,6 @@ function OrphanResult({ message }: { message: Message }) {
 }
 
 /** Color unified diff lines so additions and removals are distinguishable. */
-function Diff({ text }: { text: string }) {
-  return (
-    <pre className="patch-diff">
-      {text.split('\n').map((line, index) => (
-        <span
-          key={index}
-          className={
-            line.startsWith('+') && !line.startsWith('+++')
-              ? 'diff-add'
-              : line.startsWith('-') && !line.startsWith('---')
-                ? 'diff-remove'
-                : line.startsWith('@@')
-                  ? 'diff-hunk'
-                  : undefined
-          }
-        >
-          {line + '\n'}
-        </span>
-      ))}
-    </pre>
-  );
-}
-
 /** Display actual tool output in its natural form instead of an escaped JSON string. */
 function ToolOutput({ content }: { content: string }) {
   let value: unknown;
