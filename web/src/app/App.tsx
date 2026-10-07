@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveRestore,
+  Bell,
+  BellOff,
   Bot,
   Code2,
   Eye,
@@ -44,6 +46,7 @@ import { useLivePreview } from '../features/prompts/useLivePreview';
 import { ToolsPanel } from '../features/tools/ToolCatalog';
 import { ContextPanel } from '../features/chat/ContextPanel';
 import { ProcessesPanel } from '../features/chat/ProcessesPanel';
+import { useNotificationSetting, useRunNotifications } from '../features/chat/notifications';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ModelPicker } from '../features/composer/ModelPicker';
 import { AccessPicker } from '../features/composer/AccessPicker';
@@ -164,6 +167,8 @@ function Workspace({ data }: { data: Bootstrap }) {
     workspaceQuery.dataUpdatedAt,
   );
   useRunEvents(active);
+  const notifications = useNotificationSetting();
+  useRunNotifications(latestRun, session?.title || 'Conversation', notifications.enabled);
   useEffect(() => {
     const root = conversationScroll.current;
     if (root && followLatest.current) root.scrollTop = root.scrollHeight;
@@ -367,6 +372,21 @@ function Workspace({ data }: { data: Bootstrap }) {
           >
             <FolderOpen size={16} /> Workspace
           </button>
+          {notifications.supported && (
+            <button
+              className="nav-button"
+              aria-pressed={notifications.enabled}
+              disabled={notifications.blocked}
+              title={
+                notifications.blocked
+                  ? 'Notifications are blocked in this browser’s site settings.'
+                  : 'Notify when a run needs approval or ends while this tab is in the background.'
+              }
+              onClick={() => void notifications.toggle()}
+            >
+              {notifications.enabled ? <Bell size={16} /> : <BellOff size={16} />} Notifications
+            </button>
+          )}
           <button className="nav-button" disabled={busy} onClick={() => setEvaluations(true)}>
             <FlaskConical size={16} /> Evaluations
           </button>

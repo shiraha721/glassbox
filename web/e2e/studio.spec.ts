@@ -795,3 +795,43 @@ test('an evaluation compares prompt variants on the same cases', async ({ page }
   await dialog.getByRole('button', { name: 'Close evaluations', exact: true }).click();
   await expect(page.getByLabel('Conversation history')).not.toContainText('Variant A · Case 1');
 });
+
+test('a run that ends while the tab is in the background raises a notification', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const state = window as unknown as {
+      shown: { title: string; body?: string }[];
+      backgrounded: boolean;
+      Notification: unknown;
+    };
+    state.shown = [];
+    state.backgrounded = false;
+    state.Notification = class {
+      static permission = 'granted';
+      static requestPermission = async () => 'granted';
+      onclick: unknown = null;
+      constructor(title: string, options?: { body?: string }) {
+        state.shown.push({ title, body: options?.body });
+      }
+      close() {}
+    };
+    Object.defineProperty(document, 'hidden', { get: () => state.backgrounded });
+  });
+  await openWorkspace(page);
+  const toggle = page.getByRole('button', { name: 'Notifications', exact: true });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  // A foreground run is visible already, so it does not notify.
+  await startTask(page, '/read README.md');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await page.evaluate(() => {
+    (window as unknown as { backgrounded: boolean }).backgrounded = true;
+  });
+  await startTask(page, 'Summarize the workspace.');
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { shown: unknown[] }).shown))
+    .toEqual([
+      { title: 'Run finished', body: expect.stringContaining('Summarize the workspace.') },
+    ]);
+});

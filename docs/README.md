@@ -96,6 +96,8 @@ When a tool requires approval, the Run pauses with an **Approve once / Reject** 
 
 **Stop run** cancels the Run and waits for its processes to be cleaned up. It cannot undo files that were already written.
 
+**Notifications** in the sidebar asks the browser for permission and then notifies you when the open conversation's Run needs approval, finishes, fails or is interrupted while the tab is in the background. The setting is kept in this browser only.
+
 ### Inspect what happened
 
 **Inspector → Run trace** lists every model request and tool call of a turn in execution order. For a model request it shows the canonical messages with their sources, the prepared request, the actual outbound body, usage and provider metadata. The view is redacted by default; **Show original trace** reveals the local original, and **Export JSON** downloads a labelled, redacted copy.
