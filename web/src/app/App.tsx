@@ -178,6 +178,20 @@ function Workspace({ data }: { data: Bootstrap }) {
     workspaceQuery.dataUpdatedAt,
   );
   useRunEvents(active);
+  const autoCompact = !!data.config.auto_compact?.enabled;
+  const endedRun = latestRun && terminal(latestRun.status) ? latestRun.id : '';
+  useEffect(() => {
+    if (!autoCompact || !endedRun) return;
+    // Automatic compaction starts just after a run ends, possibly after the refresh the end
+    // triggered. Look again so its progress, and the revision it activates, reach the page.
+    const timers = [1000, 3000].map((delay) =>
+      setTimeout(() => {
+        void cache.invalidateQueries({ queryKey: ['bootstrap'] });
+        void cache.invalidateQueries({ queryKey: ['context'] });
+      }, delay),
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [autoCompact, endedRun, cache]);
   const notifications = useNotificationSetting();
   useRunNotifications(latestRun, session?.title || 'Conversation', notifications.enabled);
   useEffect(() => {

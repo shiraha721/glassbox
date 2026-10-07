@@ -961,6 +961,9 @@ class ContextView(Contract):
     """Estimated history size and explicit summary boundaries, separate from actual model usage."""
 
     session_id: str
+    # The conversation revision this view was read at. Context actions send it, so a summary
+    # activated in the background (automatic compaction) never leaves them a stale revision.
+    revision: int
     raw_messages: int
     effective_messages: int
     raw_estimated_tokens: int

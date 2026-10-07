@@ -153,6 +153,7 @@ class Studio:
         ]
         return ContextView(
             session_id=session_id,
+            revision=session["revision"],
             raw_messages=len(session["messages"]),
             effective_messages=len(effective),
             raw_estimated_tokens=estimated_tokens(session["messages"]),

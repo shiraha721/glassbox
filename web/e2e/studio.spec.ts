@@ -925,6 +925,10 @@ test('automatic compaction summarizes older turns once enabled and can be undone
     await expect(page.locator('.conversation-turn')).toHaveCount(2);
     await context.getByRole('button', { name: 'Restore full context' }).click();
     await expect(context.getByText('Active summary', { exact: true })).not.toBeAttached();
+    await expect(context.getByRole('alert')).not.toBeAttached();
+    // The page holds the revisions the background summary and the restore produced.
+    await startTask(page, 'Continue after restoring.');
+    await expect(page.getByTestId('run-status')).toHaveText('succeeded', { timeout: 20_000 });
   } finally {
     // Later tests share this server's settings.
     const config = (await (await page.request.get('/api/v1/bootstrap')).json()).config;

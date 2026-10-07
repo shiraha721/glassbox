@@ -1568,6 +1568,8 @@ export interface components {
         ContextView: {
             /** Session Id */
             session_id: string;
+            /** Revision */
+            revision: number;
             /** Raw Messages */
             raw_messages: number;
             /** Effective Messages */

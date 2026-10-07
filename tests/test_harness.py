@@ -123,6 +123,8 @@ async def test_auto_compaction_is_opt_in_recorded_and_reversible(tmp_path, monke
         assert session["messages"][: len(before["messages"])] == before["messages"]
         context = await harness.studio.context(first.session_id)
         assert context.compactions[0].trigger == "auto"
+        # The view carries the revision the activation produced, for the panel's next action.
+        assert context.revision == session["revision"]
         assert context.effective_estimated_tokens < context.raw_estimated_tokens
         # Nothing new to cover: the next check is a no-op rather than another summary.
         assert await harness.studio.auto_compact(third.id) is None

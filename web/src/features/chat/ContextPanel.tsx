@@ -193,7 +193,7 @@ export function ContextPanel({
                 }
                 onClick={() =>
                   void action('compact', 'POST', {
-                    expected_revision: session.revision,
+                    expected_revision: context.revision,
                     config_revision: config.revision,
                     keep_recent_turns: keep,
                     model,
@@ -207,7 +207,7 @@ export function ContextPanel({
                   className="button"
                   disabled={busy || !!session.active_run_id || !!context.compacting_id}
                   onClick={() =>
-                    void action('context', 'PUT', { expected_revision: session.revision })
+                    void action('context', 'PUT', { expected_revision: context.revision })
                   }
                 >
                   Restore full context
