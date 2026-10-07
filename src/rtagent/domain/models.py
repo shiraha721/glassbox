@@ -333,6 +333,22 @@ class Grant(Contract):
     created_at: str = Field(default_factory=lambda: now())
 
 
+class ShellHook(Contract):
+    """A command the user configured to run on this computer at a point in a Run.
+
+    `before_tool` runs right before an authorized tool call is dispatched: exit code 0 lets
+    it run, 2 blocks it with stderr as the reason, and any other failure also blocks it.
+    `after_tool` (after a dispatched call) and `run_end` (after a Run ends) only observe.
+    Hooks read event JSON on stdin, run outside the sandbox with a minimal environment, and
+    are frozen into each Run's snapshot like the rest of the settings."""
+
+    event: Literal["before_tool", "after_tool", "run_end"]
+    # Case-sensitive glob over tool names for the tool events, e.g. "bash" or "mcp_*".
+    tools: str = Field(default="*", min_length=1, max_length=200)
+    command: str = Field(min_length=1, max_length=2000)
+    timeout: float = Field(default=10, ge=1, le=120)
+
+
 class AutoCompact(Contract):
     """Opt-in compaction after a successful Run once the conversation history grows large.
 
@@ -385,6 +401,7 @@ class StudioConfig(Contract):
     command_rules: list[CommandRule] = Field(default_factory=list, max_length=100)
     mcp_servers: list[MCPServer] = Field(default_factory=list, max_length=10)
     auto_compact: AutoCompact = Field(default_factory=AutoCompact)
+    hooks: list[ShellHook] = Field(default_factory=list, max_length=20)
     max_steps: int = Field(default=20, ge=1, le=100)
     max_tool_calls: int = Field(default=40, ge=1, le=200)
     tool_timeout: float = Field(default=60, ge=0.1, le=300)

@@ -1,9 +1,11 @@
-"""Focused trusted Python callbacks for event observation and additional tool denial."""
+"""Trusted Python callbacks and the selection of user-configured shell hooks."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
+from typing import Literal
 
-from rtagent.domain import RunEvent, StudioConfig, ToolCall
+from rtagent.domain import RunEvent, ShellHook, StudioConfig, ToolCall
 
 EventHook = Callable[[RunEvent], Awaitable[None]]
 ToolGuard = Callable[[ToolCall, StudioConfig], Awaitable[str | None]]
@@ -15,3 +17,16 @@ class Hooks:
 
     on_event: EventHook | None = None
     before_tool: ToolGuard | None = None
+
+
+def matching_hooks(
+    hooks: list[ShellHook],
+    event: Literal["before_tool", "after_tool", "run_end"],
+    tool: str | None = None,
+) -> list[tuple[int, ShellHook]]:
+    """The configured hooks for an event, with their positions, in configured order."""
+    return [
+        (index, hook)
+        for index, hook in enumerate(hooks)
+        if hook.event == event and (tool is None or fnmatchcase(tool, hook.tools))
+    ]

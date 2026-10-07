@@ -213,6 +213,18 @@ On Linux, dependency folders such as `.venv` and `node_modules` stay visible so 
 
 MCP servers (stdio commands or Streamable HTTP URLs) are configured in **Settings → MCP servers** and run **outside** the sandbox, with their own permissions. **Save & discover** lists each server's tools on the same page, where you set their permissions; after a restart they are discovered again automatically the first time they are needed.
 
+### Hooks
+
+**Settings → Hooks** runs your own commands at points in a run, for example to log tool calls, run a formatter after edits, or send a desktop notification when a run ends. Each hook gets the event as JSON on standard input (`event`, `run_id`, `session_id`, `workspace_root`, plus `tool` with name and arguments, the tool's `status` and `result`, or the run's `status`, `stop_reason`, `error` and `input`) and runs in the workspace folder.
+
+| When | Effect of the hook's result |
+| --- | --- |
+| Before a tool runs (optionally only for tools matching a pattern such as `bash` or `mcp_*`) | Exit code 0 lets the call run. Exit code 2 blocks it and gives the model the hook's standard error as the reason. Any other exit code, or a timeout, also blocks it. |
+| After a tool runs | Recorded with the call; never changes the run. |
+| When a run ends | Recorded as an event on the run; never changes it. |
+
+Hooks run **outside** the sandbox, on this computer with your permissions, using the system shell and only basic environment variables (`PATH`, `HOME`, the display session), so keys saved in the studio never reach them. Tool arguments come from the model: treat them as untrusted data and never paste them into a command line. Do not put keys in a hook command; commands are saved with the settings and in each run. A run keeps the hooks saved when it started. Processes a hook leaves holding its output are stopped a second after it exits.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

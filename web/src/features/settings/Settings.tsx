@@ -3,6 +3,7 @@ import {
   BookOpen,
   Cpu,
   Gauge,
+  Webhook,
   KeyRound,
   Layers,
   Server,
@@ -20,6 +21,7 @@ import { McpPage } from './McpPage';
 import { SkillsPage } from './SkillsPage';
 import { CommandRules } from './CommandRules';
 import { ContextPage } from './ContextPage';
+import { HooksPage } from './HooksPage';
 import type { SettingsPage } from './pages';
 
 const pages = [
@@ -30,6 +32,7 @@ const pages = [
   { id: 'skills', label: 'Skills', icon: BookOpen },
   { id: 'sandbox', label: 'Sandbox', icon: ShieldCheck },
   { id: 'context', label: 'Context', icon: Layers },
+  { id: 'hooks', label: 'Hooks', icon: Webhook },
   { id: 'limits', label: 'Run limits', icon: Gauge },
 ] as const;
 
@@ -236,6 +239,7 @@ export function Settings({
                 </>
               )}
               {page === 'context' && <ContextPage draft={draft} onChange={change} />}
+              {page === 'hooks' && <HooksPage draft={draft} onChange={change} />}
               {page === 'limits' && (
                 <>
                   <p className="page-intro">

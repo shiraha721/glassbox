@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 /** Open the local workspace directly and create a fresh conversation. */
 async function openWorkspace(page: Page) {
@@ -976,4 +976,35 @@ test('a custom slash command is suggested, expanded and shown as typed', async (
   );
   // The simulated model reports the task it received: the expansion, not the typed command.
   await expect(turn.locator('.agent-activity')).toContainText('Task: Review README.md and');
+});
+
+test('a hook added in Settings runs when a run ends', async ({ page }) => {
+  test.skip(process.platform === 'win32', 'the hook command uses a POSIX shell');
+  const boot = await (await page.request.get('/api/v1/bootstrap')).json();
+  const marker = path.join(boot.workspace_root, 'hook-e2e.json');
+  await openWorkspace(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings
+    .getByRole('navigation', { name: 'Settings pages' })
+    .getByRole('button', { name: 'Hooks', exact: true })
+    .click();
+  await settings.getByRole('button', { name: 'Add hook', exact: true }).click();
+  const hook = settings.getByRole('region', { name: 'Hook 1' });
+  await hook.getByLabel('When').selectOption('run_end');
+  await hook.getByLabel('Command').fill('cat > hook-e2e.json');
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  await settings.getByLabel('Close settings').click();
+  try {
+    await startTask(page, 'Finish so the hook runs.');
+    await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+    await expect.poll(() => existsSync(marker)).toBe(true);
+    await expect
+      .poll(() => JSON.parse(readFileSync(marker, 'utf8')).status as string)
+      .toBe('succeeded');
+  } finally {
+    const config = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
+    await page.request.put('/api/v1/config', { data: { ...config, hooks: [] } });
+  }
 });

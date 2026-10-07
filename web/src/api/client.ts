@@ -26,6 +26,7 @@ export type CredentialStatus = components['schemas']['CredentialStatus'];
 export type WorkspaceSkills = components['schemas']['WorkspaceSkills'];
 export type Grant = components['schemas']['Grant-Output'];
 export type CommandRule = components['schemas']['CommandRule'];
+export type ShellHook = components['schemas']['ShellHook-Output'];
 export type Eval = components['schemas']['Eval'];
 export type EvalCase = components['schemas']['EvalCase-Output'];
 export type EvalVariant = components['schemas']['EvalVariant-Output'];

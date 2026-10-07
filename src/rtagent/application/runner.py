@@ -19,6 +19,7 @@ from rtagent.domain import (
     Grant,
     Message,
     Preset,
+    RunEvent,
     StudioConfig,
     ToolCall,
     ToolDefinition,
@@ -27,14 +28,18 @@ from rtagent.domain import (
     now,
 )
 from rtagent.domain.execution import ToolExecution, current_execution
-from rtagent.domain.hooks import Hooks
+from rtagent.domain.hooks import Hooks, matching_hooks
 from rtagent.domain.lifecycle import TERMINAL
 from rtagent.domain.policies import decide, granted
 from rtagent.domain.prompts import compile_prompt
 from rtagent.infrastructure.providers.chat import generate, prepare, transformations
+from rtagent.infrastructure.shell_hooks import OUTPUT_LIMIT, run_hook
 from rtagent.infrastructure.storage import Repository
 from rtagent.infrastructure.tools import ToolRegistry
+from rtagent.infrastructure.tracing import redact
 
+# Events that mark a Run's end, once each (finish is idempotent).
+RUN_END_EVENTS = frozenset({"run.completed", "run.failed", "run.cancelled"})
 # Each conversation has at most one active Run; this bounds concurrent provider and tool load
 # across conversations. Further Runs stay queued until a slot is free.
 MAX_ACTIVE_RUNS = 4
@@ -63,7 +68,8 @@ class Runner:
         """Prepare lifecycle resources without opening files or starting background tasks."""
         self.repository, self.registry = repository, registry
         self.hooks = hooks or Hooks()
-        repository.on_event = self.hooks.on_event
+        repository.on_event = self.observe
+        self.hook_tasks: set[asyncio.Task[None]] = set()
         registry.bind_repository(repository)
         self.checkpoint_path = checkpoint_path
         self.stack = AsyncExitStack()
@@ -73,6 +79,85 @@ class Runner:
         # Told the Run ID after a Run succeeds and its messages are committed. It must only
         # schedule work: cancelling a Run waits for this task, so it cannot wait for locks.
         self.on_committed: Callable[[str], None] | None = None
+
+    async def observe(self, event: RunEvent) -> None:
+        """Start `run_end` shell hooks when a Run ends, then call the trusted event observer."""
+        if event.type in RUN_END_EVENTS:
+            task = asyncio.create_task(self.run_end_hooks(event.run_id))
+            self.hook_tasks.add(task)
+            task.add_done_callback(self.hook_tasks.discard)
+        if self.hooks.on_event:
+            await self.hooks.on_event(event)
+
+    @staticmethod
+    def hook_payload(run: dict[str, Any], event: str) -> dict[str, Any]:
+        """The fields every hook receives on stdin."""
+        return {
+            "event": event,
+            "run_id": run["id"],
+            "session_id": run["session_id"],
+            "workspace_root": run["snapshot"]["workspace_root"],
+        }
+
+    async def before_tool_hooks(
+        self, run: dict[str, Any], config: StudioConfig, call: ToolCall, data: dict[str, Any]
+    ) -> None:
+        """Run `before_tool` hooks in order; any outcome except exit code 0 blocks the call."""
+        for index, hook in matching_hooks(config.hooks, "before_tool", call.name):
+            payload = {
+                **self.hook_payload(run, "before_tool"),
+                "tool": {"name": call.name, "args": call.args},
+            }
+            outcome = await run_hook(hook, payload, Path(run["snapshot"]["workspace_root"]))
+            data.setdefault("hooks", []).append(outcome.record(index, hook))
+            if outcome.succeeded:
+                continue
+            if outcome.exit_code == 2:
+                data["hook_rejection"] = (outcome.stderr.strip() or "Blocked by a hook.")[:500]
+                raise AppError("tool_denied", data["hook_rejection"], 403)
+            reason = outcome.error or f"exit code {outcome.exit_code}"
+            raise AppError(
+                "hook_failed", f"A before-tool hook failed ({reason}); no tool was dispatched."
+            )
+
+    async def after_tool_hooks(
+        self,
+        run: dict[str, Any],
+        config: StudioConfig,
+        call: ToolCall,
+        data: dict[str, Any],
+        status: str,
+        content: str,
+    ) -> None:
+        """Run `after_tool` hooks for a dispatched call; their outcome never changes the Run."""
+        for index, hook in matching_hooks(config.hooks, "after_tool", call.name):
+            payload = {
+                **self.hook_payload(run, "after_tool"),
+                "tool": {"name": call.name, "args": call.args},
+                "status": status,
+                "result": content[:OUTPUT_LIMIT],
+            }
+            outcome = await run_hook(hook, payload, Path(run["snapshot"]["workspace_root"]))
+            data.setdefault("hooks", []).append(outcome.record(index, hook))
+
+    async def run_end_hooks(self, run_id: str) -> None:
+        """Run `run_end` hooks once a Run ends, recording each outcome as a Run event."""
+        run = await self.repository.run(run_id)
+        config = StudioConfig.model_validate(run["snapshot"]["config"])
+        for index, hook in matching_hooks(config.hooks, "run_end"):
+            payload = {
+                **self.hook_payload(run, "run_end"),
+                "status": run["status"],
+                "stop_reason": run["stop_reason"],
+                "error": run["error"],
+                "input": run["snapshot"]["input"][:4000],
+            }
+            outcome = await run_hook(hook, payload, Path(run["snapshot"]["workspace_root"]))
+            await self.repository.emit(
+                run_id,
+                "hook.ran" if outcome.succeeded else "hook.failed",
+                redact(outcome.record(index, hook)),
+            )
 
     async def open(self) -> None:
         """Open checkpoints, build the explicit loop, and recover queued work."""
@@ -111,7 +196,7 @@ class Runner:
         """Interrupt active work, preserve uncertain outcomes, and release checkpoints."""
         self.shutting_down = True
         try:
-            pending = list(self.tasks.values())
+            pending = list(self.tasks.values()) + list(self.hook_tasks)
             for task in pending:
                 task.cancel()
             if pending:
@@ -385,6 +470,7 @@ class Runner:
             }
             status = "succeeded"
             started = time.monotonic()
+            dispatched = False
             try:
                 decision = decide(call, definition, config)
                 data["decision"] = decision
@@ -431,6 +517,7 @@ class Runner:
                     data["decision"] = decision
                 if decision != "allow":
                     raise AppError("tool_denied", "Tool execution was not authorized.", 403)
+                await self.before_tool_hooks(run, config, call, data)
                 if self.hooks.before_tool:
                     try:
                         async with asyncio.timeout(5):
@@ -476,6 +563,7 @@ class Runner:
 
                     execution = ToolExecution(run_id, run["session_id"], on_output)
                     token = current_execution.set(execution)
+                    dispatched = True
                     try:
                         content = await registry.execute(definition, call.args, config)
                     finally:
@@ -542,6 +630,9 @@ class Runner:
                 )
             data["latency_ms"] = round((time.monotonic() - started) * 1000)
             await self.repository.save_call(call_id, run_id, "tool", status, data, content)
+            if dispatched and matching_hooks(config.hooks, "after_tool", call.name):
+                await self.after_tool_hooks(run, config, call, data, status, content)
+                await self.repository.save_call(call_id, run_id, "tool", status, data, content)
         message = Message(role="tool", content=content, tool_call_id=call.id).model_dump()
         messages = state["messages"] + [message]
         await self.repository.emit(

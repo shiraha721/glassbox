@@ -2793,6 +2793,64 @@ export interface components {
             messages: components["schemas"]["Message"][];
         };
         /**
+         * ShellHook
+         * @description A command the user configured to run on this computer at a point in a Run.
+         *
+         *     `before_tool` runs right before an authorized tool call is dispatched: exit code 0 lets
+         *     it run, 2 blocks it with stderr as the reason, and any other failure also blocks it.
+         *     `after_tool` (after a dispatched call) and `run_end` (after a Run ends) only observe.
+         *     Hooks read event JSON on stdin, run outside the sandbox with a minimal environment, and
+         *     are frozen into each Run's snapshot like the rest of the settings.
+         */
+        "ShellHook-Input": {
+            /**
+             * Event
+             * @enum {string}
+             */
+            event: "before_tool" | "after_tool" | "run_end";
+            /**
+             * Tools
+             * @default *
+             */
+            tools: string;
+            /** Command */
+            command: string;
+            /**
+             * Timeout
+             * @default 10
+             */
+            timeout: number;
+        };
+        /**
+         * ShellHook
+         * @description A command the user configured to run on this computer at a point in a Run.
+         *
+         *     `before_tool` runs right before an authorized tool call is dispatched: exit code 0 lets
+         *     it run, 2 blocks it with stderr as the reason, and any other failure also blocks it.
+         *     `after_tool` (after a dispatched call) and `run_end` (after a Run ends) only observe.
+         *     Hooks read event JSON on stdin, run outside the sandbox with a minimal environment, and
+         *     are frozen into each Run's snapshot like the rest of the settings.
+         */
+        "ShellHook-Output": {
+            /**
+             * Event
+             * @enum {string}
+             */
+            event: "before_tool" | "after_tool" | "run_end";
+            /**
+             * Tools
+             * @default *
+             */
+            tools: string;
+            /** Command */
+            command: string;
+            /**
+             * Timeout
+             * @default 10
+             */
+            timeout: number;
+        };
+        /**
          * SkillDocument
          * @description Full skill source for inspection or an explicit model load.
          */
@@ -2932,6 +2990,8 @@ export interface components {
             /** Mcp Servers */
             mcp_servers?: components["schemas"]["MCPServer-Input"][];
             auto_compact?: components["schemas"]["AutoCompact-Input"];
+            /** Hooks */
+            hooks?: components["schemas"]["ShellHook-Input"][];
             /**
              * Max Steps
              * @default 20
@@ -2985,6 +3045,8 @@ export interface components {
             /** Mcp Servers */
             mcp_servers: components["schemas"]["MCPServer-Output"][];
             auto_compact: components["schemas"]["AutoCompact-Output"];
+            /** Hooks */
+            hooks: components["schemas"]["ShellHook-Output"][];
             /**
              * Max Steps
              * @default 20
