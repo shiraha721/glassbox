@@ -82,6 +82,18 @@ def prepare_anthropic(
         messages.append({"role": item.role, "content": blocks})
     if pending:
         raise AppError("tool_protocol", "Unpaired tool uses cannot be sent to a model.")
+    # Prompt-cache breakpoints. Each request resends the whole prefix, so marking the end of
+    # the stable system prompt (which also covers the tools rendered before it) and the newest
+    # message lets the next step of the Run read everything before it from the cache. Thinking
+    # blocks cannot carry a marker, but the final message is always the task or tool results.
+    if systems:
+        systems[-1] = {**systems[-1], "cache_control": {"type": "ephemeral"}}
+    if messages and messages[-1]["content"]:
+        last = messages[-1]
+        last["content"] = [
+            *last["content"][:-1],
+            {**last["content"][-1], "cache_control": {"type": "ephemeral"}},
+        ]
     body: dict[str, Any] = {
         "model": config.model,
         "max_tokens": config.max_output_tokens,

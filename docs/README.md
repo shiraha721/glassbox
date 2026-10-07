@@ -58,7 +58,7 @@ OPENAI_API_KEY=sk-...
 
 `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` and `ANTHROPIC_API_KEY` do the same for an `anthropic` provider. Values set in `.env` update their provider and the default model again at the next start.
 
-Each Run records the provider, model, effort and access it used, so its snapshot stays reproducible after settings change. With Anthropic models the Run keeps the model's thinking blocks between its own tool calls, as the Messages API requires; later turns receive the conversation without them. Leave temperature empty for models that reject it, such as current Claude models.
+Each Run records the provider, model, effort and access it used, so its snapshot stays reproducible after settings change. With Anthropic models the Run keeps the model's thinking blocks between its own tool calls, as the Messages API requires; later turns receive the conversation without them. Leave temperature empty for models that reject it, such as current Claude models. Requests to Claude models ask Anthropic to cache the prompt prefix, so the steps of a Run after the first are cheaper and faster; **Context** shows the resulting cache hit rate. OpenAI-compatible providers cache long prompts on their own.
 
 If a request fails, the error states the provider's reason and HTTP status (with any credential removed). Nothing is retried automatically, and a missing model is a configuration error rather than a silent switch to simulation.
 

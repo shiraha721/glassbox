@@ -188,6 +188,8 @@ def transformations(adapter: str) -> list[str]:
             "Assistant tool calls serialized as tool_use blocks with unchanged IDs/arguments",
             "Tool results serialized as user tool_result blocks; consecutive results grouped in order",
             "Consecutive user/assistant messages may be combined by the provider",
+            "Prompt-cache breakpoints (cache_control) on the last system block and the last "
+            "message block",
         ]
     return []
 

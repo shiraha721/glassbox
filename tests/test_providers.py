@@ -3,7 +3,15 @@ import json
 import httpx
 import pytest
 
-from rtagent.domain import AppError, Message, Preset, ProviderConfig, ProviderProfile, StudioConfig
+from rtagent.domain import (
+    AppError,
+    Block,
+    Message,
+    Preset,
+    ProviderConfig,
+    ProviderProfile,
+    StudioConfig,
+)
 from rtagent.domain.prompts import compile_prompt
 from rtagent.infrastructure.providers.catalog import list_models
 from rtagent.infrastructure.providers.chat import generate, prepare
@@ -139,6 +147,8 @@ async def test_messages_thinking_blocks_are_kept_and_replayed_within_the_run(mon
     )
     prepared = prepare(provider, compiled, [])
     assert prepared["output_config"] == {"effort": "high"} and "temperature" not in prepared
+    # The task ends in a cache breakpoint, so the next step reads the prefix from the cache.
+    assert prepared["messages"][-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
     stream = sse(
         {"type": "message_start", "message": {"id": "m1", "model": "x", "usage": {}}},
         {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}},
@@ -204,7 +214,16 @@ async def test_messages_thinking_blocks_are_kept_and_replayed_within_the_run(mon
         [],
         [message, result],
     )
-    assert prepare(provider, following, [])["messages"][1]["content"] == message.blocks
+    continued = prepare(provider, following, [])
+    assert continued["messages"][1]["content"] == message.blocks
+    # The newest message carries the moving cache breakpoint; replayed thinking stays as received.
+    assert continued["messages"][-1]["content"][-1] == {
+        "type": "tool_result",
+        "tool_use_id": "toolu_1",
+        "content": "print(1)",
+        "cache_control": {"type": "ephemeral"},
+    }
+    assert all("cache_control" not in block for block in continued["messages"][1]["content"])
     # In a later Run the turn is history: its thinking is bound to the earlier prompt.
     history = [
         Message(role="user", content="Read a.py", source="history"),
@@ -290,3 +309,26 @@ async def test_model_lists_follow_each_provider_format(monkeypatch):
     )
     with pytest.raises(AppError, match="HTTP 401"):
         await list_models(profile, "sk-key")
+
+
+def test_messages_cache_the_system_prompt_and_the_newest_message():
+    """Two breakpoints: the end of the stable system prompt and the end of the newest message."""
+    provider = ProviderConfig(
+        adapter="anthropic", model="claude-opus-5-5", base_url="http://127.0.0.1:12345/v1"
+    )
+    preset = Preset(
+        name="Cached",
+        blocks=[
+            Block(name="one", template="Rules.", order=0),
+            Block(name="two", template="More rules.", order=1),
+        ],
+    )
+    compiled = compile_prompt(preset, StudioConfig(provider=provider), [], "Task", {}, [])
+    body = prepare(provider, compiled, [])
+    assert [("cache_control" in block) for block in body["system"]] == [False, True]
+    assert body["messages"] == [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Task", "cache_control": {"type": "ephemeral"}}],
+        }
+    ]
