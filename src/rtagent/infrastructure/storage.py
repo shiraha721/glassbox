@@ -17,6 +17,7 @@ from sqlalchemy import (
     Table,
     delete,
     event,
+    func,
     insert,
     select,
     update,
@@ -24,6 +25,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from rtagent.domain import (
+    SIMULATED,
     AppError,
     Preset,
     RunEvent,
@@ -152,9 +154,59 @@ processes = Table(
 )
 
 
+# Run columns the browser projection needs; the frozen snapshot is deliberately excluded.
+RUN_PROJECTION = {
+    "id",
+    "session_id",
+    "status",
+    "stop_reason",
+    "messages",
+    "partial_output",
+    "latest_event_seq",
+    "approval",
+    "error",
+    "created_at",
+    "updated_at",
+    "usage",
+    "source_run_id",
+}
+
+
+def with_provider_profiles(stored: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade settings saved before provider profiles: the one provider becomes a profile."""
+    if "providers" in stored:
+        return stored
+    old = stored.get("provider", {})
+    adapter = "anthropic" if old.get("adapter") == "anthropic" else "openai"
+    profile = {
+        "id": adapter,
+        "name": "Anthropic" if adapter == "anthropic" else "OpenAI-compatible",
+        "adapter": adapter,
+        "base_url": old.get("base_url") or f"https://api.{adapter}.com/v1",
+        "credential_ref": old.get("credential_ref", ""),
+        "models": [old["model"]] if old.get("model") else [],
+        "temperature": old.get("temperature"),
+        "max_output_tokens": old.get("max_output_tokens", 8192),
+        "context_window": old.get("context_window"),
+    }
+    simulated = old.get("adapter") == "fake"
+    provider = {**old, "profile_id": SIMULATED if simulated else adapter}
+    return {**stored, "providers": [profile], "provider": provider}
+
+
+def call_order(identifier: str) -> tuple[int, int, int]:
+    """Order receipt IDs as executed: model step N precedes the tool calls it requested.
+
+    IDs are ``<run>:model:<step>`` and ``<run>:tool:<step>:<index>``; plain text order would
+    list every model request before every tool call."""
+    _, kind, step, *index = identifier.split(":")
+    return int(step), int(kind == "tool"), int(index[0]) if index else 0
+
+
 def _session_view(row: Any) -> dict[str, Any]:
     """Exclude the internal auto-title flag from the public conversation contract."""
-    return {key: value for key, value in dict(row).items() if key != "title_locked"}
+    value = {key: item for key, item in dict(row).items() if key != "title_locked"}
+    return {**value, "message_count": len(value["messages"])}
 
 
 class Repository:
@@ -187,6 +239,9 @@ class Repository:
 
         await asyncio.to_thread(migrate)
         async with self.lock, self.engine.begin() as connection:
+            await connection.execute(
+                delete(previews).where(func.json_extract(previews.c.data, "$.expires_at") <= now())
+            )
             if not (await connection.execute(select(settings_table))).first():
                 await connection.execute(
                     insert(settings_table).values(
@@ -194,9 +249,8 @@ class Repository:
                     )
                 )
             else:
-                config = StudioConfig.model_validate(
-                    (await connection.execute(select(settings_table.c.data))).scalar_one()
-                )
+                stored = (await connection.execute(select(settings_table.c.data))).scalar_one()
+                config = StudioConfig.model_validate(with_provider_profiles(stored))
                 permissions = dict(config.tools)
                 additions = {
                     "search_files": permissions.get("list_files", "deny"),
@@ -213,7 +267,7 @@ class Repository:
                 }
                 for name, permission in additions.items():
                     permissions.setdefault(name, permission)
-                if permissions != config.tools:
+                if permissions != config.tools or "providers" not in stored:
                     saved = config.model_copy(
                         update={"tools": permissions, "revision": config.revision + 1}
                     )
@@ -370,16 +424,15 @@ class Repository:
         return _session_view(await self._one(sessions, identifier))
 
     async def list_sessions(self) -> list[dict[str, Any]]:
-        """Return the most recent local conversations for the sidebar."""
+        """Return conversation summaries, newest first, without their message histories."""
+        columns = [
+            column for column in sessions.c if column.name not in {"messages", "title_locked"}
+        ]
+        query = select(
+            *columns, func.json_array_length(sessions.c.messages).label("message_count")
+        ).order_by(sessions.c.created_at.desc())
         async with self.engine.connect() as connection:
-            return [
-                _session_view(row)
-                for row in (
-                    await connection.execute(
-                        select(sessions).order_by(sessions.c.created_at.desc())
-                    )
-                ).mappings()
-            ]
+            return [dict(row) for row in (await connection.execute(query)).mappings()]
 
     async def effective_history(self, session: dict[str, Any]) -> list[dict[str, Any]]:
         """Project an explicit summary plus untouched suffix without rewriting original history."""
@@ -418,7 +471,7 @@ class Repository:
                 .join(runs, processes.c.run_id == runs.c.id)
                 .where(
                     runs.c.session_id == session_id,
-                    processes.c.status.in_(["starting", "running", "stopping"]),
+                    processes.c.status.in_(ACTIVE_PROCESSES),
                 )
                 .limit(1)
             )
@@ -764,7 +817,8 @@ class Repository:
                             }
                         )
                         messages.extend(
-                            {**message, "source": "history"} for message in run["messages"]
+                            {**message, "source": "history", "blocks": []}
+                            for message in run["messages"]
                         )
             copied = {
                 "id": uid(),
@@ -870,6 +924,10 @@ class Repository:
                         "idempotency_conflict", "This idempotency key has different input.", 409
                     )
                 return dict(existing)
+            if (
+                await connection.execute(select(runs.c.id).where(runs.c.preview_id == preview_id))
+            ).first():
+                raise AppError("preview_consumed", "Create a new preview for another Run.", 409)
             preview = (
                 await connection.execute(select(previews.c.data).where(previews.c.id == preview_id))
             ).scalar_one_or_none()
@@ -910,10 +968,6 @@ class Repository:
                 raise AppError(
                     "stale_preview", "Configuration or conversation changed. Preview again.", 409
                 )
-            if (
-                await connection.execute(select(runs.c.id).where(runs.c.preview_id == preview_id))
-            ).first():
-                raise AppError("preview_consumed", "Create a new preview for another Run.", 409)
             stamp = now()
             value = {
                 "id": uid(),
@@ -934,6 +988,8 @@ class Repository:
                 "updated_at": stamp,
             }
             await connection.execute(insert(runs).values(**value))
+            # The Run now owns the snapshot; runs.preview_id keeps the preview single-use.
+            await connection.execute(delete(previews).where(previews.c.id == preview_id))
             await connection.execute(
                 update(sessions)
                 .where(sessions.c.id == session["id"])
@@ -965,6 +1021,91 @@ class Repository:
         """Read a Run including its private frozen snapshot and current projection."""
         return await self._one(runs, identifier)
 
+    async def run_progress(self, identifier: str) -> dict[str, Any]:
+        """Read only a Run's status and event cursor, e.g. for each SSE polling tick."""
+        async with self.engine.connect() as connection:
+            row = (
+                (
+                    await connection.execute(
+                        select(runs.c.status, runs.c.latest_event_seq).where(
+                            runs.c.id == identifier
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            raise AppError("not_found", "The requested record does not exist.", 404)
+        return dict(row)
+
+    async def run_projections(
+        self, *, run_id: str | None = None, session_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Read browser-visible Run state with its open calls, without frozen snapshots.
+
+        Snapshots contain the whole prior history, so loading them for every listed turn made
+        reading a long conversation quadratic. SQLite extracts the few snapshot fields used."""
+        snapshot = runs.c.snapshot
+        query = select(
+            *(column for column in runs.c if column.name in RUN_PROJECTION),
+            func.json_extract(snapshot, "$.input").label("input"),
+            func.json_extract(snapshot, "$.workspace_root").label("workspace_root"),
+            func.json_extract(snapshot, "$.preset.name").label("preset_name"),
+            func.json_extract(snapshot, "$.config.provider.adapter").label("provider"),
+            func.json_extract(snapshot, "$.config.provider.profile_id").label("provider_id"),
+            func.json_extract(snapshot, "$.config.provider.model").label("model"),
+            func.json_extract(snapshot, "$.config.provider.reasoning_effort").label(
+                "reasoning_effort"
+            ),
+            func.json_extract(snapshot, "$.access").label("access"),
+        ).order_by(runs.c.created_at, runs.c.id)
+        if run_id is not None:
+            query = query.where(runs.c.id == run_id)
+        if session_id is not None:
+            query = query.where(runs.c.session_id == session_id)
+        async with self.engine.connect() as connection:
+            values = [dict(row) for row in (await connection.execute(query)).mappings()]
+            pending = (
+                (
+                    await connection.execute(
+                        select(calls)
+                        .where(
+                            calls.c.run_id.in_([value["id"] for value in values]),
+                            calls.c.status.in_(["executing", "outcome_unknown"]),
+                        )
+                        .order_by(calls.c.id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        for value in values:
+            value["open_calls"] = [dict(call) for call in pending if call["run_id"] == value["id"]]
+        return values
+
+    async def calls_with_status(self, run_id: str, statuses: list[str]) -> list[dict[str, Any]]:
+        """Read the few receipts in the given states, such as executing or uncertain calls."""
+        async with self.engine.connect() as connection:
+            rows = await connection.execute(
+                select(calls).where(calls.c.run_id == run_id, calls.c.status.in_(statuses))
+            )
+            return sorted(
+                (dict(row) for row in rows.mappings()), key=lambda call: call_order(call["id"])
+            )
+
+    async def call_summaries(self, run_id: str, kind: str) -> list[dict[str, Any]]:
+        """Read per-call attempts and usage without loading request and response evidence."""
+        data = calls.c.data
+        query = select(
+            func.coalesce(func.json_extract(data, "$.attempts"), 1).label("attempts"),
+            func.json_extract(data, "$.usage.input_tokens").label("input_tokens"),
+            func.json_extract(data, "$.usage.output_tokens").label("output_tokens"),
+            func.coalesce(func.json_array_length(data, "$.attempt_history"), 0).label("retries"),
+        ).where(calls.c.run_id == run_id, calls.c.kind == kind)
+        async with self.engine.connect() as connection:
+            return [dict(row) for row in (await connection.execute(query)).mappings()]
+
     async def list_runs(self, session_id: str) -> list[dict[str, Any]]:
         """Read conversation Runs in creation order."""
         await self.session(session_id)
@@ -984,8 +1125,10 @@ class Repository:
         self, connection, run_id: str, event_type: str, payload: dict[str, Any], **changes
     ) -> RunEvent:
         """Append a sequence-numbered event and update its projection in one transaction."""
-        row = (await connection.execute(select(runs).where(runs.c.id == run_id))).mappings().one()
-        seq, stamp = row["latest_event_seq"] + 1, now()
+        previous = (
+            await connection.execute(select(runs.c.latest_event_seq).where(runs.c.id == run_id))
+        ).scalar_one()
+        seq, stamp = previous + 1, now()
         await connection.execute(
             insert(events).values(
                 run_id=run_id, seq=seq, type=event_type, timestamp=stamp, payload=payload
@@ -1024,15 +1167,12 @@ class Repository:
     async def delta(self, run_id: str, call_id: str, text: str) -> None:
         """Append streamed text and persist its replay event atomically."""
         async with self.lock, self.engine.begin() as connection:
-            previous = (
-                await connection.execute(select(runs.c.partial_output).where(runs.c.id == run_id))
-            ).scalar_one()
             value = await self._event(
                 connection,
                 run_id,
                 "model.delta",
                 {"call_id": call_id, "text": text},
-                partial_output=previous + text,
+                partial_output=runs.c.partial_output + text,
             )
         await self._notify(value)
 
@@ -1069,7 +1209,7 @@ class Repository:
                             "tool_call_id": None,
                         }
                     ]
-                    + [{**message, "source": "history"} for message in messages],
+                    + [{**message, "source": "history", "blocks": []} for message in messages],
                 )
             await connection.execute(
                 update(sessions).where(sessions.c.id == run["session_id"]).values(**changes)
@@ -1132,16 +1272,12 @@ class Repository:
                 await connection.execute(insert(calls).values(id=identifier, **values))
 
     async def trace(self, run_id: str) -> list[dict[str, Any]]:
-        """Load stored model and tool evidence for inspection or recovery."""
+        """Load stored model and tool evidence in execution order for inspection or recovery."""
         async with self.engine.connect() as connection:
-            return [
-                dict(row)
-                for row in (
-                    await connection.execute(
-                        select(calls).where(calls.c.run_id == run_id).order_by(calls.c.id)
-                    )
-                ).mappings()
-            ]
+            rows = (
+                await connection.execute(select(calls).where(calls.c.run_id == run_id))
+            ).mappings()
+            return sorted((dict(row) for row in rows), key=lambda call: call_order(call["id"]))
 
     async def recover(self) -> list[str]:
         """Mark abandoned effects uncertain and return work that was still queued."""
@@ -1169,9 +1305,7 @@ class Repository:
             )
             for record in (
                 await connection.execute(
-                    select(processes).where(
-                        processes.c.status.in_(["starting", "running", "stopping"])
-                    )
+                    select(processes).where(processes.c.status.in_(ACTIVE_PROCESSES))
                 )
             ).mappings():
                 data = {
@@ -1237,7 +1371,9 @@ class Repository:
                 ).scalars()
             )
             await connection.execute(delete(sessions).where(sessions.c.id == session_id))
-            for preview in (await connection.execute(select(previews))).mappings():
-                if preview["data"]["snapshot"]["session_id"] == session_id:
-                    await connection.execute(delete(previews).where(previews.c.id == preview["id"]))
+            await connection.execute(
+                delete(previews).where(
+                    func.json_extract(previews.c.data, "$.snapshot.session_id") == session_id
+                )
+            )
         return run_ids

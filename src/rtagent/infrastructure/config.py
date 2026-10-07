@@ -8,7 +8,19 @@ from dotenv import dotenv_values
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from rtagent.domain import StudioConfig
+from rtagent.domain import (
+    SHELL_TOOL,
+    SIMULATED,
+    ProviderConfig,
+    ProviderProfile,
+    StudioConfig,
+    resolve_model,
+)
+
+DEFAULT_BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+}
 
 
 def resolve_secret(reference: str) -> str:
@@ -32,14 +44,8 @@ class Settings(BaseSettings):
     openai_model: str | None = Field(default=None, validation_alias="OPENAI_MODEL")
     anthropic_base_url: str | None = Field(default=None, validation_alias="ANTHROPIC_BASE_URL")
     anthropic_model: str | None = Field(default=None, validation_alias="ANTHROPIC_MODEL")
-    allowed_origins: list[str] = [
-        "http://127.0.0.1:8001",
-        "http://localhost:8001",
-        "http://127.0.0.1:8000",
-        "http://localhost:8000",
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-    ]
+    # Additional browser origins; pages served by this process are always same-origin.
+    allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
     def initialize(self) -> None:
         """Resolve local paths and create the runtime data directory."""
@@ -48,44 +54,68 @@ class Settings(BaseSettings):
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def apply_provider(self, config: StudioConfig) -> StudioConfig:
-        """Apply explicit environment values on startup; later UI edits remain usable."""
-        values = config.model_dump()
-        # Preserve the previous shell permission when upgrading the Windows backend.
-        # Only current settings change; stored Run snapshots keep their original tool names.
-        if os.name == "nt" and "bash" in values["tools"]:
-            permission = values["tools"].pop("bash")
-            values["tools"].setdefault("powershell", permission)
-        use_anthropic = self.provider == "anthropic" or (
-            self.provider is None
-            and (self.anthropic_base_url is not None or self.anthropic_model is not None)
-            and self.openai_base_url is None
-            and self.openai_model is None
-        )
-        overrides = {
-            "adapter": self.provider,
-            "base_url": self.anthropic_base_url if use_anthropic else self.openai_base_url,
-            "model": self.anthropic_model if use_anthropic else self.openai_model,
-        }
-        if use_anthropic:
-            overrides["adapter"] = "anthropic"
-            if config.provider.adapter != "anthropic":
-                overrides["base_url"] = self.anthropic_base_url or "https://api.anthropic.com/v1"
-                overrides["model"] = self.anthropic_model or ""
-                values["provider"]["credential_ref"] = "ANTHROPIC_API_KEY"
-        elif config.provider.adapter == "anthropic" and (
-            self.provider == "openai"
-            or self.openai_base_url is not None
-            or self.openai_model is not None
+        """Normalize saved settings on startup and apply explicit .env provider values.
+
+        OPENAI_* and ANTHROPIC_* values update (or create) the `openai` and `anthropic`
+        providers. STUDIO_PROVIDER, or the only provider configured in .env, becomes the
+        default model."""
+        values = config.model_copy(deep=True)
+        # A data directory created on another OS names that OS's shell. Carry its permission
+        # over to this OS's shell; an explicit permission for the native shell wins. Only
+        # current settings change; stored Run snapshots keep their original tool names.
+        foreign = "bash" if SHELL_TOOL == "powershell" else "powershell"
+        if foreign in values.tools:
+            permission = values.tools.pop(foreign)
+            values.tools.setdefault(SHELL_TOOL, permission)
+        explicit: dict[str, str | None] = {}
+        for adapter, base_url, model in (
+            ("openai", self.openai_base_url, self.openai_model),
+            ("anthropic", self.anthropic_base_url, self.anthropic_model),
         ):
-            overrides["base_url"] = self.openai_base_url or "https://api.openai.com/v1"
-            overrides["model"] = self.openai_model or ""
-            values["provider"]["credential_ref"] = "OPENAI_API_KEY"
-        values["provider"].update(
-            {key: value for key, value in overrides.items() if value is not None}
-        )
-        if self.provider is None and (self.openai_base_url or self.openai_model):
-            values["provider"]["adapter"] = "openai"
-        return StudioConfig.model_validate(values)
+            if base_url is None and model is None:
+                continue
+            profile = next((item for item in values.providers if item.id == adapter), None)
+            if profile is None:
+                profile = ProviderProfile(
+                    id=adapter,
+                    name="Anthropic" if adapter == "anthropic" else "OpenAI-compatible",
+                    adapter=adapter,
+                    base_url=base_url or DEFAULT_BASE_URLS[adapter],
+                    credential_ref=f"{adapter.upper()}_API_KEY",
+                    max_output_tokens=32000 if adapter == "anthropic" else 8192,
+                )
+                values.providers.append(profile)
+            if base_url:
+                profile.base_url = base_url
+            if model:
+                profile.models = sorted({*profile.models, model})
+            explicit[adapter] = model
+        chosen = self.provider or next(iter(explicit), None)
+        current = values.provider
+        if chosen == "fake":
+            values.provider = ProviderConfig(
+                profile_id=SIMULATED, adapter="fake", model="simulated"
+            )
+        elif chosen is not None:
+            profile = next((item for item in values.providers if item.id == chosen), None)
+            if profile is None:
+                profile = ProviderProfile(
+                    id=chosen,
+                    name="Anthropic" if chosen == "anthropic" else "OpenAI-compatible",
+                    adapter=chosen,
+                    base_url=DEFAULT_BASE_URLS[chosen],
+                    credential_ref=f"{chosen.upper()}_API_KEY",
+                )
+                values.providers.append(profile)
+            model = explicit.get(chosen) or (current.model if current.profile_id == chosen else "")
+            if not model and profile.models:
+                model = profile.models[0]
+            effort = current.reasoning_effort if current.profile_id == chosen else None
+            values.provider = ProviderConfig(
+                profile_id=chosen, adapter=profile.adapter, model=model, reasoning_effort=effort
+            )
+        values.provider = resolve_model(values)
+        return StudioConfig.model_validate(values.model_dump())
 
     @property
     def database_url(self) -> str:

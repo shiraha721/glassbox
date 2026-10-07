@@ -5,19 +5,19 @@ import codecs
 import json
 import os
 import queue
+import shutil
 import signal
-import threading
-import time
-from collections.abc import Callable
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from rtagent.domain import AppError
-from rtagent.infrastructure.sandbox.command_io import CommandControl, OutputCallback, OutputRelay
-from rtagent.infrastructure.workspace.files import Workspace, excluded_name
-from rtagent.infrastructure.workspace.toolchains import copy_toolchains
-
-OUTPUT_LIMIT = 24_000  # Per stream; leave room for the JSON envelope in a tool result.
+from rtagent.infrastructure.sandbox.command_io import (
+    CommandControl,
+    CommandOutput,
+    OutputCallback,
+    command_result,
+)
+from rtagent.infrastructure.workspace.files import DEPENDENCY_DIRS, Workspace, private_name
+from rtagent.infrastructure.workspace.toolchains import validate_toolchains
 
 
 class BashSandbox:
@@ -40,53 +40,65 @@ class BashSandbox:
         )
 
     def _hidden_paths(self) -> list[Path]:
-        """Mask server state and credentials even when they live inside the workspace."""
+        """Mask server state and credentials even when they live inside the workspace.
+
+        Other links are allowed: they resolve inside the sandbox's own mount namespace, where
+        host paths outside the bound system directories do not exist and masked workspace
+        paths stay masked. Only an excluded name that is itself a link cannot be masked safely,
+        because bubblewrap would follow it when mounting the mask."""
         hidden = []
         for directory, dirs, files in os.walk(self.workspace.root, followlinks=False):
+            # Dependency trees stay visible but are not searched for user credentials; this
+            # keeps the per-command scan fast in projects with large node_modules folders.
+            dirs[:] = [name for name in dirs if name.casefold() not in DEPENDENCY_DIRS]
             for name in [*dirs, *files]:
                 path = Path(directory) / name
-                excluded = excluded_name(name) or path == self.workspace.data_dir
+                if not private_name(name) and path != self.workspace.data_dir:
+                    continue
                 if path.is_symlink() or path.is_junction():
-                    # Links must not expose paths excluded by the workspace policy.
-                    if not excluded:
-                        raise AppError(
-                            "sandbox_path",
-                            f"Remove the linked path before running Bash: {path.relative_to(self.workspace.root)}",
-                        )
                     raise AppError(
                         "sandbox_path",
-                        "Linked excluded directories cannot be safely masked; use a workspace without junctions.",
+                        "Excluded paths cannot be links; replace this link before running "
+                        f"commands: {path.relative_to(self.workspace.root)}",
                     )
-                if excluded:
-                    hidden.append(path)
-                    if name in dirs:
-                        dirs.remove(name)
+                hidden.append(path)
+                if name in dirs:
+                    dirs.remove(name)
         return hidden
 
+    @staticmethod
+    def _system_mounts() -> list[str]:
+        """Expose read-only system programs and configuration with the host's root layout.
+
+        /etc is needed by ordinary tools (Debian's awk is an /etc/alternatives link, getpwuid
+        reads /etc/passwd). It is read-only and files restricted to root stay unreadable."""
+        args = ["--ro-bind", "/usr", "/usr", "--ro-bind", "/etc", "/etc"]
+        for name in ("bin", "sbin", "lib", "lib32", "lib64", "libx32"):
+            host = Path("/") / name
+            if host.is_symlink():
+                args.extend(["--symlink", os.readlink(host), str(host)])
+            elif host.is_dir():
+                args.extend(["--ro-bind", str(host), str(host)])
+        return args
+
     async def _arguments(
-        self, command: str, cwd: str, mode: str, root: str, toolchains: list[Path] | None = None
+        self,
+        command: str,
+        cwd: str,
+        mode: str,
+        root: str,
+        toolchains: list[tuple[Path, Path]] | None = None,
     ) -> list[str]:
         directory = self.workspace.path(cwd)
         if not directory.is_dir():
             raise AppError("tool_error", "Bash cwd must be an existing workspace directory.")
         mount = "--ro-bind" if mode == "read-only" else "--bind"
         args = [
-            "/usr/bin/bwrap",
+            shutil.which("bwrap") or "/usr/bin/bwrap",
             "--unshare-all",
             "--die-with-parent",
             "--new-session",
-            "--ro-bind",
-            "/usr",
-            "/usr",
-            "--symlink",
-            "usr/bin",
-            "/bin",
-            "--symlink",
-            "usr/lib",
-            "/lib",
-            "--symlink",
-            "usr/lib64",
-            "/lib64",
+            *self._system_mounts(),
             "--proc",
             "/proc",
             "--dev",
@@ -100,9 +112,6 @@ class BashSandbox:
             "HOME",
             "/home/agent",
             "--setenv",
-            "PATH",
-            "/usr/bin:/bin",
-            "--setenv",
             "LANG",
             "C.UTF-8",
             mount,
@@ -111,18 +120,13 @@ class BashSandbox:
         ]
         args.extend(["--dir", "/toolchains"])
         paths = []
-        for index, path in enumerate(toolchains or [], 1):
+        for index, (configured, path) in enumerate(toolchains or [], 1):
             mountpoint = f"/toolchains/{index}"
-            args.extend(
-                [
-                    "--ro-bind",
-                    str(path),
-                    mountpoint,
-                    "--setenv",
-                    f"RTAGENT_TOOLCHAIN_{index}",
-                    mountpoint,
-                ]
-            )
+            args.extend(["--ro-bind", str(path), mountpoint])
+            # Host paths stay valid too: virtual environments link to their base interpreter.
+            for alias in dict.fromkeys([path, configured]):
+                args.extend(["--ro-bind", str(path), str(alias)])
+            args.extend(["--setenv", f"RTAGENT_TOOLCHAIN_{index}", mountpoint])
             paths.extend([mountpoint, mountpoint + "/bin"])
         args.extend(
             [
@@ -165,26 +169,12 @@ class BashSandbox:
         await process.wait()
 
     @staticmethod
-    async def _drain(
-        stream: asyncio.StreamReader, key: str, publish: Callable[[str, str, bool], None]
-    ) -> tuple[str, bool]:
-        """Drain pipes to avoid deadlocks while retaining only a bounded output prefix."""
-        chunks, size, truncated = [], 0, False
+    async def _drain(stream: asyncio.StreamReader, output: CommandOutput, key: str) -> None:
+        """Drain a pipe completely so the child cannot block, retaining bounded text."""
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while chunk := await stream.read(8192):
-            remaining = max(0, OUTPUT_LIMIT - size)
-            if remaining:
-                chunks.append(chunk[:remaining])
-            retained = chunk[:remaining]
-            changed = len(chunk) > remaining and not truncated
-            size += min(remaining, len(chunk))
-            truncated |= len(chunk) > remaining
-            if retained or changed:
-                publish(key, decoder.decode(retained), truncated)
-        tail = decoder.decode(b"", final=True)
-        if tail:
-            publish(key, tail, truncated)
-        return b"".join(chunks).decode("utf-8", errors="replace"), truncated
+            output.write(key, decoder.decode(chunk))
+        output.write(key, decoder.decode(b"", final=True))
 
     @staticmethod
     async def _feed_input(stream: asyncio.StreamWriter, control: CommandControl) -> None:
@@ -219,36 +209,32 @@ class BashSandbox:
         """Run a command with bounded output and terminate all children on stop or timeout."""
         process, group, readers = None, None, []
         writer = None
-        relay = OutputRelay(on_output)
-        relay_reader = asyncio.create_task(relay.drain())
-        private = TemporaryDirectory(prefix="rtagent-toolchains-")
-        preparation_stop = control.stop if control else threading.Event()
+        # Background processes persist snapshots; a slower cadence bounds their write rate.
+        output = CommandOutput(on_output, interval=0.5 if control else 0.1)
+        publisher = asyncio.create_task(output.drain())
         timed_out = False
         try:
             async with asyncio.timeout(timeout):
-                root = str(self.workspace.root)
-                preparing = asyncio.create_task(
-                    asyncio.to_thread(
-                        copy_toolchains,
-                        toolchain_roots or [],
-                        Path(private.name),
-                        self.workspace.root,
-                        preparation_stop,
-                        time.monotonic() + timeout,
-                    )
+                # Bubblewrap binds trusted runtimes read-only in place; unlike the Windows
+                # AppContainer, no copy is needed to avoid changing their permissions.
+                roots = toolchain_roots or []
+                resolved = await asyncio.to_thread(validate_toolchains, roots, self.workspace.root)
+                toolchains = list(zip(map(Path, roots), resolved, strict=True))
+                arguments = await self._arguments(
+                    command, cwd, mode, str(self.workspace.root), toolchains
                 )
-                try:
-                    toolchains = await asyncio.shield(preparing)
-                finally:
-                    if not preparing.done():
-                        preparation_stop.set()
-                        # Cancellation cannot remove a directory still being written by a thread.
-                        await asyncio.gather(preparing, return_exceptions=True)
-                arguments = await self._arguments(command, cwd, mode, root, toolchains)
                 # The first line is emitted by our fixed driver before any untrusted command.
                 driver = 'printf "RTAGENT_PID:%s\\n" "$$"; exec "$@"'
                 process = await self._spawn(
-                    ["/usr/bin/setsid", "--wait", "/bin/sh", "-c", driver, "rtagent", *arguments],
+                    [
+                        shutil.which("setsid") or "/usr/bin/setsid",
+                        "--wait",
+                        "/bin/sh",
+                        "-c",
+                        driver,
+                        "rtagent",
+                        *arguments,
+                    ],
                     pipe_input=control is not None,
                 )
                 marker = await process.stdout.readline()
@@ -262,8 +248,8 @@ class BashSandbox:
                     control.started(group)
                     writer = asyncio.create_task(self._feed_input(process.stdin, control))
                 readers = [
-                    asyncio.create_task(self._drain(process.stdout, "stdout", relay.publish)),
-                    asyncio.create_task(self._drain(process.stderr, "stderr", relay.publish)),
+                    asyncio.create_task(self._drain(process.stdout, output, "stdout")),
+                    asyncio.create_task(self._drain(process.stderr, output, "stderr")),
                 ]
                 while control and process.returncode is None:
                     if control.stop.is_set():
@@ -299,27 +285,23 @@ class BashSandbox:
                 await asyncio.gather(*readers)
             if writer:
                 await writer
-            await relay.finish(relay_reader)
-            private.cleanup()
-        output = [task.result() for task in readers] if readers else [("", False), ("", False)]
-        result = {
-            "stdout": output[0][0],
-            "stderr": output[1][0],
-            "exit_code": process.returncode if process else None,
-            "timed_out": timed_out,
-            "truncated": any(item[1] for item in output),
-            "sandbox": self.backend,
-            "mode": mode,
-            "network": "disabled",
-            "effects_may_be_partial": timed_out or bool(control and control.stop.is_set()),
-            "workspace_changes": None,
-        }
-        # JSON escaping can multiply byte size, even after the stream byte limits were applied.
-        while len(json.dumps(result, ensure_ascii=False).encode()) > 65536:
-            result["stdout"] = result["stdout"][: len(result["stdout"]) // 2]
-            result["stderr"] = result["stderr"][: len(result["stderr"]) // 2]
-            result["truncated"] = True
-        return json.dumps(result, ensure_ascii=False)
+            await output.close(publisher)
+        stdout, stdout_truncated = output.result("stdout")
+        stderr, stderr_truncated = output.result("stderr")
+        return command_result(
+            {
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": process.returncode if process else None,
+                "timed_out": timed_out,
+                "truncated": stdout_truncated or stderr_truncated,
+                "sandbox": self.backend,
+                "mode": mode,
+                "network": "disabled",
+                "effects_may_be_partial": timed_out or bool(control and control.stop.is_set()),
+                "workspace_changes": None,
+            }
+        )
 
     async def status(self, refresh: bool = False) -> dict:
         """Check the real sandbox without making application startup depend on it."""

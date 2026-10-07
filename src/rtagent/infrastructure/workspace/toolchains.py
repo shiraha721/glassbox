@@ -12,14 +12,15 @@ TOOLCHAIN_LIMIT = 256 * 1024 * 1024
 
 
 def validate_toolchains(roots: list[str], workspace: Path) -> list[Path]:
-    """Reject missing, linked or overly broad runtime roots before granting sandbox access."""
+    """Resolve runtime roots, rejecting missing or overly broad folders before granting access.
+
+    A root may itself be a link (uv names interpreters through minor-version links); every
+    breadth check applies to the resolved directory that is actually exposed."""
     result = []
     for value in roots:
         path = Path(value)
-        if not path.is_absolute() or not path.is_dir() or path.is_symlink() or path.is_junction():
-            raise AppError(
-                "toolchain_path", "Choose an existing absolute, unlinked runtime directory."
-            )
+        if not path.is_absolute() or not path.is_dir():
+            raise AppError("toolchain_path", "Choose an existing absolute runtime directory.")
         resolved = path.resolve()
         if (
             resolved == Path(resolved.anchor)

@@ -113,19 +113,22 @@ test('tools expose schemas and effective policy, presets and recorded plans rema
   page,
 }) => {
   await openWorkspace(page);
+  // Workspace access is chosen per run beside the model; the Tools panel reflects it.
+  await page.getByRole('button', { name: 'Workspace access', exact: true }).click();
+  await page.getByRole('button', { name: /^Read only/ }).click();
   await page.getByRole('button', { name: 'Tools', exact: true }).click();
   const catalog = page.getByLabel('Tool catalog', { exact: true });
   await catalog.getByLabel('Search tools', { exact: true }).fill('apply_patch');
   await expect(catalog.locator('[data-tool="apply_patch"]')).toBeVisible();
+  await expect(catalog.getByText('Blocked by read-only', { exact: true })).toBeVisible();
   await catalog.getByText('Arguments', { exact: true }).click();
   await expect(catalog.getByText('"expected_hashes"', { exact: false })).toBeVisible();
   await catalog.getByRole('button', { name: 'Edit permissions', exact: true }).click();
-  const settings = page.getByRole('dialog');
-  await settings
-    .getByRole('combobox', { name: 'Workspace access', exact: true })
-    .selectOption('read-only');
+  const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByLabel('Search tools', { exact: true }).fill('apply_patch');
-  await expect(settings.getByText('Blocked by read-only', { exact: true })).toBeVisible();
+  await settings
+    .getByRole('combobox', { name: 'apply_patch permission', exact: true })
+    .selectOption('ask');
   await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
   await expect(
     settings.getByText('Settings saved. New runs use these settings.', { exact: true }),
@@ -144,6 +147,7 @@ test('tools expose schemas and effective policy, presets and recorded plans rema
         data: {
           preset: current.presets.find((item: { id: string }) => item.id === 'coding'),
           config_revision: current.config.revision,
+          access: 'read-only',
         },
       })
     ).json();
@@ -170,7 +174,7 @@ test('tools expose schemas and effective policy, presets and recorded plans rema
   } finally {
     const state = await (await page.request.get('/api/v1/bootstrap')).json();
     const restored = await page.request.put('/api/v1/config', {
-      data: { ...state.config, sandbox_mode: 'workspace-write' },
+      data: { ...state.config, tools: { ...state.config.tools, apply_patch: 'allow' } },
     });
     expect(restored.ok()).toBeTruthy();
   }
@@ -380,7 +384,7 @@ test('edit, preview, real file tool, inspect trace, and refresh without another 
   await expect(page.getByRole('link', { name: 'Export JSON' })).toBeVisible();
   await page.reload();
   await expect(page.getByTestId('run-status')).toHaveText('succeeded');
-  await expect(page.locator('#run-selector option')).toHaveCount(1);
+  await expect(page.locator('.conversation-turn')).toHaveCount(1);
   await page.screenshot({ path: 'test-results/completed-workbench.png', fullPage: true });
 });
 
@@ -394,8 +398,9 @@ test('approval survives a browser refresh and only one tool result is recorded',
   await expect(page.getByRole('button', { name: 'Approve once' })).toBeVisible();
   await page.getByRole('button', { name: 'Approve once' }).click();
   await expect(page.getByTestId('run-status')).toHaveText('succeeded');
-  await expect(page.locator('.tool-result')).toHaveCount(1);
-  await expect(page.locator('#run-selector option')).toHaveCount(1);
+  await expect(page.locator('.tool-step')).toHaveCount(1);
+  await expect(page.locator('.tool-step')).toContainText('done');
+  await expect(page.locator('.conversation-turn')).toHaveCount(1);
 });
 
 test('reject a tool and cancel the next turn', async ({ page }) => {
@@ -411,29 +416,50 @@ test('reject a tool and cancel the next turn', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeEnabled();
 });
 
-test('settings save real endpoint references and refresh the live preview', async ({ page }) => {
+test('providers and models feed the model picker, and keys are write-only', async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel('Task', { exact: true }).fill('configuration draft');
   await page.getByRole('button', { name: 'Preview', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Provider', exact: true }).selectOption('openai');
-  await page.getByLabel('Base URL', { exact: true }).fill('http://127.0.0.1:11434/v1');
-  await page.getByLabel('Model', { exact: true }).fill('local-contract-model');
-  await page.getByRole('button', { name: 'Save settings', exact: true }).click();
-  await expect(page.getByText('Settings saved. New runs use these settings.')).toBeVisible();
-  await page.getByLabel('Close settings').click();
-  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeEnabled();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  const provider = settings.getByRole('region', { name: 'Provider OpenAI-compatible' });
+  await provider.getByLabel('Base URL', { exact: true }).fill('http://127.0.0.1:11434/v1');
+  const pages = settings.getByRole('navigation', { name: 'Settings pages' });
+  await pages.getByRole('button', { name: 'Models', exact: true }).click();
+  await settings.getByLabel('Add model to OpenAI-compatible').fill('local-contract-model');
+  await settings.getByRole('button', { name: 'Add', exact: true }).click();
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  await settings.getByLabel('Close settings').click();
+  // The picker lists the saved model; the live preview compiles with the chosen model.
+  await page.getByRole('button', { name: 'Model', exact: true }).click();
+  await page.getByRole('button', { name: 'local-contract-model', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Model', exact: true })).toContainText(
+    'local-contract-model',
+  );
+  await page.getByText('Prepared request body', { exact: true }).click();
+  await expect(page.getByLabel('Request inspector')).toContainText('"local-contract-model"');
+  // A key is sent once and only its source and last characters come back.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByLabel('Model', { exact: true })).toHaveValue('local-contract-model');
-  await page.getByRole('combobox', { name: 'Provider', exact: true }).selectOption('fake');
-  await page.getByRole('button', { name: 'Save settings', exact: true }).click();
-  await expect(page.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  await settings.getByLabel('API key', { exact: true }).fill('sk-e2e-0123456789');
+  await settings.getByRole('button', { name: 'Save key', exact: true }).click();
+  await expect(settings.getByText('Saved in the studio · ends in 6789')).toBeVisible();
+  await expect(settings.getByLabel('API key', { exact: true })).toHaveValue('');
+  await settings.getByRole('button', { name: 'Remove saved key', exact: true }).click();
+  await expect(settings.getByText('Saved in the studio · ends in 6789')).not.toBeAttached();
+  await settings.getByLabel('Close settings').click();
+  await page.getByRole('button', { name: 'Model', exact: true }).click();
+  await page.getByRole('button', { name: 'Simulated model', exact: true }).click();
 });
 
 test('discover a stdio MCP tool, authorize it, and complete the tool loop', async ({ page }) => {
   await openWorkspace(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings pages' })
+    .getByRole('button', { name: 'MCP servers', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Add server' }).click();
   const root = path.resolve(import.meta.dirname, '../..');
   await page
@@ -645,4 +671,30 @@ test('conversation menus organize history and fork an independent earlier turn',
   await expect(page.locator('.topbar h1')).toHaveText('History workflow');
   await expect(page.locator('.conversation-turn')).toHaveCount(2);
   await page.screenshot({ path: 'test-results/conversation-history.png', fullPage: true });
+});
+
+test('global skills from Settings are available in every project', async ({ page }) => {
+  await openWorkspace(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings
+    .getByRole('navigation', { name: 'Settings pages' })
+    .getByRole('button', { name: 'Skills', exact: true })
+    .click();
+  await settings.getByRole('button', { name: 'New skill', exact: true }).click();
+  await settings.getByLabel('Skill name', { exact: true }).fill('browser-global');
+  await settings.getByLabel('Description', { exact: true }).fill('A shared browser check.');
+  await settings.getByLabel('Instructions', { exact: true }).fill('Report the shared rule.');
+  await settings.getByRole('button', { name: 'Save skill', exact: true }).click();
+  await expect(settings.getByRole('button', { name: /browser-global/ })).toContainText('global');
+  await settings.getByLabel('Close settings').click();
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await expect(page.getByLabel('Use browser-global', { exact: true })).toBeVisible();
+  const skills = await (await page.request.get('/api/v1/skills')).json();
+  const saved = skills.skills.find((item: { name: string }) => item.name === 'browser-global');
+  const removed = await page.request.delete(
+    `/api/v1/skills/browser-global?expected_hash=${saved.hash}`,
+  );
+  expect(removed.status()).toBe(204);
 });

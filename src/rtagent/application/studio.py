@@ -14,10 +14,12 @@ from rtagent.domain import (
     CompactionView,
     CompactRequest,
     ContextView,
+    CredentialStatus,
     DraftPreviewRequest,
     MemoryDocument,
     MemorySave,
     Message,
+    ModelChoice,
     Preset,
     PresetPackage,
     Preview,
@@ -25,6 +27,7 @@ from rtagent.domain import (
     ProjectCreate,
     ProjectView,
     PromptInspection,
+    ProviderProfile,
     ResumeRequest,
     RunView,
     SkillDocument,
@@ -32,18 +35,59 @@ from rtagent.domain import (
     SkillSave,
     StartRun,
     StudioConfig,
+    ToolDefinition,
+    WorkspaceAccess,
+    WorkspaceSkills,
     WorkspaceView,
     digest,
     latest_plan,
+    resolve_model,
     uid,
 )
+from rtagent.domain.lifecycle import ACTIVE_PROCESSES
 from rtagent.domain.prompts import compile_prompt
 from rtagent.infrastructure.packages import export_skill, import_preset, import_skill
+from rtagent.infrastructure.providers.catalog import list_models
 from rtagent.infrastructure.providers.chat import prepare, transformations
 from rtagent.infrastructure.storage import Repository
 from rtagent.infrastructure.tools import ToolRegistry
 from rtagent.infrastructure.tracing import redact
 from rtagent.infrastructure.workspace.files import MEMORY_PATH
+from rtagent.infrastructure.workspace.toolchains import validate_toolchains
+
+
+def environment_message(root: Path, config: StudioConfig, tools: list[ToolDefinition]) -> Message:
+    """Describe the actual execution boundary the model works in, recorded with each Run."""
+    if os.name == "nt":
+        shell = "Windows PowerShell in an AppContainer, on a private copy of the workspace"
+        hidden = "credentials, Git metadata, runtime data and dependency folders are not copied"
+        changes = "Workspace edits are copied back after each command or background process exits"
+        runtimes = "Trusted runtimes are read-only copies; RTAGENT_TOOLCHAIN_1 etc. name them"
+    else:
+        shell = "Bash in a bubblewrap sandbox with the workspace mounted at /workspace"
+        hidden = "credentials, Git metadata and runtime data are masked; dependency folders remain"
+        changes = "Workspace edits apply directly"
+        runtimes = (
+            "Trusted runtimes are mounted read-only at their host paths and at "
+            "RTAGENT_TOOLCHAIN_1 etc."
+        )
+    lines = [
+        f"Workspace: {root}",
+        f"Native commands: {shell}; network is disabled; {hidden}. {changes}.",
+        f"Workspace policy: {config.sandbox_mode}. Command availability is not pre-probed; "
+        "failures are reported without a host fallback. MCP tools use their explicitly "
+        "configured external connections.",
+        f"Exposed tools: {', '.join(tool.name for tool in tools) or '(none)'}.",
+        f"Trusted runtime directories: {', '.join(config.toolchain_roots) or '(none)'}. "
+        f"{runtimes}. Python workspace packages: .rtagent/packages (PYTHONPATH); pip is offline.",
+        f"HTTPS download hosts: {', '.join(config.network_hosts) or '(none)'}. fetch_url "
+        "downloads public resources separately; commands still have no network.",
+        "Background commands use start_process/poll_process/send_process_input/stop_process "
+        "with pipe stdin, not a terminal.",
+        f"Run limits: {config.max_steps} model steps, {config.max_tool_calls} tool calls, "
+        f"{config.tool_timeout:g}s per tool, {config.run_timeout:g}s active runtime.",
+    ]
+    return Message(role="system", source="runtime:environment", content="\n".join(lines))
 
 
 class Studio:
@@ -94,7 +138,7 @@ class Studio:
                 )
             turns = [
                 item
-                for item in await self.repository.list_runs(session_id)
+                for item in await self.repository.run_projections(session_id=session_id)
                 if item["status"] == "succeeded"
             ]
             if len(turns) <= request.keep_recent_turns:
@@ -113,6 +157,7 @@ class Studio:
             previous_count = previous_data.get("covered_messages", 0)
             if count <= previous_count:
                 raise AppError("compaction_scope", "No additional older turns need reduction.")
+            config = config.model_copy(update={"provider": resolve_model(config, request.model)})
             data = {
                 "source_revision": session["revision"],
                 "covered_messages": count,
@@ -129,7 +174,9 @@ class Studio:
             record = await self.repository.begin_compaction(
                 session_id, request.expected_revision, data
             )
-            task = asyncio.create_task(reduce_context(self.repository, record))
+            task = asyncio.create_task(
+                reduce_context(self.repository, record, self.registry.credentials)
+            )
             self.compaction_tasks[record["id"]] = task
             task.add_done_callback(lambda _completed: self.compaction_tasks.pop(record["id"], None))
             return compaction_view(record)
@@ -147,12 +194,39 @@ class Studio:
 
     async def workspace_registry(self, project_id: str | None = None) -> ToolRegistry:
         """Resolve native files/tools from the selected project, never from model arguments."""
+        # Project registries share the root catalog when they are resolved, so discover first.
+        await self.registry.ensure_discovered(await self.repository.config())
         root = (
             Path((await self.repository.project(project_id))["workspace_root"])
             if project_id
             else self.registry.workspace
         )
         return self.registry.for_workspace(root)
+
+    @staticmethod
+    def _effective_config(
+        config: StudioConfig,
+        registry: ToolRegistry,
+        model: ModelChoice | None = None,
+        access: WorkspaceAccess | None = None,
+    ) -> StudioConfig:
+        """Apply a Run's model and workspace access choices to the saved settings.
+
+        Read only removes file-changing tools; ask turns every allowed tool that changes files,
+        runs code or calls MCP into an approval; workspace write keeps the configured policy."""
+        update: dict[str, Any] = {"provider": resolve_model(config, model)}
+        if access is not None:
+            update["sandbox_mode"] = "read-only" if access == "read-only" else "workspace-write"
+        if access == "ask":
+            update["tools"] = {
+                name: (
+                    "ask"
+                    if permission == "allow" and registry.changes_workspace(name)
+                    else permission
+                )
+                for name, permission in config.tools.items()
+            }
+        return config.model_copy(update=update)
 
     async def create_project(self, request: ProjectCreate) -> ProjectView:
         """Register an existing absolute workspace folder without creating or copying files."""
@@ -214,6 +288,57 @@ class Studio:
         await asyncio.to_thread(registry.files.save_skill, **request.model_dump())
         return await self.skill(request.name, project_id)
 
+    async def global_skills(self) -> WorkspaceSkills:
+        """List bundled and global skills, which every project shares."""
+        skills, errors = await asyncio.to_thread(self.registry.files.skills, False)
+        return WorkspaceSkills(
+            skills=[
+                {key: value for key, value in skill.items() if key != "content"} for skill in skills
+            ],
+            errors=errors,
+        )
+
+    async def global_skill(self, name: str) -> SkillDocument:
+        """Load a bundled or global skill without reference to any project."""
+        skills, errors = await asyncio.to_thread(self.registry.files.skills, False)
+        found = next((skill for skill in skills if skill["name"] == name), None)
+        if found is None:
+            raise AppError("skill_unavailable", errors.get(name, f"Skill {name} was not found."))
+        return SkillDocument.model_validate(found)
+
+    async def save_global_skill(self, request: SkillSave) -> SkillDocument:
+        """Create or update a global skill with the same validation as project skills."""
+        await asyncio.to_thread(
+            self.registry.files.save_skill, **request.model_dump(), scope="global"
+        )
+        return await self.global_skill(request.name)
+
+    async def delete_global_skill(self, name: str, expected_hash: str) -> None:
+        """Delete a global skill the user has seen; bundled skills cannot be deleted."""
+        await asyncio.to_thread(self.registry.files.delete_global_skill, name, expected_hash)
+
+    async def list_models(self, profile: ProviderProfile) -> list[str]:
+        """Ask a provider which models it serves, using its server-side credential."""
+        key = await asyncio.to_thread(self.registry.credentials.resolve, profile.credential_ref)
+        return await list_models(profile, key)
+
+    async def credential_status(self, names: list[str]) -> list[CredentialStatus]:
+        """Report where each named key comes from, never its value."""
+        return [
+            await asyncio.to_thread(self.registry.credentials.status, name)
+            for name in dict.fromkeys(names)
+        ]
+
+    async def save_credential(self, name: str, value: str) -> CredentialStatus:
+        """Store a key entered in Settings under its reference name."""
+        await asyncio.to_thread(self.registry.credentials.save, name, value)
+        return await asyncio.to_thread(self.registry.credentials.status, name)
+
+    async def delete_credential(self, name: str) -> CredentialStatus:
+        """Forget a stored key; an environment variable of the same name still applies."""
+        await asyncio.to_thread(self.registry.credentials.delete, name)
+        return await asyncio.to_thread(self.registry.credentials.status, name)
+
     async def export_preset(self, identifier: str) -> PresetPackage:
         """Package saved prompt data without settings, credentials or execution evidence."""
         return PresetPackage(preset=await self.repository.preset(identifier))
@@ -256,32 +381,7 @@ class Studio:
         mentions = re.findall(r"(?<!\S)\$([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$|[.,!?])", user_input)
         selected_skills = skills + [name for name in mentions if name in known_skills]
         workspace_context = await asyncio.to_thread(registry.files.context, selected_skills)
-        workspace_context.insert(
-            0,
-            Message(
-                role="system",
-                source="runtime:environment",
-                content=(
-                    f"Workspace: {registry.workspace}\n"
-                    f"Native command language: {'Windows PowerShell' if os.name == 'nt' else 'Bash on Linux'}.\n"
-                    f"Workspace policy: {config.sandbox_mode}; native command network is disabled. "
-                    "Command availability is not pre-probed; failures are reported without a host fallback. "
-                    "Host credentials, Git metadata, runtime data, and dependencies are excluded. "
-                    "MCP tools use their explicitly configured external connections.\n"
-                    f"Exposed tools: {', '.join(tool.name for tool in tools) or '(none)'}.\n"
-                    f"Trusted runtime directories: {config.toolchain_roots or '(none)'}. "
-                    "Copies are read-only; use RTAGENT_TOOLCHAIN_1 etc. for their sandbox paths. "
-                    "Python workspace packages: .rtagent/packages (PYTHONPATH); pip is offline.\n"
-                    f"HTTPS download hosts: {', '.join(config.network_hosts) or '(none)'}. "
-                    "fetch_url downloads public resources separately; commands still have no network.\n"
-                    "Background commands use start_process/poll_process/send_process_input/stop_process. "
-                    "Use pipe stdin, not terminal interactions. Windows copies back after exit; "
-                    "background commands see their initial private workspace copy.\n"
-                    f"Run limits: {config.max_steps} model steps, {config.max_tool_calls} tool calls, "
-                    f"{config.tool_timeout:g}s per tool, {config.run_timeout:g}s active runtime."
-                ),
-            ),
-        )
+        workspace_context.insert(0, environment_message(registry.workspace, config, tools))
         compiled = compile_prompt(
             preset,
             config,
@@ -316,14 +416,15 @@ class Studio:
                 raise AppError("revision_conflict", "Reload the latest conversation.", 409)
             history = await self.repository.effective_history(session)
             project_id = session["project_id"]
+        registry = await self.workspace_registry(project_id)
         inspection, _ = await self._prepare(
             request.preset,
-            config,
+            self._effective_config(config, registry, request.model, request.access),
             history,
             request.input,
             request.variables,
             request.skills,
-            await self.workspace_registry(project_id),
+            registry,
         )
         return inspection
 
@@ -348,6 +449,7 @@ class Studio:
             )
         registry = await self.workspace_registry(session["project_id"])
         history = await self.repository.effective_history(session)
+        config = self._effective_config(config, registry, request.model, request.access)
         inspection, workspace_context = await self._prepare(
             preset,
             config,
@@ -377,6 +479,8 @@ class Studio:
             "project_id": session["project_id"],
             "workspace_context": [message.model_dump() for message in workspace_context],
             "prepared_request": inspection.prepared_request,
+            "access": request.access
+            or ("read-only" if config.sandbox_mode == "read-only" else "workspace-write"),
         }
         await self.repository.put_preview(
             preview.id, {**preview.model_dump(), "snapshot": snapshot}
@@ -409,51 +513,49 @@ class Studio:
 
     async def view(self, run_id: str) -> RunView:
         """Project persisted state without exposing editable configuration or secret values."""
-        run = await self.repository.run(run_id)
-        values = {
-            key: run[key]
-            for key in (
-                "id",
-                "session_id",
-                "status",
-                "stop_reason",
-                "messages",
-                "partial_output",
-                "latest_event_seq",
-                "approval",
-                "error",
-                "created_at",
-                "updated_at",
-                "usage",
-                "source_run_id",
+        views = await self.run_views(run_id=run_id)
+        if not views:
+            raise AppError("not_found", "The requested record does not exist.", 404)
+        return views[0]
+
+    async def run_views(
+        self, *, run_id: str | None = None, session_id: str | None = None
+    ) -> list[RunView]:
+        """Project one Run or a conversation's Runs with a constant number of queries."""
+        if session_id is not None:
+            await self.repository.session(session_id)
+        views = []
+        for value in await self.repository.run_projections(run_id=run_id, session_id=session_id):
+            pending = value.pop("open_calls")
+            active = next(
+                (
+                    call
+                    for call in reversed(pending)
+                    if call["kind"] == "tool" and call["status"] == "executing"
+                ),
+                None,
             )
-        }
-        values.update(
-            input=run["snapshot"]["input"],
-            workspace_root=run["snapshot"]["workspace_root"],
-            plan=latest_plan([Message.model_validate(item) for item in run["messages"]]),
-            preset_name=run["snapshot"]["preset"]["name"],
-            provider=run["snapshot"]["config"]["provider"]["adapter"],
-            unknown_calls=[
-                {"id": call["id"], "kind": call["kind"], "data": redact(call["data"])}
-                for call in await self.repository.trace(run_id)
-                if call["status"] == "outcome_unknown"
-            ],
-        )
-        active = next(
-            (
-                call
-                for call in reversed(await self.repository.trace(run_id))
-                if call["kind"] == "tool" and call["status"] == "executing"
-            ),
-            None,
-        )
-        values["active_tool"] = (
-            {"id": active["id"], "name": active["data"]["name"], **active["data"].get("output", {})}
-            if active
-            else None
-        )
-        return RunView.model_validate(values)
+            # Replay blocks (provider reasoning signatures) are evidence, not display data.
+            value["messages"] = [{**item, "blocks": []} for item in value["messages"]]
+            value.update(
+                plan=latest_plan([Message.model_validate(item) for item in value["messages"]]),
+                unknown_calls=[
+                    {"id": call["id"], "kind": call["kind"], "data": redact(call["data"])}
+                    for call in pending
+                    if call["status"] == "outcome_unknown"
+                ],
+                active_tool=(
+                    {
+                        "id": active["id"],
+                        "name": active["data"]["name"],
+                        **active["data"].get("output", {}),
+                    }
+                    if active
+                    else None
+                ),
+            )
+            views.append(RunView.model_validate(value))
+        return views
 
     async def approve(self, run_id: str, approval_id: str, decision: str) -> RunView:
         """Record one idempotent decision before resuming the interrupted checkpoint."""
@@ -490,11 +592,7 @@ class Studio:
             run = await self.repository.run(run_id)
             if run["status"] != "interrupted":
                 raise AppError("state_conflict", "Only interrupted Runs can be resumed.", 409)
-            uncertain = [
-                call
-                for call in await self.repository.trace(run_id)
-                if call["status"] == "outcome_unknown"
-            ]
+            uncertain = await self.repository.calls_with_status(run_id, ["outcome_unknown"])
             if set(request.resolutions) != {call["id"] for call in uncertain}:
                 raise AppError(
                     "recovery_required",
@@ -545,9 +643,18 @@ class Studio:
     async def save_config(self, value: StudioConfig) -> StudioConfig:
         """Apply optimistic version checks and invalidate stale MCP discovery."""
         previous = await self.repository.config()
-        from rtagent.infrastructure.workspace.toolchains import validate_toolchains
-
         await asyncio.to_thread(validate_toolchains, value.toolchain_roots, self.registry.workspace)
+        # The default model's connection comes from its provider. Reject an edit that changes
+        # the request format under a provider ID instead of silently discarding it.
+        resolved = resolve_model(value)
+        if value.provider.profile_id is not None and value.provider.adapter != resolved.adapter:
+            raise AppError(
+                "provider_mismatch",
+                f"provider.profile_id {value.provider.profile_id} is a {resolved.adapter} "
+                f"provider, not {value.provider.adapter}. Select a configured provider, or set "
+                "profile_id to null for an explicit endpoint.",
+            )
+        value = value.model_copy(update={"provider": resolved})
         saved = await self.repository.save_config(value)
         if saved.mcp_servers != previous.mcp_servers:
             self.registry.reset()
@@ -561,7 +668,7 @@ class Studio:
                 session["active_run_id"]
                 or session["compacting_id"]
                 or any(
-                    item["status"] in {"starting", "running", "stopping"}
+                    item["status"] in ACTIVE_PROCESSES
                     for item in await self.repository.list_processes(session_id)
                 )
             ):

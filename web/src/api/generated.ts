@@ -224,6 +224,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Credentials
+         * @description Report where named keys come from, for draft settings not saved yet.
+         */
+        get: operations["credentials_api_v1_credentials_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credentials/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Credential
+         * @description Store a key entered in Settings; the response never contains the value.
+         */
+        put: operations["save_credential_api_v1_credentials__name__put"];
+        post?: never;
+        /**
+         * Delete Credential
+         * @description Forget a stored key; an environment variable of the same name still applies.
+         */
+        delete: operations["delete_credential_api_v1_credentials__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/providers/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Provider Models
+         * @description List the models a provider serves, using the server-side key for its reference.
+         */
+        post: operations["provider_models_api_v1_providers_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Global Skills
+         * @description List bundled and global skills shared by every project.
+         */
+        get: operations["global_skills_api_v1_skills_get"];
+        /**
+         * Save Global Skill
+         * @description Create or update a global skill with conflict detection.
+         */
+        put: operations["save_global_skill_api_v1_skills_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Global Skill
+         * @description Load a bundled or global skill.
+         */
+        get: operations["global_skill_api_v1_skills__name__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Global Skill
+         * @description Delete a global skill whose current content the user has seen.
+         */
+        delete: operations["delete_global_skill_api_v1_skills__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config": {
         parameters: {
             query?: never;
@@ -910,7 +1022,7 @@ export interface components {
             /** Presets */
             presets: components["schemas"]["Preset-Output"][];
             /** Sessions */
-            sessions: components["schemas"]["SessionView"][];
+            sessions: components["schemas"]["SessionSummary"][];
             /** Folders */
             folders: components["schemas"]["FolderView"][];
             /** Projects */
@@ -923,6 +1035,12 @@ export interface components {
             };
             /** Workspace Root */
             workspace_root: string;
+            /** Credentials */
+            credentials: components["schemas"]["CredentialStatus"][];
+            /** Effort Levels */
+            effort_levels: {
+                [key: string]: string[];
+            };
         };
         /**
          * CallView
@@ -958,6 +1076,7 @@ export interface components {
              * @default 2
              */
             keep_recent_turns: number;
+            model?: components["schemas"]["ModelChoice"] | null;
         };
         /**
          * CompactionView
@@ -1057,6 +1176,29 @@ export interface components {
             compactions: components["schemas"]["CompactionView"][];
         };
         /**
+         * CredentialSave
+         * @description A key entered in Settings; it is stored on the server and never returned.
+         */
+        CredentialSave: {
+            /** Value */
+            value: string;
+        };
+        /**
+         * CredentialStatus
+         * @description Where a named key comes from, without its value; `hint` is the last four characters.
+         */
+        CredentialStatus: {
+            /** Name */
+            name: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "stored" | "environment" | "missing";
+            /** Hint */
+            hint: string | null;
+        };
+        /**
          * DraftPreviewRequest
          * @description Inspect an unsaved preset without creating a conversation or a saved preview.
          */
@@ -1081,6 +1223,9 @@ export interface components {
             };
             /** Skills */
             skills?: string[];
+            model?: components["schemas"]["ModelChoice"] | null;
+            /** Access */
+            access?: ("read-only" | "ask" | "workspace-write") | null;
         };
         /**
          * ErrorEnvelope
@@ -1285,6 +1430,30 @@ export interface components {
             tool_calls: components["schemas"]["ToolCall"][];
             /** Tool Call Id */
             tool_call_id: string | null;
+            /** Blocks */
+            blocks: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * ModelChoice
+         * @description The model selected for a Run: a configured provider (or `simulated`) and options.
+         */
+        ModelChoice: {
+            /** Provider Id */
+            provider_id: string;
+            /** Model */
+            model: string;
+            /** Reasoning Effort */
+            reasoning_effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
+        };
+        /**
+         * ModelList
+         * @description Model IDs a provider reports it serves.
+         */
+        ModelList: {
+            /** Models */
+            models: string[];
         };
         /**
          * PlanItem
@@ -1403,6 +1572,9 @@ export interface components {
             };
             /** Skills */
             skills?: string[];
+            model?: components["schemas"]["ModelChoice"] | null;
+            /** Access */
+            access?: ("read-only" | "ask" | "workspace-write") | null;
         };
         /**
          * ProcessInput
@@ -1515,9 +1687,14 @@ export interface components {
         };
         /**
          * ProviderConfig
-         * @description Serializable provider options containing references, never API key values.
+         * @description The resolved model endpoint and options a Run uses; credentials are referenced by name.
+         *
+         *     `profile_id` names the configured provider this was resolved from (or `simulated`). Saved
+         *     settings use it as the default model; Run snapshots keep the fully resolved values.
          */
         "ProviderConfig-Input": {
+            /** Profile Id */
+            profile_id?: string | null;
             /**
              * Adapter
              * @default openai
@@ -1539,14 +1716,13 @@ export interface components {
              * @default OPENAI_API_KEY
              */
             credential_ref: string;
-            /**
-             * Temperature
-             * @default 0.2
-             */
-            temperature: number;
+            /** Reasoning Effort */
+            reasoning_effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
+            /** Temperature */
+            temperature?: number | null;
             /**
              * Max Output Tokens
-             * @default 2048
+             * @default 8192
              */
             max_output_tokens: number;
             /** Context Window */
@@ -1554,9 +1730,14 @@ export interface components {
         };
         /**
          * ProviderConfig
-         * @description Serializable provider options containing references, never API key values.
+         * @description The resolved model endpoint and options a Run uses; credentials are referenced by name.
+         *
+         *     `profile_id` names the configured provider this was resolved from (or `simulated`). Saved
+         *     settings use it as the default model; Run snapshots keep the fully resolved values.
          */
         "ProviderConfig-Output": {
+            /** Profile Id */
+            profile_id: string | null;
             /**
              * Adapter
              * @default openai
@@ -1578,14 +1759,81 @@ export interface components {
              * @default OPENAI_API_KEY
              */
             credential_ref: string;
-            /**
-             * Temperature
-             * @default 0.2
-             */
-            temperature: number;
+            /** Reasoning Effort */
+            reasoning_effort: ("low" | "medium" | "high" | "xhigh" | "max") | null;
+            /** Temperature */
+            temperature: number | null;
             /**
              * Max Output Tokens
-             * @default 2048
+             * @default 8192
+             */
+            max_output_tokens: number;
+            /** Context Window */
+            context_window: number | null;
+        };
+        /**
+         * ProviderProfile
+         * @description A configured model endpoint: connection, key reference, known models and options.
+         */
+        "ProviderProfile-Input": {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Adapter
+             * @default openai
+             * @enum {string}
+             */
+            adapter: "openai" | "anthropic";
+            /** Base Url */
+            base_url: string;
+            /**
+             * Credential Ref
+             * @default
+             */
+            credential_ref: string;
+            /** Models */
+            models?: string[];
+            /** Temperature */
+            temperature?: number | null;
+            /**
+             * Max Output Tokens
+             * @default 8192
+             */
+            max_output_tokens: number;
+            /** Context Window */
+            context_window?: number | null;
+        };
+        /**
+         * ProviderProfile
+         * @description A configured model endpoint: connection, key reference, known models and options.
+         */
+        "ProviderProfile-Output": {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Adapter
+             * @default openai
+             * @enum {string}
+             */
+            adapter: "openai" | "anthropic";
+            /** Base Url */
+            base_url: string;
+            /**
+             * Credential Ref
+             * @default
+             */
+            credential_ref: string;
+            /** Models */
+            models: string[];
+            /** Temperature */
+            temperature: number | null;
+            /**
+             * Max Output Tokens
+             * @default 8192
              */
             max_output_tokens: number;
             /** Context Window */
@@ -1677,6 +1925,14 @@ export interface components {
             preset_name: string;
             /** Provider */
             provider: string;
+            /** Provider Id */
+            provider_id: string | null;
+            /** Model */
+            model: string | null;
+            /** Reasoning Effort */
+            reasoning_effort: string | null;
+            /** Access */
+            access: string | null;
             /** Usage */
             usage: {
                 [key: string]: unknown;
@@ -1736,6 +1992,39 @@ export interface components {
             project_id?: string | null;
         };
         /**
+         * SessionSummary
+         * @description Conversation metadata for navigation, without the committed message history.
+         */
+        SessionSummary: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Revision */
+            revision: number;
+            /** Active Run Id */
+            active_run_id: string | null;
+            /** Compaction Id */
+            compaction_id: string | null;
+            /** Compacting Id */
+            compacting_id: string | null;
+            /** Created At */
+            created_at: string;
+            /** Folder Id */
+            folder_id: string | null;
+            /** Project Id */
+            project_id: string | null;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /** Copied From Session Id */
+            copied_from_session_id: string | null;
+            /** Message Count */
+            message_count: number;
+        };
+        /**
          * SessionUpdate
          * @description Edit conversation metadata; an explicit null removes folder membership.
          */
@@ -1768,8 +2057,6 @@ export interface components {
             compaction_id: string | null;
             /** Compacting Id */
             compacting_id: string | null;
-            /** Messages */
-            messages: components["schemas"]["Message"][];
             /** Created At */
             created_at: string;
             /** Folder Id */
@@ -1783,6 +2070,10 @@ export interface components {
             archived: boolean;
             /** Copied From Session Id */
             copied_from_session_id: string | null;
+            /** Message Count */
+            message_count: number;
+            /** Messages */
+            messages: components["schemas"]["Message"][];
         };
         /**
          * SkillDocument
@@ -1799,6 +2090,12 @@ export interface components {
             builtin: boolean;
             /** Hash */
             hash: string;
+            /**
+             * Scope
+             * @default project
+             * @enum {string}
+             */
+            scope: "builtin" | "global" | "project";
             /** Content */
             content: string;
         };
@@ -1817,6 +2114,12 @@ export interface components {
             builtin: boolean;
             /** Hash */
             hash: string;
+            /**
+             * Scope
+             * @default project
+             * @enum {string}
+             */
+            scope: "builtin" | "global" | "project";
         };
         /**
          * SkillPackage
@@ -1890,6 +2193,8 @@ export interface components {
              * @default 0
              */
             revision: number;
+            /** Providers */
+            providers?: components["schemas"]["ProviderProfile-Input"][];
             provider?: components["schemas"]["ProviderConfig-Input"];
             /** Tools */
             tools?: {
@@ -1938,6 +2243,8 @@ export interface components {
              * @default 0
              */
             revision: number;
+            /** Providers */
+            providers: components["schemas"]["ProviderProfile-Output"][];
             provider: components["schemas"]["ProviderConfig-Output"];
             /** Tools */
             tools: {
@@ -2083,6 +2390,18 @@ export interface components {
             required: boolean;
             /** Default */
             default: unknown;
+        };
+        /**
+         * WorkspaceSkills
+         * @description A skill catalog with the reasons any skill folders could not be loaded.
+         */
+        WorkspaceSkills: {
+            /** Skills */
+            skills: components["schemas"]["SkillInfo"][];
+            /** Errors */
+            errors: {
+                [key: string]: string;
+            };
         };
         /**
          * WorkspaceView
@@ -2815,6 +3134,548 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Bootstrap"];
                 };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    credentials_api_v1_credentials_get: {
+        parameters: {
+            query?: {
+                name?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    save_credential_api_v1_credentials__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_credential_api_v1_credentials__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    provider_models_api_v1_providers_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderProfile-Input"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelList"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    global_skills_api_v1_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSkills"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    save_global_skill_api_v1_skills_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDocument"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    global_skill_api_v1_skills__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDocument"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_global_skill_api_v1_skills__name__delete: {
+        parameters: {
+            query: {
+                expected_hash: string;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Forbidden */
             403: {

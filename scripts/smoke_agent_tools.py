@@ -64,7 +64,9 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> str:
 
     _, found = await tool("search_files", {"pattern": "**/*.txt"})
     assert "src/deep/value.txt" in found["files"] and "root.txt" in found["files"]
-    assert all(".venv" not in path and "var/" not in path for path in found["files"])
+    assert all(".venv" not in path for path in found["files"])
+    # Only the configured data directory is runtime data; a project's var/ is ordinary.
+    assert "var/notes.txt" in found["files"]
     _, found = await tool(
         "search_text", {"query": "marker", "pattern": "**/*.txt", "case_sensitive": False}
     )
@@ -224,7 +226,8 @@ async def main() -> None:
             ),
             ".env": "DO_NOT_SEARCH",
             ".venv/hidden.txt": "DO_NOT_SEARCH",
-            "var/private.txt": "DO_NOT_SEARCH",
+            "state/cache.sqlite": "DO_NOT_SEARCH",
+            "var/notes.txt": "project var folder",
         }
         for name, text in fixtures.items():
             target = workspace / name

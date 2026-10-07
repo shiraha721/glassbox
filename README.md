@@ -1,12 +1,20 @@
 # Security Agent Studio
 
-A local agent workspace for coding, reverse engineering, CTF challenges, and debugging, with composable prompts and inspectable model/tool execution.
+A local agent workspace for coding, debugging, reverse engineering, CTF challenges and other authorized security work. One tool-using agent works in your project folder, runs commands in an OS sandbox without network access, and records every model request and tool result for inspection.
 
-Project documentation and system design live in [docs/](docs/README.md):
+```bash
+uv sync --dev --locked && npm --prefix web ci && npm --prefix web run build
+uv run rtagent serve    # http://127.0.0.1:8001
+```
 
-- [Project guide](docs/README.md): current capabilities, setup, usage, verification, and delivery stages.
-- [System architecture](docs/architecture.md): layers, ownership, execution flow, data, APIs, and isolation.
-- [Architecture reference](docs/reference/README.md): every module/function, design reasons, dependencies, and source links.
-- [Development guide](docs/development.md): engineering conventions, behavioral invariants, and validation commands.
+Then add a provider and its API key in **Settings → Providers** and pick a model under the message box. `.env` can seed providers instead (see `.env.example`).
+
+Documentation lives in [docs/](docs/README.md):
+
+- [Project guide](docs/README.md): installation, model setup, using the studio, isolation and permissions, troubleshooting.
+- [Architecture](docs/architecture.md): how a task becomes a recorded Run, the data model, sandboxes, providers and API.
+- [Development guide](docs/development.md): conventions, invariants, commands and testing.
+- [Harness interfaces](docs/harness.md): CLI, JSON-RPC, Python client, embedding and extensions.
+- [Review 2026-10-06](docs/review.md): the latest assessment and changes, with the 2026-10-07 settings follow-up.
 
 Coding agents start with [AGENTS.md](AGENTS.md).

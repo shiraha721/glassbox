@@ -16,6 +16,7 @@ dist/
 web/node_modules/
 web/dist/
 web/test-results/
+test-results/
 web/playwright-report/
 web/src/api/schema.json
 .coverage

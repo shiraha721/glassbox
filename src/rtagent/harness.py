@@ -5,10 +5,19 @@ from typing import Any
 
 from rtagent.application.runner import Runner
 from rtagent.application.studio import Studio
-from rtagent.domain import AppError, PreviewRequest, ResumeRequest, RunView, uid
+from rtagent.domain import (
+    AppError,
+    ModelChoice,
+    PreviewRequest,
+    ResumeRequest,
+    RunView,
+    WorkspaceAccess,
+    uid,
+)
 from rtagent.domain.hooks import Hooks
 from rtagent.domain.lifecycle import TERMINAL
 from rtagent.infrastructure.config import Settings
+from rtagent.infrastructure.credentials import CredentialStore
 from rtagent.infrastructure.storage import Repository
 from rtagent.infrastructure.tools import ToolRegistry
 
@@ -20,7 +29,10 @@ class Harness:
         """Prepare resources without I/O; register explicit trusted tools before entering the context."""
         self.settings = settings or Settings()
         self.repository = Repository(self.settings.database_url)
-        self.registry = ToolRegistry(self.settings.workspace_root, self.settings.data_dir)
+        self.credentials = CredentialStore(self.settings.data_dir.resolve() / "credentials.json")
+        self.registry = ToolRegistry(
+            self.settings.workspace_root, self.settings.data_dir, self.credentials
+        )
         self.runner = Runner(
             self.repository,
             self.registry,
@@ -73,8 +85,12 @@ class Harness:
         variables: dict[str, Any] | None = None,
         skills: list[str] | None = None,
         key: str | None = None,
+        model: ModelChoice | None = None,
+        access: WorkspaceAccess | None = None,
     ) -> RunView:
-        """Submit observed revisions without requiring Preview and return the durable Run immediately."""
+        """Submit observed revisions without requiring Preview and return the durable Run immediately.
+
+        `model` and `access` apply to this Run only; by default the saved settings apply."""
         if not self.entered:
             raise AppError("harness_closed", "Enter the Harness context before submitting work.")
         session = (
@@ -93,6 +109,8 @@ class Harness:
                 input=task,
                 variables=variables or {},
                 skills=skills or [],
+                model=model,
+                access=access,
             ),
             key or uid(),
         )

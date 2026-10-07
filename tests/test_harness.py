@@ -36,7 +36,7 @@ async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, 
         session = await harness.repository.session(first.session_id)
         gate, release = asyncio.Event(), asyncio.Event()
 
-        async def summarizer(_config, _compiled, _tools, _prepared, on_wire):
+        async def summarizer(_config, _compiled, _tools, _prepared, on_wire, _key=""):
             """Hold a derived result until a real versioned conversation edit commits."""
             await on_wire(None)
             gate.set()
@@ -156,7 +156,7 @@ async def test_trusted_guard_is_never_called_before_core_denial(tmp_path, monkey
         executions.append(True)
         return "Unexpected execution"
 
-    async def model(_config, compiled, _tools, _prepared, on_wire):
+    async def model(_config, compiled, _tools, _prepared, on_wire, _key=""):
         """Request a deliberately unexposed tool to exercise backend policy independently."""
         await on_wire(None)
         message = (
@@ -192,3 +192,31 @@ async def test_trusted_guard_is_never_called_before_core_denial(tmp_path, monkey
         finished = await harness.wait(view.id, 10)
         assert finished.status == "succeeded"
         assert "tool_denied" in finished.messages[1].content and not guards and not executions
+
+
+async def test_mcp_tools_are_rediscovered_after_restart(tmp_path):
+    """Saved MCP permissions keep working after a restart without a manual refresh."""
+    import sys
+    from pathlib import Path
+
+    from rtagent.domain import MCPServer
+
+    fixture = Path(__file__).parent / "fixtures" / "mcp_server.py"
+    settings = Settings(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    )
+    async with Harness(settings) as harness:
+        config = await harness.repository.config()
+        config.mcp_servers = [
+            MCPServer(name="Fixture", command=sys.executable, args=[str(fixture.resolve())])
+        ]
+        config = await harness.studio.save_config(config)
+        tools = await harness.registry.discover(config)
+        name = next(tool.name for tool in tools if tool.original_name == "fixture_echo")
+        config.tools[name] = "allow"
+        await harness.studio.save_config(config)
+    async with Harness(settings) as harness:
+        assert name not in harness.registry.catalog
+        run = await harness.wait((await harness.run(f'/tool {name} {{"text": "again"}}')).id, 30)
+        assert run.status == "succeeded", run.error
+        assert "MCP evidence: again" in run.messages[1].content

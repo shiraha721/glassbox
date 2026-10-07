@@ -347,11 +347,18 @@ async def http_workflow(base_url: str, fixture: FastAPI) -> None:
             assert exc.status in {403, 422}
         boot = await client.request("GET", "/bootstrap")
         config = boot["config"]
+        config["providers"].append(
+            {
+                "id": "fixture-messages",
+                "name": "Messages fixture",
+                "adapter": "anthropic",
+                "base_url": "http://127.0.0.1:8773/v1",
+                "credential_ref": "",
+                "models": ["fixture-messages"],
+            }
+        )
         config["provider"].update(
-            adapter="anthropic",
-            base_url="http://127.0.0.1:8773/v1",
-            model="fixture-messages",
-            credential_ref="",
+            profile_id="fixture-messages", adapter="anthropic", model="fixture-messages"
         )
         await client.request("PUT", "/config", config)
         started = await client.run("Read evidence.txt and report it.")
@@ -378,7 +385,7 @@ async def http_workflow(base_url: str, fixture: FastAPI) -> None:
 async def main() -> None:
     """Keep test services/data separate and await every process/connection during cleanup."""
     with tempfile.TemporaryDirectory(
-        prefix="rtagent-stage4-", ignore_cleanup_errors=True
+        prefix="rtagent-harness-", ignore_cleanup_errors=True
     ) as temporary:
         root = Path(temporary)
         workspace = root / "workspace"

@@ -13,7 +13,8 @@ import uvicorn
 from rtagent.domain import ProviderConfig, StudioConfig, ToolCall, ToolDefinition
 from rtagent.domain.hooks import Hooks
 from rtagent.harness import Harness
-from rtagent.infrastructure.config import Settings, resolve_secret
+from rtagent.infrastructure.config import Settings
+from rtagent.infrastructure.credentials import CredentialStore
 from rtagent.infrastructure.workspace.files import Workspace
 from rtagent.interfaces.client import AgentClient
 from rtagent.interfaces.http.app import create_app
@@ -30,6 +31,20 @@ FIXTURES = {
     "check.py": '"""Independent immutable acceptance check."""\nimport json\nimport subprocess\nimport sys\nfrom pipeline.records import records\nfrom pipeline.aggregate import summarize\n\nexpected = {"counts": {"login": 4, "logout": 2}, "users": ["alice", "bob", "charlie", "quoted, user"], "total": 6}\nassert summarize(records("data/events.csv")) == expected\nreply = subprocess.run([sys.executable, "cli.py", "data/other.csv"], check=True, capture_output=True, text=True)\nassert json.loads(reply.stdout) == {"counts": {"logout": 1}, "users": ["bob"], "total": 1}\nprint("RIVER_CHECK_OK")\n',
     "KEEP.txt": "Unrelated evidence must remain unchanged.\n",
 }
+
+
+def service_key(provider: ProviderConfig) -> str:
+    """Resolve the running service's key, whether saved in Settings or in the environment."""
+    store = CredentialStore(Settings().data_dir.resolve() / "credentials.json")
+    return store.resolve(provider.credential_ref)
+
+
+def share_key(provider: ProviderConfig, settings: Settings) -> None:
+    """Give an isolated acceptance service the same key without printing or committing it."""
+    if provider.credential_ref:
+        CredentialStore(settings.data_dir / "credentials.json").save(
+            provider.credential_ref, service_key(provider)
+        )
 
 
 async def guard(call: ToolCall, _config: StudioConfig) -> str | None:
@@ -145,10 +160,12 @@ async def main() -> None:
     if (
         provider.adapter != "openai"
         or not provider.model
-        or (provider.credential_ref and not resolve_secret(provider.credential_ref))
+        or (provider.credential_ref and not service_key(provider))
     ):
         parser.error("Configure the real OpenAI-compatible provider on port 8001 first.")
-    root = (Path("var") / ("stage34-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))).resolve()
+    root = (
+        Path("var") / ("daily-harness-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
+    ).resolve()
     workspace = root / "workspace"
     workspace.mkdir(parents=True)
     for name, text in FIXTURES.items():
@@ -164,13 +181,17 @@ async def main() -> None:
         _env_file=None,
     )
     summaries = []
+    share_key(provider, settings)
     server, serving = await serve(settings)
     try:
         async with AgentClient("http://127.0.0.1:8775") as client:
             boot = await client.request("GET", "/bootstrap")
             config = boot["config"]
             config["provider"] = provider.model_copy(
-                update={"max_output_tokens": max(4096, provider.max_output_tokens)}
+                update={
+                    "max_output_tokens": max(4096, provider.max_output_tokens),
+                    "profile_id": None,
+                }
             ).model_dump()
             config["toolchain_roots"] = [str(Path(sys.base_prefix).resolve())]
             config["tools"]["workspace_summary"] = "allow"
@@ -341,11 +362,12 @@ async def main() -> None:
         openai_model=provider.model,
         _env_file=None,
     )
+    share_key(provider, embed_settings)
     embedded = Harness(embed_settings, Hooks(before_tool=guard))
     configure(embedded)
     async with embedded:
         config = await embedded.repository.config()
-        config.provider = provider
+        config.provider = provider.model_copy(update={"profile_id": None})
         config.tools["workspace_summary"] = "allow"
         await embedded.studio.save_config(config)
         view = await embedded.run(

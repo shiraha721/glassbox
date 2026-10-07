@@ -115,15 +115,35 @@ class Preset(Contract):
     blocks: list[Block] = Field(default_factory=list, max_length=100)
 
 
-class ProviderConfig(Contract):
-    """Serializable provider options containing references, never API key values."""
+ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
+# Effort levels each request format accepts. Chat Completions takes reasoning_effort; the
+# Messages API takes output_config.effort. Unsupported levels are rejected, never rewritten.
+EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
+    "openai": ("low", "medium", "high"),
+    "anthropic": ("low", "medium", "high", "xhigh", "max"),
+}
+# The pseudo provider ID that selects the offline simulated model.
+SIMULATED = "simulated"
+# The native command tool of this operating system; settings name the shell they permit.
+SHELL_TOOL = "powershell" if os.name == "nt" else "bash"
 
+
+class ProviderConfig(Contract):
+    """The resolved model endpoint and options a Run uses; credentials are referenced by name.
+
+    `profile_id` names the configured provider this was resolved from (or `simulated`). Saved
+    settings use it as the default model; Run snapshots keep the fully resolved values."""
+
+    profile_id: str | None = None
     adapter: Literal["fake", "openai", "anthropic"] = "openai"
     model: str = ""
     base_url: str = "https://api.openai.com/v1"
     credential_ref: str = "OPENAI_API_KEY"
-    temperature: float = Field(default=0.2, ge=0, le=2)
-    max_output_tokens: int = Field(default=2048, ge=1, le=32768)
+    reasoning_effort: ReasoningEffort | None = None
+    # None leaves sampling to the provider; current Claude models reject the parameter.
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    # Tool calls that write files need room; 2048 truncated ordinary edits mid-argument.
+    max_output_tokens: int = Field(default=8192, ge=1, le=128_000)
     context_window: int | None = Field(default=None, ge=256)
 
     @field_validator("credential_ref")
@@ -137,6 +157,65 @@ class ProviderConfig(Contract):
     def safe_url(cls, value: str) -> str:
         """Reject credentials embedded in a serialized provider URL."""
         return endpoint_url(value)
+
+
+class ProviderProfile(Contract):
+    """A configured model endpoint: connection, key reference, known models and options."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")
+    name: str = Field(min_length=1, max_length=60)
+    adapter: Literal["openai", "anthropic"] = "openai"
+    base_url: str = Field(min_length=1)
+    credential_ref: str = ""
+    models: list[str] = Field(default_factory=list, max_length=500)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_output_tokens: int = Field(default=8192, ge=1, le=128_000)
+    context_window: int | None = Field(default=None, ge=256)
+
+    @field_validator("credential_ref")
+    @classmethod
+    def credential_name(cls, value: str) -> str:
+        """Store the name of the key, never its value."""
+        return credential_reference(value)
+
+    @field_validator("base_url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        """Keep credentials and query strings out of the stored URL."""
+        return endpoint_url(value)
+
+    @field_validator("models")
+    @classmethod
+    def model_ids(cls, value: list[str]) -> list[str]:
+        """Keep a sorted list of distinct, nonempty model IDs."""
+        if any(not item.strip() or len(item) > 200 for item in value):
+            raise ValueError("Model IDs must be nonempty and at most 200 characters.")
+        return sorted(set(item.strip() for item in value))
+
+
+class ModelChoice(Contract):
+    """The model selected for a Run: a configured provider (or `simulated`) and options."""
+
+    provider_id: str = Field(min_length=1, max_length=40)
+    model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
+
+
+# Read only: no workspace changes. Ask: changes and commands need approval. Workspace write:
+# the configured tool permissions apply unchanged.
+WorkspaceAccess = Literal["read-only", "ask", "workspace-write"]
+
+
+def default_providers() -> list[ProviderProfile]:
+    """Seed one OpenAI-compatible endpoint that reads its key from OPENAI_API_KEY."""
+    return [
+        ProviderProfile(
+            id="openai",
+            name="OpenAI-compatible",
+            base_url="https://api.openai.com/v1",
+            credential_ref="OPENAI_API_KEY",
+        )
+    ]
 
 
 class MCPServer(Contract):
@@ -192,7 +271,11 @@ class StudioConfig(Contract):
     """Version provider, tool permissions, connections, and execution limits together."""
 
     revision: int = Field(default=0, ge=0)
-    provider: ProviderConfig = Field(default_factory=ProviderConfig)
+    providers: list[ProviderProfile] = Field(default_factory=default_providers, max_length=20)
+    # The default model; Runs may choose another and snapshot the resolved result.
+    provider: ProviderConfig = Field(
+        default_factory=lambda: ProviderConfig(profile_id="openai", temperature=None)
+    )
     tools: dict[str, Literal["allow", "ask", "deny"]] = Field(
         default_factory=lambda: {
             "read_text": "allow",
@@ -209,7 +292,7 @@ class StudioConfig(Contract):
             "send_process_input": "ask",
             "stop_process": "allow",
             "fetch_url": "ask",
-            "powershell" if os.name == "nt" else "bash": "allow",
+            SHELL_TOOL: "allow",
             "read_memory": "allow",
             "save_memory": "allow",
             "load_skill": "allow",
@@ -226,6 +309,15 @@ class StudioConfig(Contract):
     tool_timeout: float = Field(default=60, ge=0.1, le=300)
     run_timeout: float = Field(default=600, ge=1, le=3600)
 
+    @field_validator("providers")
+    @classmethod
+    def unique_providers(cls, value: list[ProviderProfile]) -> list[ProviderProfile]:
+        """Provider IDs identify a Run's model choice, so they must be unique."""
+        identifiers = [profile.id for profile in value]
+        if len(set(identifiers)) != len(identifiers) or SIMULATED in identifiers:
+            raise ValueError("Provider IDs must be unique and cannot be 'simulated'.")
+        return value
+
     @field_validator("network_hosts")
     @classmethod
     def exact_hosts(cls, value: list[str]) -> list[str]:
@@ -236,6 +328,47 @@ class StudioConfig(Contract):
             if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?", host) or ".." in host:
                 raise ValueError("Use lowercase exact hostnames without ports, URLs or wildcards.")
         return list(dict.fromkeys(value))
+
+
+def resolve_model(config: StudioConfig, choice: ModelChoice | None = None) -> ProviderConfig:
+    """Resolve a model choice (or the saved default) against the configured providers.
+
+    The result carries everything a request needs, so a Run snapshot stays reproducible after
+    provider settings change. A saved default without a profile is used as stored."""
+    current = config.provider
+    if choice is not None:
+        provider_id, model, effort = choice.provider_id, choice.model, choice.reasoning_effort
+    elif current.profile_id is not None:
+        provider_id, model, effort = current.profile_id, current.model, current.reasoning_effort
+    else:
+        return current
+    if provider_id == SIMULATED:
+        return ProviderConfig(
+            profile_id=SIMULATED,
+            adapter="fake",
+            model="simulated",
+            base_url="",
+            credential_ref="",
+            max_output_tokens=current.max_output_tokens,
+        )
+    profile = next((item for item in config.providers if item.id == provider_id), None)
+    if profile is None:
+        raise AppError("provider_unknown", f"Provider {provider_id} is not configured.")
+    if effort and effort not in EFFORT_LEVELS[profile.adapter]:
+        raise AppError(
+            "reasoning_effort", f"{profile.name} does not accept reasoning effort {effort}."
+        )
+    return ProviderConfig(
+        profile_id=profile.id,
+        adapter=profile.adapter,
+        model=model,
+        base_url=profile.base_url,
+        credential_ref=profile.credential_ref,
+        reasoning_effort=effort,
+        temperature=profile.temperature,
+        max_output_tokens=profile.max_output_tokens,
+        context_window=profile.context_window,
+    )
 
 
 class ToolCall(Contract):
@@ -254,6 +387,9 @@ class Message(Contract):
     source: str = "runtime"
     tool_calls: list[ToolCall] = Field(default_factory=list)
     tool_call_id: str | None = None
+    # Provider content blocks to send back unchanged within the same Run, such as Messages
+    # API thinking blocks with their signatures. Empty for most messages.
+    blocks: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PlanItem(Contract):
@@ -320,6 +456,9 @@ class PreviewRequest(Contract):
     input: str = Field(min_length=1, max_length=100_000)
     variables: dict[str, Any] = Field(default_factory=dict)
     skills: list[str] = Field(default_factory=list, max_length=20)
+    # Per-Run choices; omitted values use the saved default model and workspace policy.
+    model: ModelChoice | None = None
+    access: WorkspaceAccess | None = None
 
 
 class DraftPreviewRequest(Contract):
@@ -333,6 +472,8 @@ class DraftPreviewRequest(Contract):
     input: str = Field(default="", max_length=100_000)
     variables: dict[str, Any] = Field(default_factory=dict)
     skills: list[str] = Field(default_factory=list, max_length=20)
+    model: ModelChoice | None = None
+    access: WorkspaceAccess | None = None
 
 
 class MemoryDocument(Contract):
@@ -358,6 +499,15 @@ class SkillInfo(Contract):
     path: str
     builtin: bool
     hash: str
+    # Bundled with the app, shared by every project (global), or in this project.
+    scope: Literal["builtin", "global", "project"] = "project"
+
+
+class WorkspaceSkills(Contract):
+    """A skill catalog with the reasons any skill folders could not be loaded."""
+
+    skills: list[SkillInfo]
+    errors: dict[str, str]
 
 
 class SkillDocument(SkillInfo):
@@ -401,6 +551,20 @@ class SkillPackage(Contract):
         ):
             raise ValueError("Package files are limited to 64 KiB each and 1 MiB total.")
         return value
+
+
+class CredentialStatus(Contract):
+    """Where a named key comes from, without its value; `hint` is the last four characters."""
+
+    name: str
+    source: Literal["stored", "environment", "missing"]
+    hint: str | None = None
+
+
+class CredentialSave(Contract):
+    """A key entered in Settings; it is stored on the server and never returned."""
+
+    value: str = Field(min_length=1, max_length=8192)
 
 
 class SandboxStatus(Contract):
@@ -583,6 +747,7 @@ class CompactRequest(Contract):
     expected_revision: int = Field(ge=0)
     config_revision: int = Field(ge=0)
     keep_recent_turns: int = Field(default=2, ge=1, le=10)
+    model: ModelChoice | None = None
 
 
 class ContextRestore(Contract):
@@ -623,8 +788,8 @@ class ContextView(Contract):
     compactions: list[CompactionView]
 
 
-class SessionView(Contract):
-    """Conversation history containing only committed successful turns."""
+class SessionSummary(Contract):
+    """Conversation metadata for navigation, without the committed message history."""
 
     id: str
     title: str
@@ -632,12 +797,18 @@ class SessionView(Contract):
     active_run_id: str | None
     compaction_id: str | None = None
     compacting_id: str | None = None
-    messages: list[Message]
     created_at: str
     folder_id: str | None = None
     project_id: str | None = None
     archived: bool = False
     copied_from_session_id: str | None = None
+    message_count: int
+
+
+class SessionView(SessionSummary):
+    """Conversation history containing only committed successful turns."""
+
+    messages: list[Message]
 
 
 class RunView(Contract):
@@ -658,6 +829,10 @@ class RunView(Contract):
     updated_at: str
     preset_name: str
     provider: str
+    provider_id: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
+    access: str | None = None
     usage: dict[str, Any]
     source_run_id: str | None = None
     unknown_calls: list[dict[str, Any]] = Field(default_factory=list)

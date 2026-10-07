@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Search, Wrench, X } from 'lucide-react';
-import type { Config, Tool } from '../../api/client';
+import type { Config, Tool, WorkspaceAccess } from '../../api/client';
 
 const groups = {
   'Files and search': [
@@ -148,11 +148,13 @@ export function ToolCatalog({
 export function ToolsPanel({
   tools,
   config,
+  access,
   onClose,
   onSettings,
 }: {
   tools: Tool[];
   config: Config;
+  access: WorkspaceAccess;
   onClose: () => void;
   onSettings: () => void;
 }) {
@@ -169,7 +171,13 @@ export function ToolsPanel({
         <ToolCatalog tools={tools} config={config} />
       </div>
       <div className="panel-footer">
-        <span className="subtle">Run freezes tools and permissions.</span>
+        <span className="subtle">
+          {access === 'read-only'
+            ? 'Shown for read-only access.'
+            : access === 'ask'
+              ? 'Shown for ask before changes.'
+              : 'Each run freezes its tools and permissions.'}
+        </span>
         <button className="button" onClick={onSettings}>
           Edit permissions
         </button>

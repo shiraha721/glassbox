@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Terminal, X } from 'lucide-react';
 import { request, errorMessage, type Session } from '../../api/client';
 import type { components } from '../../api/generated';
+import { StatusBadge } from '../../shared/StatusBadge';
 
 type Process = components['schemas']['ProcessView'];
 const active = new Set(['starting', 'running', 'stopping']);
@@ -61,7 +62,7 @@ export function ProcessesPanel({ session, onClose }: { session: Session; onClose
         {[...(query.data || [])].reverse().map((item) => (
           <article className="process-card" key={item.id}>
             <div className="row">
-              <strong>{item.status.replaceAll('_', ' ')}</strong>
+              <StatusBadge status={item.status} />
               <span className="subtle">
                 PID {item.pid ?? 'pending'} · {item.mode}
               </span>

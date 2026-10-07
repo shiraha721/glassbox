@@ -1,207 +1,126 @@
-# Development Guide
+# Development guide
 
-This guide applies to the entire repository and defines project constraints and working conventions for developers and coding agents. The root [AGENTS.md](../AGENTS.md) directs agents here.
+Conventions and constraints for everyone changing this repository, including coding agents (the root [AGENTS.md](../AGENTS.md) points here). Read the [project guide](README.md) and [architecture](architecture.md) first, then the modules you are changing; the code is the authority on what is implemented.
 
-## Project Goals and Current Stage
+## Principles
 
-Security Agent Studio is a prompt orchestration platform for authorized security workflows, including reverse engineering, code analysis, CTF challenges, and debugging.
-Its core value is composable message blocks, inspectable final model inputs, controlled tool calls, and comparable execution records.
+- **Keep the single-user local workflow simple.** No accounts, login, access tokens, extra services, queues or plugin frameworks. Prefer removing code to adding configuration switches or abstractions. Introduce an interface only when a second implementation actually exists.
+- **Run works directly from a task.** Preview is optional inspection through the same compiler, never a gate. Never fall back to simulation silently.
+- **Evidence over convenience.** Keep Run snapshots immutable, message roles and sources intact, every tool call paired with one result, revision checks on edits, and provenance on copies. Copies never replay effects or clone checkpoints.
+- **Real isolation.** Use bubblewrap with Bash on Linux and AppContainer with PowerShell on Windows. Never replace OS isolation with host execution or require WSL.
+- **Secrets stay on the server.** Resolve credentials from environment variable names at the moment of use. Keep secret values out of snapshots, prompts, logs, browser storage and Git.
+- **Finish one vertical workflow at a time:** UI, API, persistence, execution feedback and tests together. Check the real service behaves as intended before broadening tests.
 
-As of 2026-10-05, Stages 1–4 are implemented and the Windows daily-agent/shared-harness workflows are accepted. The [code and architecture review](review.md) covers native folder selection, lifecycle corrections and maintenance refactoring. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md), [Stage 2 acceptance](acceptance-stage2.md) and the [Codex capability review](codex-gap-review.md). Linux acceptance and an external Claude endpoint check remain unperformed. Inspect actual files and delivery boundaries before work.
+## Behavioral invariants
 
-The first release must deliver both a working Web UI and a complete backend workflow. The runtime uses a single-agent tool loop.
-Multi-agent orchestration, batch evaluation, PostgreSQL, and team deployment belong to later phases.
+These are relied on by recovery, inspection and the security model. Changing one is a design change: update the architecture document and tests with it.
 
-Keep the local single-user workflow simple: open the workspace directly, with no accounts, login screen, workspace access token, or lock feature. Prefer removing unnecessary code and steps over adding configuration switches or abstractions. Validate changes against the running service before expanding tests.
+**Prompts**
 
-Run must work directly from task input. Preview is optional inspection using the same compiler, never a UI gate. Keep Base URL, model, and credential references configurable through .env and Settings. Never silently fall back to simulation.
+- Compilation is pure and deterministic: same inputs, same messages, sources and hash.
+- Blocks use only system, user and assistant roles; the runtime creates tool messages. Ordering follows [prompt compilation](architecture.md#prompt-compilation). The current input appears exactly once.
+- Duplicate IDs or orders, undeclared or missing variables and malformed conditions are errors. Blocks are never silently dropped, re-roled or moved; each has an activation reason.
+- Conditions use the restricted structured grammar. No `eval`, attribute access or template code.
+- Provider adaptation that changes structure (such as extracting system messages) must be listed in the request's transformations; adaptation that would lose information is rejected.
+- Over-budget context fails with a reason. Compaction is explicit, reversible and source-checked; there is no hidden trimming.
 
-Read in this order:
+**Execution**
 
-1. [README.md](README.md): product goals, scope, and delivery status.
-2. [architecture.md](architecture.md): module boundaries, data models, interfaces, and acceptance criteria.
-3. The relevant modules, tests, and project configuration. Use commands supported by the configuration that actually exists.
+- The loop is `model → tools → model` in one LangGraph graph with `thread_id = run_id`. Do not nest another agent loop.
+- Every model tool call keeps its `tool_call_id` and receives exactly one result before the next model call.
+- The model sees only tools that are permitted in the frozen settings (and non-mutating ones in read-only mode). Permissions, schema validation and approvals are enforced on the server; prompts, files, tool output and model text cannot change them.
+- Persist intent before an effect and the outcome after it. A call interrupted mid-effect is `outcome_unknown` and is never retried without an explicit decision. Do not claim exactly-once execution for external effects.
+- Budgets bound steps, tool calls, time and output. Cancellation awaits local cleanup; it does not claim to undo effects.
+- Each Run binds to one frozen workspace root. Background processes belong to their original Run, conversation and root, never restart from records, and block archive, delete and workspace moves while running.
 
-The [Architecture Reference](reference/README.md) maps every implemented module, class, function, callback, and dependency to its purpose, mechanism, design reason, architectural layer, and source location. Keep the corresponding entry and source link synchronized when changing behavior.
+**Data**
 
-## Module Structure and Dependency Direction
+- Edits carry the revision they were based on. Editing settings or presets never alters existing Runs.
+- Record canonical messages, the prepared request and the actual outbound body separately for every model call. Unknown usage is `null`, never zero.
+- Event sequence numbers are persistent; reconnecting reads state and never starts work. A pending submission keeps its body and idempotency key together across retries.
+- Duplicates and forks copy saved evidence with new IDs and provenance; forks stop at a successful turn; folder deletion keeps its conversations.
+- Exports and default trace views are redacted and labelled as such.
 
-The implementation groups concrete source files by dependency layer. The [architecture module map](architecture.md#what-the-application-owns) gives the full layout. Split a module only for a concrete need. Presets own embedded blocks; one settings aggregate owns provider, MCP, permission, runtime/download and limit configuration. Preserve snapshots without a generic persistence or plugin framework.
+## Engineering conventions
 
-```text
-src/rtagent/
-  domain/                     Values and pure decisions; no adapters or resource ownership
-    models.py                 Typed contracts and canonical utilities
-    prompts.py, patches.py    Prompt compilation and exact text-hunk computation
-    policies.py               Frozen-schema validation and permission decisions
-    lifecycle.py              Shared immutable Run/process state membership
-    hooks.py, execution.py    Callback contracts and trusted effect ownership values
-  application/                Working workflows over concrete adapters
-    studio.py                 Task/context/recovery/project/package use cases
-    runner.py                 One LangGraph loop, checkpoints, budgets and receipts
-    context.py                Explicit source-bound summarization and evidence
-  infrastructure/             Database, providers, filesystem and OS implementations
-    storage.py                SQLite tables, writer transactions, history and receipts
-    config.py, tracing.py     Process settings, credential resolution, redacted views
-    tools.py, packages.py     Native/MCP/local dispatch and reusable data publication
-    providers/chat.py         OpenAI-compatible preparation/capture and explicit simulation
-    providers/messages.py     Messages text/tool mapping and SSE transport
-    workspace/                files.py, downloads.py, toolchains.py
-    sandbox/                  linux.py, windows.py, files.py, command_io.py, processes.py
-    desktop/                  folders.py and the Windows Shell helper windows_dialog.py
-  interfaces/                 HTTP, client, CLI and JSON-RPC adapters
-    http/app.py               Web composition/lifespan, ASGI errors/origins and SPA delivery
-    http/api.py               Typed routes and persistent SSE observation
-    client.py, cli.py, rpc.py  Existing-owner attachment and explicit commands
-  harness.py                  Shared concrete composition/resource owner for Web/embedding
-  main.py, cli.py, client.py   Stable aliases/launch guards; no duplicate implementations
-  __init__.py, __main__.py     Version and module entry point
-  skills/                     Bundled skill-creator, debugging and code-review resources
-web/src/
-  app/App.tsx                 Workspace composition, target selection and submission identity
-  features/chat/              Saved turns/plans, Context and owned process controls
-  features/history/           Conversation groups, menus and copy/metadata forms
-  features/projects/          Project navigation and OS directory selection
-  features/prompts/           Composer, reversible drafts and live preview hooks
-  features/inspection/        Preview and recorded request/effect evidence
-  features/workspace/         Memory/Skill editors and sandbox inspection
-  features/settings/          Versioned execution settings
-  features/tools/             Searchable schemas and effective tool permissions
-  shared/                     Json, PackageActions and useDialogFocus
-  api/                        HTTP/types and saved-event observation
-  main.tsx, style.css         Browser entry, QueryClient and fixed/scroll layout
+- **Python 3.12+**, dependencies with `uv` (commit `uv.lock`), Pydantic v2 models at boundaries, type annotations on public interfaces. Ruff for linting, Black and isort (Black profile) for formatting, line length 100.
+- **Frontend:** React, TypeScript (strict), Vite, TanStack Query; npm with `package-lock.json`; ESLint and Prettier. API types are generated from the backend schema, never written by hand. Styles use the design tokens at the top of `web/src/style.css`; add colors as tokens with light and dark values.
+- **Schema changes** go through an Alembic migration in `migrations/versions`. Never modify LangGraph's checkpoint tables directly.
+- **Child processes** use `pathlib` and argument lists; never concatenate shell strings on the host side. Blocking file or Win32 work runs off the event loop.
+- **Timestamps** are stored in UTC ISO format and displayed in local time.
+- **Language:** identifiers, docstrings, comments and documentation in English. Public classes and functions have docstrings that say what they guarantee; comments explain constraints and non-obvious decisions rather than restating code.
+- **Keep files at their functional paths:** documentation in `docs/`, bundled Skills in `src/rtagent/skills/`, test fixtures in `tests/fixtures/`. Never commit `.env`, databases, checkpoints, traces or credentials.
+
+## Commands
+
+From the repository root:
+
+```bash
+uv sync --dev --locked                 # install backend dependencies
+npm --prefix web ci                    # install frontend dependencies
+npm --prefix web run build             # build the UI served by the backend
+uv run rtagent serve                   # run the app at http://127.0.0.1:8001
+npm --prefix web run dev               # Vite dev server at :5173, proxying the API to :8001
 ```
 
-- `interfaces/http/api.py` adapts transport to Studio and existing atomic Repository operations. Keep multi-resource business decisions in `application`. Root entry aliases are never internal dependencies.
-- `domain` contains models, algorithms, lifecycle and ownership values. It must not import outer layers, FastAPI, databases, MCP, provider SDKs or native-pipe implementations. Infrastructure never imports application/interfaces; application never imports interfaces/composition. Shared callback types belong to domain, not an adapter.
-- `application` coordinates the concrete runtime, tool registry and repository. Harness owns their lifecycle for Web/embedding; AgentClient/CLI/RPC attach to a running service. Never open a second worker on the same data directory. Introduce dependency interfaces only when a second implementation actually needs them.
-- LangGraph controls execution; LangChain provides model/tool adapters. Do not nest another implicit tool loop inside a prebuilt agent.
-- The frontend obtains data, submits actions, and subscribes to events through the API. It must not connect directly to model providers, MCP, or the database.
-- Keep a modular monolith. Do not introduce microservices, message queues, vector databases, or a generic plugin marketplace for hypothetical needs.
+Checks:
 
-## Behavioral Invariants
-
-### Prompt Compilation
-
-- Compilation is pure computation: identical snapshot inputs produce identical message ordering, content, and source mappings, without network or database access.
-- Configured blocks support only `system`, `user`, and `assistant`. The runtime generates `tool` messages.
-- Sort by the placement and order rules in the design document. Report duplicate ordering, missing variables, and invalid conditions explicitly.
-- Use restricted structured expressions for conditions and substitute only declared variable names. Prohibit `eval`, `exec`, and arbitrary template code execution.
-- Preserve message roles, sources, and exclusion reasons. Never silently drop blocks, change roles, move blocks, or add unrecorded system instructions.
-- Record actual root, command language, configured isolation and exposed capabilities in the visible runtime:environment source. Preset focus changes behavior, not permission. Upgrade only exactly recognized unchanged built-in starter text.
-- Provider-required system field extraction, merging, and serialization changes must remain visible. Reject requests that cannot be adapted without loss.
-- Preview and execution share the same compilation path. Runs bind to immutable configuration, tool schemas, and session versions.
-- Insert the current user input exactly once. Do not repeatedly write rendered system blocks into conversation history.
-- Return an explainable error when context exceeds its budget. Explicit compaction freezes a complete-turn prefix, revision/hash/config and every no-tools provider receipt. Activate only a complete matching result; keep originals, roles/sources/tool pairing, null usage, copy provenance and restoration. Cancelled/crashed/stale reductions never activate or replay automatically. Do not introduce hidden automatic trimming.
-
-### Agents, Tools, and Recovery
-
-- Use native Windows AppContainer with PowerShell on Windows and bubblewrap with Bash on Linux. Do not require WSL for Windows execution. Never replace it with unrestricted host execution or present a cwd check as an OS sandbox. Preserve no-network behavior, hidden credentials/runtime paths, bounded output, and child-process cleanup.
-- Projects register one existing local folder; sessions bind to stable project IDs and Runs freeze their absolute root. Idle workspace moves affect future Runs only. Native tools and context are resolved from that root; the model cannot select a different project.
-- Use the OS folder dialog first; cancellation preserves selection and unavailable desktops enable manual entry. The helper is an explicit user action, never an agent tool. Preserve process cleanup and direct ASGI disconnect signals. An empty conversation selection stays a new draft.
-- Memory and Skills use ordinary files. Snapshot the first nonempty root AGENTS.override.md or AGENTS.md, memory and selected Skill content with source mapping. Load nested root-to-leaf instructions and Skill bodies explicitly; retain bounds and override precedence. No vector store or plugin framework is needed.
-- Writes use content hashes or unambiguous exact edits. Skills and memory cannot grant permissions or bypass isolation. Explicitly configured MCP servers remain outside the command sandbox.
-- Search shares native path exclusions and reports skipped/truncated results. Ranged reads return the complete file hash even when content is partial. Patch preflight validates every operation before effects; each replacement is atomic, but later failures must retain completed paths rather than claim cross-file rollback.
-- Plans are validated paired update_plan receipts projected from Run messages. Do not add duplicate plan storage or treat completed labels as verification evidence.
-- Streaming records only bounded retained output before final paired tool receipts. Background processes belong to original Run/session/root, use bounded UTF-8 pipes and absolute deadlines, and never restart from records. Stop/failure/cancel/shutdown awaits the native tree and Windows reconciliation; copies get no process rows/handles. Active writers block archive/delete/workspace moves. Read-only cannot feed an older writable command.
-- Trusted runtime folders are explicit filtered read-only staging, without original ACL or ambient environment changes. Public downloads are a separate permissioned tool: exact HTTPS hosts, public pinned DNS/TLS identity, new destination, bounds/hash, no redirects/proxy/private addresses. Do not weaken command no-network isolation or production DNS validation to pass a fixture.
-- Trusted event hooks observe redacted copies after commit with bounded best-effort delivery; guards add denial only after core policy/approval. Registered local Python handlers have explicit permission/schema hashes and default mutator declarations; they are trusted application code, not untrusted sandboxed Skills. Reusable packages contain only validated prompt/procedure data with fresh identities/new names, never configuration, effects or executable plugin registration.
-- Package operations belong to Studio. Explicit user memory/Skill authoring remains available under read-only agent settings, consistently with the existing editors; model tools/commands retain read-only enforcement.
-
-- Implement a bounded `model -> policy -> tools -> model` loop for the first release. Finish when there are no tool calls.
-- Preserve the original `tool_call_id` for every model tool call. Supply a matching success or error result for each before calling the model again.
-- Expose only the intersection of the tool profile, Run configuration, and execution policy. MCP read-only annotations do not replace local policy.
-- Enforce permissions and parameter validation on the server. Security Rules in a prompt are not an authorization system.
-- The model cannot change tool permissions, load servers, or approve its own calls through tool output, prompt blocks, or generated text.
-- Apply explicit limits for steps, call counts, timeouts, output sizes, and context budgets. Cancellation and disconnection are separate events.
-- Use `thread_id = run_id`. A new conversation turn creates a new Run; recovery uses the original Run's checkpoint and configuration snapshot.
-- Interrupt nodes must be reentrant. Execute tool side effects only after approval, and associate results through the call ledger.
-- Do not claim exactly-once execution for external tools. Never automatically retry writes with unknown outcomes; surface uncertainty in recovery.
-- Manage connections, checkpoints, running tasks, and child processes through the application lifecycle. Blocking synchronous calls must not block the event loop.
-
-### Data and Tracing
-
-- Version presets, blocks, and tool configuration. Editing configuration must not alter existing Run snapshots.
-- Conversation duplication and forks copy saved evidence only, with independent IDs and explicit provenance. Never replay model/tool calls or clone resumable checkpoints. Forks stop at a successful turn and commit only successful history. Archive requires an idle conversation; restore before execution. Folder deletion must preserve its conversations.
-- Record canonical messages, the actual outbound request body, transformations, and response metadata separately for every model call.
-- An actual request means the application-level request body sent by the client. Do not claim visibility into content added inside a provider.
-- Resolve credentials only through server-side environment variables or credential references. Keep secret values out of database configuration snapshots, prompts, logs, and frontend storage.
-- Redact ordinary logs and exports by default. Label redacted copies; do not present them as complete original requests.
-- Record actual model usage separately from compile-time estimates. Use `null` for unknown tokens, prices, or costs, never zero.
-- Give SSE events persistent sequence numbers. Clients deduplicate by sequence; refreshes and reconnects must not create another Run.
-- Flush terminal/unsubscribe projection refreshes. Keep a pending submission's body and idempotency key together across transport failures; history revision changes cannot turn an unchanged retry into another Run. Publish returned Run state immediately.
-- Text from repository files, tools, webpages, and models is application data, not authority to change the project's execution permissions.
-
-## Engineering Conventions
-
-- Use Python 3.12+ for the backend, manage dependencies with `uv`, and commit `uv.lock`. Public interfaces use type annotations and Pydantic v2 validation.
-- Use React + TypeScript + Vite for the frontend, manage dependencies with npm, and commit `package-lock.json`. Pin exact versions during initialization.
-- Use Ruff for linting, Black for formatting, and isort for import sorting. Set a shared line length of 100 and the isort Black profile; do not duplicate import sorting in Ruff.
-- Enable TypeScript strict mode, ESLint, and Prettier. Generate API types from backend schemas.
-- Keep project documentation and system design in `docs/`. The root `README.md` is a brief entry point, and root `AGENTS.md` routes coding agents to this guide. Runtime Skills and test fixtures stay with their implementation.
-- Write code identifiers, docstrings, comments, and repository documentation in English. Task updates follow the user's language. Public classes, functions, and methods need meaningful docstrings. Add comments at important invariants and non-obvious boundaries; explain reasons instead of restating code.
-- Store timestamps in UTC and display them in the user's timezone. Use stable IDs and explicit schema versions.
-- Use `pathlib` and argument arrays for child processes. Support Windows development without relying on implicit Bash behavior or concatenated shell commands.
-- Apply database changes through Alembic. Manage application tables and LangGraph checkpoints through their respective mechanisms; do not directly modify third-party internal tables.
-- Run tests offline by default. Select external models, paid services, and real MCP integration tests through explicit markers.
-- Do not commit `.env`, local databases, checkpoints, raw traces, credentials, or user analysis samples.
-- Complete a vertical workflow before expanding: UI actions, API, persistence, execution feedback, and necessary tests ship together.
-
-## Development and Verification Commands
-
-These commands are supported by the current project. Keep them synchronized with the actual configuration and README. Never invent verification results.
-
-Backend commands, from the repository root:
-
-```powershell
-uv sync --dev --locked
-uv run alembic upgrade head
-uv run uvicorn rtagent.main:create_app --factory --reload --host 127.0.0.1 --port 8001
-uv run python scripts/smoke_workspace.py
-uv run python scripts/smoke_conversations.py
-uv run python scripts/smoke_projects.py
-uv run python scripts/smoke_desktop.py
-uv run python scripts/smoke_agent_tools.py
-uv run python scripts/smoke_stage3.py
-uv run python scripts/smoke_stage4.py
-uv run pytest
+```bash
+uv run pytest                                       # backend tests (offline)
 uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations
 uv run isort --check-only src tests scripts migrations
-uv run python scripts/check_docs.py
-uv run python scripts/check_layers.py
+uv run python scripts/check_layers.py               # dependency direction, Python and TS
+uv run python scripts/check_docs.py                 # Markdown links and anchors
+npm --prefix web run lint
+npm --prefix web run typecheck
+npm --prefix web run format:check
+npm --prefix web run test -- --run                  # component tests
+npm --prefix web run build
+(cd web && npx playwright install chromium && npm run test:e2e)   # browser tests
 ```
 
-Frontend commands, from `web/`:
+After changing an API model, regenerate the client types and commit `web/src/api/generated.ts` (the intermediate `schema.json` is ignored):
 
-```powershell
-npm ci
-npm run dev
-npm run lint
-npm run typecheck
-npm run test -- --run
-npm run format:check
-npm run build
-npx playwright install chromium
-npm run test:e2e
+```bash
+uv run python scripts/export_api.py
+npm --prefix web run generate:api
 ```
 
-During initial setup, use `uv lock` and `npm install` to create lockfiles, then install from those lockfiles on subsequent runs.
-Before running browser tests for the first time, install the browsers required by the Playwright configuration.
-Build the frontend before browser tests; their isolated backend serves `web/dist`. Regenerate API types with `uv run python scripts/export_api.py`, then `npm --prefix web run generate:api`. Commit `web/src/api/generated.ts`; the intermediate schema is ignored.
+## Testing strategy
 
-With a configured real provider and the local service running, `uv run python scripts/acceptance_stage2.py --live` and `uv run python scripts/acceptance_agent_tools.py --live` provide opt-in external acceptance. Run them separately: both own isolated port 8768 and retain evidence under ignored var. The latter independently checks guarded Coding repairs and read-only Code review findings; default tests never make these model requests.
+| Layer | Where | What it should prove |
+| --- | --- | --- |
+| Pure logic | `tests/test_prompts.py`, parts of `test_tools.py` | Compiler ordering, conditions, variables, budgets; patch parsing and hunks; output buffering. |
+| Runtime and API | `tests/test_api.py`, `test_runtime.py`, `test_harness.py`, `test_review_regressions.py` | The real app over ASGI with the simulated provider: idempotency, approvals, cancellation, checkpoint recovery, uncertain effects, compaction, concurrency, origin checks. |
+| Adapters | `tests/test_providers.py`, `test_tools.py`, `test_sandbox.py`, `test_storage.py`, `test_config.py` | Captured provider requests and errors, MCP over stdio and HTTP, real bubblewrap isolation (skipped without it), migrations and revisions. |
+| UI components | `web/src/**/*.test.tsx` | Rendering decisions such as tool step pairing and preset editing. |
+| Browser | `web/e2e/studio.spec.ts` | End-to-end workflows against a real backend with temporary data. |
+| Live service | `scripts/smoke_*.py` | Start a real HTTP server on a fixed port with disposable data and exercise actual OS effects. |
+| Real model | `scripts/acceptance_*.py --live` | Opt-in work against the configured provider; may cost money. |
 
-`uv run python scripts/acceptance_stage34.py --live` owns port 8775 and accepts substantive coding, background input/cleanup, explicit compaction, continued CLI work, approval restart and an embedded trusted extension using the configured real OpenAI-compatible provider. Stage 3 smoke optionally accepts `--network --public-dns` for an actual public dependency transfer/offline import with a test-only public-DNS fixture. Production still rejects reserved VPN fake-IP answers. Stage 4 smoke owns ports 8772/8773 and distinguishes genuine HTTP/CLI/Messages transport behavior from simulated model decisions. See the acceptance documents for evidence and limits.
+Tests run offline by default. Each test should protect a behavior someone relies on; avoid tests that only restate implementation details, and do not repeat passing checks without a reason.
 
-Tests should cover the actual behavior affected by a change:
+Smoke scripts (each owns its port and a temporary directory, and calls no model service):
 
-- Compiler: ordering, conditions, roles, missing variables, source mapping, and determinism.
-- Providers: consistency between previews and outbound requests, capability limits, and tool message pairing.
-- Runtime: completion without tools, multiple tools, rejection, timeouts, cancellation, checkpoint recovery, and unknown side effects.
-- API/storage: version conflicts, Run idempotency, SSE reconnection, migrations, and sensitive data boundaries.
-- Web: editing through preview, execution through trace inspection, approval/rejection, stopping, and state restoration after refresh.
+| Script | Port | Covers |
+| --- | --- | --- |
+| `smoke_workspace.py` | 8766 | Direct Run, retry identity, native commands and files, isolation, memory and Skills, read-only mode, cancellation |
+| `smoke_conversations.py` | 8767 | Duplicate, fork, provenance, stale edits, archive, folders |
+| `smoke_projects.py` | 8769 | Project-bound tools and context, workspace moves, frozen Run roots |
+| `smoke_agent_tools.py` | 8770 | Search, ranged reads, instruction chains, patches, plans across restart |
+| `smoke_context_processes.py` | 8771 | Compaction, copies, streamed commands, trusted runtimes, background processes, download policy (`--network --public-dns` adds a real download) |
+| `smoke_harness.py` | 8772–8773 | CLI, JSON-RPC, embedding, hooks, packages, the Messages adapter over real HTTP |
+| `smoke_desktop.py` | 8776 | Error envelopes, folder picker fallback (`--native` drives real Windows dialogs) |
 
-For documentation-only changes, check content, links, examples, and cross-references. Do not initialize the application or run nonexistent tests.
-`scripts/check_layers.py` checks Python dependency direction and static UI imports without launching resources. `scripts/check_docs.py` checks current declarations/callbacks, source lines and links without writing runtime inventories. Node and the installed TypeScript parser (`npm --prefix web ci`) are prerequisites. `scripts/smoke_desktop.py --native` additionally opens, answers and cancels only owned Windows dialogs; the default smoke opens no desktop windows.
-Delivery notes must state the changes, verification results, and unimplemented work. Do not repeat passing checks unless new issues justify it.
+Live acceptance (`acceptance_local_agent.py`, `acceptance_agent_tools.py` on port 8768, `acceptance_daily_harness.py` on 8775) needs a configured real provider and `--live`; run them one at a time. Evidence is kept under `var/`.
+
+## Documentation
+
+Keep `docs/` accurate when behavior changes: the [project guide](README.md) for users, [architecture](architecture.md) for design, this guide for conventions, [harness](harness.md) for programmatic interfaces. Dated records go in [history](history/README.md) and are not rewritten. `scripts/check_docs.py` validates every relative link and heading anchor. Source code carries the function-level detail in docstrings.
+
+For documentation-only changes, check content, links and examples; application builds and test suites are unnecessary.
+
+## Delivering changes
+
+State what changed, how it was verified (with the actual results) and what remains unimplemented or unverified. Never report a check that was not run.

@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import threading
 from difflib import unified_diff
 from fnmatch import fnmatchcase
@@ -20,17 +21,27 @@ TEXT_FILE_LIMIT = 2 * 1024 * 1024
 MEMORY_PATH = ".rtagent/MEMORY.md"
 SKILL_ROOT = ".agents/skills"
 SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-EXCLUDED_DIRS = {".git", ".venv", "node_modules", "var", "__pycache__"}
+# Git metadata is private because remote URLs and config can embed credentials.
+PRIVATE_NAMES = {".env", ".git", "access-token"}
+DATABASE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
+# Large generated trees: skipped by file tools and Windows workspace copies, but visible to
+# Linux commands (a direct bind mount) so project test suites can run offline.
+DEPENDENCY_DIRS = {".venv", "node_modules", "__pycache__"}
+
+
+def private_name(name: str) -> bool:
+    """Recognize credentials, Git metadata and databases hidden from every tool and command."""
+    name = name.casefold()
+    return (
+        name in PRIVATE_NAMES
+        or (name.startswith(".env.") and name != ".env.example")
+        or Path(name).suffix in DATABASE_SUFFIXES
+    )
 
 
 def excluded_name(name: str) -> bool:
-    """Share credential and runtime exclusions between file tools and the sandbox."""
-    name = name.casefold()
-    return (
-        name in EXCLUDED_DIRS | {".env", "access-token"}
-        or (name.startswith(".env.") and name != ".env.example")
-        or Path(name).suffix in {".db", ".sqlite", ".sqlite3"}
-    )
+    """Recognize paths that file tools, packages and copied sandboxes never include."""
+    return private_name(name) or name.casefold() in DEPENDENCY_DIRS
 
 
 class Workspace:
@@ -41,6 +52,8 @@ class Workspace:
         self.root = root.resolve()
         self.data_dir = data_dir.resolve() if data_dir else self.root / "var"
         self.bundled_skills = Path(__file__).resolve().parents[2] / "skills"
+        # User-level skills shared by every project, kept with the studio's own data.
+        self.global_skills = data_dir.resolve() / "skills" if data_dir else None
         self.lock = threading.RLock()
 
     def path(self, relative: str) -> Path:
@@ -337,10 +350,15 @@ class Workspace:
 
     def _replace(self, path: str, content: str, expected_hash: str | None) -> dict[str, str]:
         """Share guarded atomic replacement while allowing bounded patches to edit larger files."""
+        with self.lock:
+            self._write_file(self.path(path), content, expected_hash)
+        return {"path": path, "hash": digest(content)}
+
+    def _write_file(self, target: Path, content: str, expected_hash: str | None) -> None:
+        """Atomically replace a file only if it still has the hash the caller last read."""
         if len(content.encode()) > TEXT_FILE_LIMIT:
             raise AppError("tool_output_limit", "Text exceeds the 2 MiB file limit.")
         with self.lock:
-            target = self.path(path)
             previous = self.read_path(target, TEXT_FILE_LIMIT) if target.exists() else ""
             if (target.exists() and expected_hash != digest(previous)) or (
                 not target.exists() and expected_hash not in (None, digest(""))
@@ -361,19 +379,18 @@ class Workspace:
                 os.replace(temporary, target)
             finally:
                 temporary.unlink(missing_ok=True)
-        return {"path": path, "hash": digest(content)}
 
     def edit(self, path: str, old_text: str, new_text: str) -> dict[str, str]:
-        """Replace exactly one literal occurrence; ambiguous edits require a narrower match."""
+        """Replace exactly one literal occurrence; ambiguous edits require a narrower match.
+
+        Edits are small by construction, so they apply to any file read_text can read."""
         with self.lock:
-            current = self.read(path)
-            if not old_text or current["content"].count(old_text) != 1:
+            current = self.read_path(self.path(path), TEXT_FILE_LIMIT)
+            if not old_text or current.count(old_text) != 1:
                 raise AppError(
                     "edit_conflict", "old_text must match exactly once in the current file.", 409
                 )
-            return self.write(
-                path, current["content"].replace(old_text, new_text, 1), current["hash"]
-            )
+            return self._replace(path, current.replace(old_text, new_text, 1), digest(current))
 
     def list_files(self, path: str = ".") -> dict[str, Any]:
         """List one directory, leaving recursion to explicit subsequent calls."""
@@ -407,7 +424,7 @@ class Workspace:
             )
         return name
 
-    def _skill(self, path: Path, name: str, builtin: bool) -> dict[str, Any]:
+    def _skill(self, path: Path, name: str, scope: str) -> dict[str, Any]:
         text = self.read_path(path)
         normalized = text.replace("\r\n", "\n")
         frontmatter = re.fullmatch(r"---\n(.*?)\n---\n([\s\S]*)", normalized, re.DOTALL)
@@ -432,18 +449,28 @@ class Workspace:
         return {
             "name": name,
             "description": metadata["description"],
-            "builtin": builtin,
-            "path": f"builtin:{name}" if builtin else path.relative_to(self.root).as_posix(),
+            "builtin": scope == "builtin",
+            "scope": scope,
+            "path": (
+                f"{scope}:{name}" if scope != "project" else path.relative_to(self.root).as_posix()
+            ),
             "content": text,
             "hash": digest(text),
         }
 
-    def skills(self) -> tuple[list[dict[str, Any]], dict[str, str]]:
-        """Discover metadata without injecting every skill body into model context."""
+    def skills(self, include_project: bool = True) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Discover metadata without injecting every skill body into model context.
+
+        Names are unique across bundled, global and project skills; a later duplicate is
+        reported rather than silently shadowing the earlier one."""
         found, errors = {}, {}
-        local = self.path(SKILL_ROOT)
-        for root, builtin in ((self.bundled_skills, True), (local, False)):
-            if not root.exists():
+        sources = [
+            (self.bundled_skills, "builtin"),
+            (self.global_skills, "global"),
+            (self.path(SKILL_ROOT) if include_project else None, "project"),
+        ]
+        for root, scope in sources:
+            if root is None or not root.exists():
                 continue
             for directory in sorted(root.iterdir()):
                 if not directory.is_dir():
@@ -451,15 +478,16 @@ class Workspace:
                 try:
                     name = self.skill_name(directory.name)
                     path = (
-                        directory / "SKILL.md"
-                        if builtin
-                        else self.path(f"{SKILL_ROOT}/{name}/SKILL.md")
+                        self.path(f"{SKILL_ROOT}/{name}/SKILL.md")
+                        if scope == "project"
+                        else directory / "SKILL.md"
                     )
-                    if not builtin and name in found:
+                    if name in found:
                         raise AppError(
-                            "invalid_skill", "A workspace skill cannot replace a bundled skill."
+                            "invalid_skill",
+                            f"A {found[name]['scope']} skill with this name already exists.",
                         )
-                    found[name] = self._skill(path, name, builtin)
+                    found[name] = self._skill(path, name, scope)
                 except AppError as exc:
                     errors[directory.name] = exc.message
                 if len(found) + len(errors) > 100:
@@ -476,12 +504,19 @@ class Workspace:
         raise AppError("skill_unavailable", errors.get(name, f"Skill {name} was not found."))
 
     def save_skill(
-        self, name: str, description: str, instructions: str, expected_hash: str | None = None
+        self,
+        name: str,
+        description: str,
+        instructions: str,
+        expected_hash: str | None = None,
+        scope: str = "project",
     ) -> dict[str, str]:
-        """Write a usable workspace SKILL.md; bundled skills remain read-only."""
+        """Write a usable project or global SKILL.md; bundled skills remain read-only."""
         self.skill_name(name)
         if (self.bundled_skills / name).exists():
             raise AppError("tool_denied", "Bundled skills cannot be overwritten.", 403)
+        if scope == "project" and self.global_skills and (self.global_skills / name).exists():
+            raise AppError("file_conflict", f"A global skill named {name} already exists.", 409)
         if not description.strip() or len(description) > 1000 or not instructions.strip():
             raise AppError(
                 "invalid_skill", "Provide a description (up to 1,000 characters) and instructions."
@@ -489,11 +524,28 @@ class Workspace:
         header = yaml.safe_dump(
             {"name": name, "description": description}, sort_keys=False, allow_unicode=True
         )
-        return self.write(
-            f"{SKILL_ROOT}/{name}/SKILL.md",
-            f"---\n{header}---\n\n{instructions.strip()}\n",
-            expected_hash,
-        )
+        content = f"---\n{header}---\n\n{instructions.strip()}\n"
+        if len(content.encode()) > FILE_LIMIT:
+            raise AppError("tool_output_limit", "A skill is limited to 64 KiB.")
+        if scope == "global":
+            if self.global_skills is None:
+                raise AppError("skill_scope", "Global skills need a data directory.")
+            target = self.global_skills / name / "SKILL.md"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._write_file(target, content, expected_hash)
+            return {"path": f"global:{name}", "hash": digest(content)}
+        return self.write(f"{SKILL_ROOT}/{name}/SKILL.md", content, expected_hash)
+
+    def delete_global_skill(self, name: str, expected_hash: str) -> None:
+        """Remove a global skill folder after checking the user saw its current content."""
+        self.skill_name(name)
+        directory = self.global_skills / name if self.global_skills else None
+        if directory is None or not (directory / "SKILL.md").is_file():
+            raise AppError("not_found", f"Global skill {name} was not found.", 404)
+        with self.lock:
+            if digest(self.read_path(directory / "SKILL.md")) != expected_hash:
+                raise AppError("file_conflict", "The skill changed. Reload it first.", 409)
+            shutil.rmtree(directory)
 
     def read_instructions(self, path: str = ".") -> dict[str, Any]:
         """Read the instruction chain down to a file's parent or an existing workspace directory."""

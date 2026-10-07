@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Layers, X } from 'lucide-react';
-import { errorMessage, request, type Config, type Session } from '../../api/client';
+import {
+  errorMessage,
+  request,
+  type Config,
+  type ModelChoice,
+  type Session,
+} from '../../api/client';
 import type { components } from '../../api/generated';
 
 type Context = components['schemas']['ContextView'];
@@ -10,11 +16,13 @@ type Context = components['schemas']['ContextView'];
 export function ContextPanel({
   session,
   config,
+  model,
   onClose,
   onChanged,
 }: {
   session: Session;
   config: Config;
+  model: ModelChoice | null;
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
@@ -95,8 +103,8 @@ export function ContextPanel({
               </select>
             </label>
             <p className="subtle">
-              Compaction calls the selected model. Original messages stay in history; new runs use a
-              summary and the recent turns. You can restore full context.
+              Compaction calls the model selected below the message box. Original messages stay in
+              history; new runs use a summary and the recent turns. You can restore full context.
             </p>
             <div className="row">
               <button
@@ -109,6 +117,7 @@ export function ContextPanel({
                     expected_revision: session.revision,
                     config_revision: config.revision,
                     keep_recent_turns: keep,
+                    model,
                   })
                 }
               >

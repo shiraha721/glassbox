@@ -7,7 +7,7 @@ export type PromptInspection = components['schemas']['PromptInspection'];
 export type SkillInfo = components['schemas']['SkillInfo'];
 export type Run = components['schemas']['RunView'];
 export type RunRequest = components['schemas']['PreviewRequest'];
-export type Session = components['schemas']['SessionView'];
+export type Session = components['schemas']['SessionSummary'];
 export type Folder = components['schemas']['FolderView'];
 export type Project = components['schemas']['ProjectView'];
 export type FolderSelection = components['schemas']['FolderSelection'];
@@ -20,6 +20,16 @@ export type Trace = components['schemas']['TraceView'];
 export type WorkspaceView = components['schemas']['WorkspaceView'];
 export type MemoryDocument = components['schemas']['MemoryDocument'];
 export type SkillDocument = components['schemas']['SkillDocument'];
+export type ProviderProfile = components['schemas']['ProviderProfile-Output'];
+export type ModelChoice = components['schemas']['ModelChoice'];
+export type CredentialStatus = components['schemas']['CredentialStatus'];
+export type WorkspaceSkills = components['schemas']['WorkspaceSkills'];
+export type WorkspaceAccess = 'read-only' | 'ask' | 'workspace-write';
+/** What the composer sends with each Run: the model and the workspace access. */
+export type RunChoice = { model: ModelChoice; access: WorkspaceAccess };
+
+/** The pseudo provider ID of the offline simulated model. */
+export const SIMULATED = 'simulated';
 
 /** Carry the server error code so conflicts and validation failures remain identifiable. */
 export class ApiError extends Error {

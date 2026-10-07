@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from rtagent.domain import AppError, MCPServer, StudioConfig
+from rtagent.infrastructure.sandbox.command_io import OutputBuffer
 from rtagent.infrastructure.tools import ToolRegistry
 from rtagent.infrastructure.workspace.files import Workspace
 
@@ -160,3 +161,53 @@ def test_unicode_patch_evidence_stays_bounded(tmp_path):
     assert len(json.dumps(result, ensure_ascii=False).encode()) < 65_536
     assert len(result["files"]) == 20 and all((tmp_path / path).exists() for path in paths)
     assert any(item["diff_truncated"] for item in result["files"])
+
+
+def test_patches_accept_blank_context_lines_and_section_separators(tmp_path):
+    """Models often drop the space prefix of blank context lines and separate file sections."""
+    workspace = Workspace(tmp_path)
+    (tmp_path / "a.py").write_text("def a():\n    return 1\n\n\ndef b():\n    return 2\n")
+    (tmp_path / "b.py").write_text("x = 1\n")
+    patch = (
+        "*** Begin Patch\n*** Update File: a.py\n@@\n def a():\n-    return 1\n+    return 10\n"
+        "\n\n def b():\n\n*** Update File: b.py\n@@\n-x = 1\n+x = 2\n*** End Patch"
+    )
+    hashes = {name: workspace.read(name)["hash"] for name in ("a.py", "b.py")}
+    workspace.apply_patch(patch, hashes)
+    assert (
+        tmp_path / "a.py"
+    ).read_text() == "def a():\n    return 10\n\n\ndef b():\n    return 2\n"
+    assert (tmp_path / "b.py").read_text() == "x = 2\n"
+
+
+def test_edit_text_handles_files_larger_than_direct_writes(tmp_path):
+    """Edits are small by construction and apply to any file read_text can read."""
+    workspace = Workspace(tmp_path)
+    (tmp_path / "large.txt").write_text("filler line\n" * 10_000 + "TARGET\n")
+    workspace.edit("large.txt", "TARGET", "CHANGED")
+    assert (tmp_path / "large.txt").read_text().endswith("CHANGED\n")
+
+
+def test_project_var_folders_are_visible_but_runtime_data_is_not(tmp_path):
+    """Only the configured data directory is runtime data; a project's own var/ is ordinary."""
+    workspace = Workspace(tmp_path, tmp_path / "data")
+    (tmp_path / "var").mkdir()
+    (tmp_path / "var" / "notes.txt").write_text("project notes")
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "log.txt").write_text("runtime")
+    assert workspace.read("var/notes.txt")["content"] == "project notes"
+    assert workspace.search_files("**/*.txt")["files"] == ["var/notes.txt"]
+    with pytest.raises(AppError):
+        workspace.read("data/log.txt")
+
+
+def test_output_buffer_keeps_head_and_newest_tail():
+    """Long command output retains its start and end with an explicit omission marker."""
+    buffer = OutputBuffer(head=5, tail=5)
+    for chunk in ("01234", "56789", "abcde", "fghij"):
+        buffer.append(chunk)
+    assert buffer.truncated and buffer.omitted == 10
+    assert buffer.text() == "01234\n[... 10 characters omitted ...]\nfghij"
+    short = OutputBuffer(head=5, tail=5)
+    short.append("0123456789")
+    assert not short.truncated and short.text() == "0123456789"

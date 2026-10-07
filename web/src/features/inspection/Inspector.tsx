@@ -3,29 +3,37 @@ import { useQuery } from '@tanstack/react-query';
 import { Download, X } from 'lucide-react';
 import { request, type PromptInspection, type Run, type Trace } from '../../api/client';
 import { Json } from '../../shared/Json';
+import { StatusBadge } from '../../shared/StatusBadge';
 
 /** Inspect preview provenance or the saved evidence for every model and tool invocation. */
 export function Inspector({
+  visible,
   preview,
   previewUpdating,
   previewError,
+  runs,
   run,
+  onRun,
   tab,
   onTab,
   onClose,
 }: {
+  visible: boolean;
   preview: PromptInspection | null;
   previewUpdating: boolean;
   previewError: string;
+  runs: Run[];
   run?: Run;
+  onRun: (id: string) => void;
   tab: 'preview' | 'trace';
   onTab: (tab: 'preview' | 'trace') => void;
   onClose: () => void;
 }) {
   const [raw, setRaw] = useState(false);
+  // Evidence can be megabytes; load it only while the trace is on screen.
   const trace = useQuery({
     queryKey: ['trace', run?.id, raw],
-    enabled: !!run,
+    enabled: !!run && visible && tab === 'trace',
     queryFn: () => request<Trace>(`/runs/${run!.id}/trace?raw=${raw}`),
   });
   return (
@@ -141,6 +149,21 @@ export function Inspector({
         {tab === 'trace' &&
           (run ? (
             <>
+              <label className="inline-field">
+                Turn
+                <select
+                  id="run-selector"
+                  aria-label="Inspected turn"
+                  value={run.id}
+                  onChange={(event) => onRun(event.target.value)}
+                >
+                  {runs.map((item, index) => (
+                    <option key={item.id} value={item.id}>
+                      #{index + 1} · {item.input.slice(0, 60)} · {item.status.replaceAll('_', ' ')}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {run.source_run_id && (
                 <p className="notice">
                   Copied history · requests, results, and usage come from the source run. No calls
@@ -197,9 +220,7 @@ export function Inspector({
                     <strong>
                       {call.kind === 'model' ? 'Model request' : String(call.data.name)}
                     </strong>
-                    <span className={`status status-${call.status}`}>
-                      {call.status.replaceAll('_', ' ')}
-                    </span>
+                    <StatusBadge status={call.status} />
                   </summary>
                   {call.kind === 'model' ? (
                     <>
@@ -249,12 +270,13 @@ export function Inspector({
                     <summary>Result</summary>
                     <Json value={call.result} />
                   </details>
-                  {call.data.attempt_history != null && (
-                    <details className="evidence">
-                      <summary>Previous attempts</summary>
-                      <Json value={call.data.attempt_history} />
-                    </details>
-                  )}
+                  {Array.isArray(call.data.attempt_history) &&
+                    call.data.attempt_history.length > 0 && (
+                      <details className="evidence">
+                        <summary>Previous attempts</summary>
+                        <Json value={call.data.attempt_history} />
+                      </details>
+                    )}
                 </details>
               ))}
             </>

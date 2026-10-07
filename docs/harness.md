@@ -1,14 +1,15 @@
 # Harness interfaces and extensions
 
-Stage 4 exposes the existing agent through HTTP, CLI, newline JSON-RPC and Python embedding. All paths use the same compiler, immutable Run snapshots, permission decisions, approval/checkpoint recovery and receipts. There is one LangGraph loop, one service worker and no automatically loaded plugin code.
+The agent is available through HTTP, a CLI, newline JSON-RPC and Python embedding. All paths use the same compiler, immutable Run snapshots, permission decisions, approval/checkpoint recovery and receipts. There is one LangGraph loop in one service process, and no automatically loaded plugin code.
 
 ## Attach to the running service
 
-Start `uv run python -m rtagent` (or `rtagent serve`) and open http://127.0.0.1:8001. Client commands attach to that service and its database; they do not create another worker. The older `python -m rtagent.main` entry remains supported.
+Start `uv run rtagent serve` (or `uv run python -m rtagent`; add `--port` for another port) and open http://127.0.0.1:8001. Client commands attach to that service over HTTP; they never open its databases. The older `python -m rtagent.main` entry remains supported.
 
 ```powershell
 uv run rtagent run "Inspect the project and report its entry point" --preset coding --wait --json
 uv run rtagent run --task-file task.txt --session SESSION_ID --skill debugging --wait
+uv run rtagent run "Review src/ for injection" --model anthropic:claude-opus-5-5 --effort high --access read-only
 uv run rtagent sessions
 uv run rtagent status RUN_ID
 uv run rtagent events RUN_ID --after 0
@@ -18,7 +19,7 @@ uv run rtagent resume RUN_ID --resolutions decisions.json
 uv run rtagent cancel RUN_ID
 ```
 
-Use `--url http://127.0.0.1:8001` **before** the subcommand to choose a service. `--project PROJECT_ID` selects a registered workspace for a new conversation. Existing conversations keep their saved Project; change that membership explicitly through the Web/API before submitting a new turn. `--skill` can repeat. `--task-file` is UTF-8; when task/file is omitted, Run reads stdin. Standard input/output/error use UTF-8 on Windows as well as Linux.
+Use `--url http://127.0.0.1:8001` **before** the subcommand to choose a service. `--project PROJECT_ID` selects a registered workspace for a new conversation. Existing conversations keep their saved Project; change that membership explicitly through the Web/API before submitting a new turn. `--skill` can repeat. `--model PROVIDER_ID:MODEL` (a provider ID from Settings, e.g. `openai:gpt-5`, or `simulated:simulated`), `--effort` and `--access read-only|ask|workspace-write` apply to this Run only; without them the saved default model and sandbox mode apply. `--effort` requires `--model`. `--task-file` is UTF-8; when task/file is omitted, Run reads stdin. Standard input/output/error use UTF-8 on Windows as well as Linux.
 
 `run` returns the accepted Run immediately; `--wait` waits for success/failure or required attention, including approval and interrupted outcomes. Approval is never automatic. A waiting approval exits successfully with that state/ID so the caller can decide; failed/cancelled Runs and client errors return exit code 1. Ctrl+C detaches the client (130); it does not cancel saved work. The printed Run/conversation IDs and `status` allow reconnection. `wait`/`events` emit JSON. An event page contains at most 200 persisted numbered events; advance the cursor to its last sequence and request the next page. SSE remains available for browser subscribers.
 
@@ -35,17 +36,23 @@ Use `retry` only after deciding repetition is appropriate. A model call with an 
 ```python
 import asyncio
 from rtagent.client import AgentClient
+from rtagent.domain import ModelChoice
 
 async def main() -> None:
     async with AgentClient() as client:
-        run = await client.run("Inspect the workspace", preset_id="coding")
+        run = await client.run(
+            "Inspect the workspace",
+            preset_id="coding",
+            model=ModelChoice(provider_id="openai", model="gpt-5", reasoning_effort="high"),
+            access="read-only",
+        )
         result = await client.wait(run.id)
         print(result.status, result.id, result.approval)
 
 asyncio.run(main())
 ```
 
-`AgentClient.run` reads current revisions and optionally creates a conversation. For reliable retry after a lost response, capture a typed `PreviewRequest` containing the observed session/preset/config revisions and input, then call **`client.start(request, key)` with the same request and key**. The server returns the original Run even if the session revision later changes. Reconstructing a convenience request with newer revisions or creating a new session is a new submission. Neither convenience nor explicit submission requires Preview. Exact request/response shapes are in `/openapi.json` and [domain contracts](reference/backend-core.md).
+`AgentClient.run` reads current revisions and optionally creates a conversation. `model` and `access` are optional per-Run choices, as in the CLI; the Run view reports the `provider_id`, `model`, `reasoning_effort` and `access` that were used. For reliable retry after a lost response, capture a typed `PreviewRequest` containing the observed session/preset/config revisions and input, then call **`client.start(request, key)` with the same request and key**. The server returns the original Run even if the session revision later changes. Reconstructing a convenience request with newer revisions or creating a new session is a new submission. Neither convenience nor explicit submission requires Preview. Exact request/response shapes are in `/openapi.json` and `src/rtagent/domain/models.py`.
 
 The Web client follows the same rule: an unchanged visible task retains its complete submitted body and key across a lost response and later history revisions. HTTP validation, business and unexpected pre-response failures share `{"error":{"code":"...","message":"...","details":null,"request_id":"..."}}`. Field errors contain locations/types without submitted input values. AgentClient handles non-JSON failures as transport errors; JSON-RPC returns `-32603` for an unexpected operation and continues reading independent frames.
 
@@ -67,7 +74,7 @@ Each UTF-8 input line is an ID-bearing JSON-RPC 2.0 request; each output line is
 | Methods | Parameters and result |
 | --- | --- |
 | `rpc.schema`, `bootstrap` | No params; supported methods/contract location or service projection. |
-| `run.submit` | `task`, optional `session_id`, `project_id`, `preset_id`, `variables`, `skills`, `key`; current-revision Run. |
+| `run.submit` | `task`, optional `session_id`, `project_id`, `preset_id`, `variables`, `skills`, `key`, `model` (`{provider_id, model, reasoning_effort}`), `access`; current-revision Run. |
 | `run.start` | `{request: PreviewRequest, key: string}`; captured-request retry identity. |
 | `run.get`, `run.cancel` | `run_id`; saved Run projection. |
 | `run.wait`, `events.list` | `run_id` plus optional `timeout` (seconds, up to 3600) or `after`; Run or finite event page. |
@@ -95,7 +102,9 @@ from rtagent.harness import Harness
 async def main() -> None:
     settings = Settings(data_dir=Path("var/embedded"), workspace_root=Path("."))
     async with Harness(settings) as harness:
-        run = await harness.run("Inspect this project's startup", preset_id="coding")
+        run = await harness.run(
+            "Inspect this project's startup", preset_id="coding", access="read-only"
+        )
         result = await harness.wait(run.id)
         if result.approval:
             print("Approval required:", result.approval)
@@ -175,13 +184,16 @@ Studio owns package use cases for HTTP and embedding. Explicit user Skill import
 
 ## Provider support
 
-OpenAI-compatible streaming Chat Completions remains the primary provider. Messages is a second explicit text/tool adapter:
+Providers are configured in **Settings → Providers** (or seeded from `.env`) and addressed by ID. Both adapters are explicit; there is no fallback between them:
+
+- **OpenAI-compatible** streaming Chat Completions, with `reasoning_effort` low, medium or high.
+- **Anthropic Messages**, with `output_config.effort` low through max. Leading canonical system blocks become ordered top-level system text blocks; assistant calls become `tool_use`, paired results become user `tool_result` blocks. Thinking blocks are replayed unchanged within a Run and dropped from later turns (see [Architecture → Providers](architecture.md#providers)). Interleaved system blocks, incomplete streams and unsupported server-tool content fail explicitly; a classifier refusal is reported as `provider_refusal`.
 
 ```dotenv
 STUDIO_PROVIDER=anthropic
 ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
-ANTHROPIC_MODEL=
+ANTHROPIC_MODEL=claude-opus-5-5
 ANTHROPIC_API_KEY=
 ```
 
-Set the model/key locally or use Settings. Leading canonical system blocks become ordered top-level system text blocks; assistant calls become tool_use, paired results become user tool_result blocks. Inspector and every call record disclose transformations, canonical input, prepared/actual body, usage and returned metadata. Interleaved system blocks, incomplete streams and unsupported thinking/server-tool content fail explicitly. No fallback, role relocation or automatic retry occurs. The [official Messages](https://platform.claude.com/docs/en/api/messages/create) and [streaming contracts](https://platform.claude.com/docs/en/build-with-claude/streaming) describe the external protocol. Local real-HTTP protocol acceptance passed; no external Claude credential was available for a production endpoint check. See [Stage 4 acceptance](acceptance-stage4.md).
+Inspector and every call record disclose transformations, canonical input, prepared/actual body, usage and returned metadata. No role relocation or automatic retry occurs. The [official Messages](https://platform.claude.com/docs/en/api/messages/create) and [streaming contracts](https://platform.claude.com/docs/en/build-with-claude/streaming) describe the external protocol. The adapter is tested against local real-HTTP fixtures, including thinking replay and refusals; no external Claude credential was available for a production endpoint check. See the [Stage 4 acceptance record](history/acceptance-stage4.md).

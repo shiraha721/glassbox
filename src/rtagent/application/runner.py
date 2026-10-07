@@ -32,6 +32,10 @@ from rtagent.infrastructure.providers.chat import generate, prepare, transformat
 from rtagent.infrastructure.storage import Repository
 from rtagent.infrastructure.tools import ToolRegistry
 
+# Each conversation has at most one active Run; this bounds concurrent provider and tool load
+# across conversations. Further Runs stay queued until a slot is free.
+MAX_ACTIVE_RUNS = 4
+
 
 class AgentState(TypedDict):
     """Checkpoint only the current Run delta and its next model/tool positions."""
@@ -61,7 +65,7 @@ class Runner:
         self.checkpoint_path = checkpoint_path
         self.stack = AsyncExitStack()
         self.tasks: dict[str, asyncio.Task] = {}
-        self.semaphore = asyncio.Semaphore(1)
+        self.semaphore = asyncio.Semaphore(MAX_ACTIVE_RUNS)
         self.shutting_down = False
 
     async def open(self) -> None:
@@ -170,9 +174,7 @@ class Runner:
         except Exception as exc:
             run = await self.repository.run(run_id)
             await self.mark_unknown(run_id)
-            uncertain = any(
-                call["status"] == "outcome_unknown" for call in await self.repository.trace(run_id)
-            )
+            uncertain = bool(await self.repository.calls_with_status(run_id, ["outcome_unknown"]))
             if uncertain:
                 await self.repository.emit(
                     run_id,
@@ -208,16 +210,10 @@ class Runner:
 
     async def mark_unknown(self, run_id: str) -> None:
         """Preserve the uncertainty of calls interrupted before a durable receipt."""
-        for call in await self.repository.trace(run_id):
-            if call["status"] == "executing":
-                await self.repository.save_call(
-                    call["id"],
-                    run_id,
-                    call["kind"],
-                    "outcome_unknown",
-                    call["data"],
-                    call["result"],
-                )
+        for call in await self.repository.calls_with_status(run_id, ["executing"]):
+            await self.repository.save_call(
+                call["id"], run_id, call["kind"], "outcome_unknown", call["data"], call["result"]
+            )
 
     async def cancel(self, run_id: str) -> None:
         """Stop local execution without claiming that external effects were rolled back."""
@@ -284,9 +280,7 @@ class Runner:
                 "attempt_history": (existing or {}).get("data", {}).get("attempt_history", []),
             }
             attempts = sum(
-                call["data"].get("attempts", 1)
-                for call in await self.repository.trace(run_id)
-                if call["kind"] == "model"
+                call["attempts"] for call in await self.repository.call_summaries(run_id, "model")
             )
             if attempts >= config.max_steps:
                 raise AppError("max_steps", "The Run reached its model attempt limit.")
@@ -301,8 +295,9 @@ class Runner:
 
             started = time.monotonic()
             response = None
+            key = self.registry.credentials.resolve(config.provider.credential_ref)
             async for event in generate(
-                config.provider, compiled, snapshot["tools"], prepared, on_wire
+                config.provider, compiled, snapshot["tools"], prepared, on_wire, key
             ):
                 if event["kind"] == "delta":
                     await self.repository.delta(run_id, call_id, event["text"])
@@ -315,15 +310,16 @@ class Runner:
             data["latency_ms"] = round((time.monotonic() - started) * 1000)
             await self.repository.save_call(call_id, run_id, "model", "succeeded", data, response)
         messages = state["messages"] + [response]
-        trace = [call for call in await self.repository.trace(run_id) if call["kind"] == "model"]
+        summaries = await self.repository.call_summaries(run_id, "model")
         usage = dict(run["usage"])
         for key in ("input_tokens", "output_tokens"):
-            values = [call["data"].get("usage", {}).get(key) for call in trace]
+            values = [call[key] for call in summaries]
+            # Retried calls may have consumed unreported tokens, so their total is unknown.
             usage[key] = (
                 sum(values)
                 if values
                 and all(value is not None for value in values)
-                and not any(call["data"].get("attempt_history") for call in trace)
+                and not any(call["retries"] for call in summaries)
                 else None
             )
         await self.repository.emit(
@@ -363,9 +359,7 @@ class Runner:
             content = existing["result"]
         else:
             attempts = sum(
-                item["data"].get("attempts", 1)
-                for item in await self.repository.trace(run_id)
-                if item["kind"] == "tool"
+                item["attempts"] for item in await self.repository.call_summaries(run_id, "tool")
             )
             if attempts >= config.max_tool_calls:
                 raise AppError("max_tool_calls", "The Run reached its tool attempt limit.")
@@ -445,15 +439,18 @@ class Runner:
                     registry = self.registry.for_workspace(Path(run["snapshot"]["workspace_root"]))
 
                     async def on_output(frame: dict[str, Any]) -> None:
-                        """Persist native output while the call is executing, before its final receipt."""
+                        """Persist the latest bounded output snapshot before the final receipt."""
                         output = data.setdefault(
                             "output", {"stdout": "", "stderr": "", "truncated": False}
                         )
-                        output[frame["stream"]] += frame["text"]
+                        output[frame["stream"]] = frame["text"]
                         output["truncated"] |= frame["truncated"]
                         await self.repository.save_call(call_id, run_id, "tool", "executing", data)
+                        # The text lives in the call receipt; events only signal progress.
                         await self.repository.emit(
-                            run_id, "tool.output", {"call_id": call_id, **frame}
+                            run_id,
+                            "tool.output",
+                            {"call_id": call_id, "stream": frame["stream"]},
                         )
 
                     token = current_execution.set(

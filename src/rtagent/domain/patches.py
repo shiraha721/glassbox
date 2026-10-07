@@ -48,6 +48,8 @@ def parse_patch(patch: str) -> list[PatchOperation]:
             body.append(lines[index])
             index += 1
         action = headers[header]
+        while action == "update" and body and not body[-1]:
+            body.pop()  # A blank separator before the next header is not hunk context.
         if action == "add" and any(not line.startswith("+") for line in body):
             raise AppError("invalid_patch", "Every added file line must start with +.")
         if action == "delete" and body:
@@ -112,11 +114,13 @@ def apply_hunks(original: str, lines: tuple[str, ...]) -> str:
             old, new, at_end, started = [], [], False, True
         elif line == "*** End of File" and started:
             at_end = True
-        elif started and line and line[0] in " +-" and not at_end:
-            if line[0] != "+":
-                old.append(line[1:])
-            if line[0] != "-":
-                new.append((line[1:], len(old) - 1 if line[0] == " " else None))
+        elif started and not at_end and (not line or line[0] in " +-"):
+            # Models often drop the leading space of a blank context line; treat "" as " ".
+            marker, text = (line[0], line[1:]) if line else (" ", "")
+            if marker != "+":
+                old.append(text)
+            if marker != "-":
+                new.append((text, len(old) - 1 if marker == " " else None))
         else:
             raise AppError(
                 "invalid_patch",

@@ -32,7 +32,6 @@ export default defineConfig({
       STUDIO_PROVIDER: 'fake',
       STUDIO_DATA_DIR: path.join(runRoot, 'data'),
       STUDIO_WORKSPACE_ROOT: workspaceRoot,
-      STUDIO_ALLOWED_ORIGINS: '["http://127.0.0.1:8765"]',
     },
   },
 });

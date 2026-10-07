@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from pydantic import Field, StrictInt, StrictStr, ValidationError
 
-from rtagent.domain import AppError, Contract, PreviewRequest
+from rtagent.domain import AppError, Contract, ModelChoice, PreviewRequest, WorkspaceAccess
 from rtagent.interfaces.client import AgentClient
 
 LINE_LIMIT = 512 * 1024
@@ -47,6 +47,8 @@ class Submission(Contract):
     variables: dict[str, Any] = Field(default_factory=dict)
     skills: list[str] = Field(default_factory=list, max_length=20)
     key: str | None = None
+    model: ModelChoice | None = None
+    access: WorkspaceAccess | None = None
 
 
 class RPCRequest(Contract):
@@ -73,7 +75,8 @@ async def dispatch(client: AgentClient, method: str, params: dict[str, Any]) -> 
             "line_limit": LINE_LIMIT,
         }
     if method == "run.submit":
-        return (await client.run(**Submission.model_validate(params).model_dump())).model_dump()
+        submission = Submission.model_validate(params)
+        return (await client.run(**dict(submission))).model_dump()
     if method == "run.start":
         if set(params) != {"request", "key"} or not isinstance(params["key"], str):
             raise AppError("rpc_params", "run.start requires request and key.")

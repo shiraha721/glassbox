@@ -1,117 +1,130 @@
 # Security Agent Studio
 
-A local agent workspace for coding, reverse engineering, CTF challenges, debugging, and other authorized security work. Compose inspectable prompts, run a tool-using agent, and retain evidence for each model and tool call.
+A local agent workspace for coding, debugging, reverse engineering, CTF challenges and other authorized security work. You give a task; one tool-using agent works in a project folder, runs commands in an OS sandbox without network access, and records the exact model input, every request and every tool result so you can inspect what happened.
 
-The target is an extensible everyday agent harness in the scope of [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent), with prompt composition and inspection as core features. The original Web UI and tool loop are **Stage 1**, not the finished product. Develop working vertical features without speculative services or a generic plugin framework.
+What makes it different from a plain chat agent:
 
-## Current status
+- **Inspectable prompts.** Instructions are composed from editable blocks. **Preview** shows the exact messages, sources and provider request before anything runs; every Run keeps an immutable snapshot of its input.
+- **Recorded evidence.** Each model call stores the canonical messages, the prepared request and the actual outbound body. Each tool call stores its arguments, permission decision and result.
+- **Explicit authority.** Tools are allowed, require approval, or are disabled in Settings. Prompts, files, memory and model output can never change those permissions.
+- **Real isolation.** Commands run in bubblewrap namespaces on Linux or an AppContainer on Windows, never as unrestricted host processes.
 
-As of 2026-10-05, Stages 1–4 are implemented; the Windows daily-agent and extensible-harness workflows are accepted:
+Contents: [Install](#install-and-start) · [Configure a model](#configure-a-model) · [Use the studio](#use-the-studio) · [Projects, memory and Skills](#projects-memory-and-skills) · [Isolation and permissions](#isolation-and-permissions) · [Troubleshooting](#troubleshooting) · [Status and roadmap](#status-and-roadmap)
 
-- Direct **Run**, streaming replies, persistent conversations, cancellation, approval, and checkpoint recovery. Preview is optional.
-- Prompt blocks with roles, ordering, conditions, variables, and source mapping; live draft inspection, including empty task input; immutable Run inputs.
-- Continuous chat history, conversation rename/duplicate/fork/archive/delete, flat folders, and reversible preset drafts.
-- OpenAI-compatible Chat Completions with configurable Base URL, model, and server-side API key. The real adapter is the default; a missing model produces a configuration error.
-- Twenty native tools: file/search/read/instructions, guarded writes/patches, plans, native commands, memory/Skills, background process/poll/input/stop, controlled downloads and approval-check echo.
-- Native Windows PowerShell execution in AppContainer, or Linux Bash in bubblewrap. Chat shows patch diffs and recorded task progress; Tools shows grouped schemas and effective permissions.
-- Named Projects bind conversations to local workspace folders, with project-specific instructions, files, commands, memory, and Skills. Registration opens the native system folder dialog; manual entry appears only when it is unavailable. Bundled procedures include skill-creator, debugging, and code-review.
-- Five editable presets: Security analysis, General agent, Coding, Debugging, and Code review. Recorded environment context tells the model its actual root, command language, tool exposure, and limits.
-- Stateless stdio/Streamable HTTP MCP, per-tool permissions, captured requests, tool results, usage, and redacted exports.
-- Explicit context compaction/accounting/restoration with original history preserved; native command output streams before completion and background commands accept bounded UTF-8 pipe input/EOF.
-- Explicit trusted runtime folders and exact public HTTPS download hosts; commands keep their no-network boundary and dependencies run offline.
-- Shared Python Harness and existing-service AgentClient, CLI/JSON-RPC, committed event observation/additional tool guards, trusted local tools, new-identity prompt/Skill data packages and an explicit Messages provider adapter.
+Further reading: [Architecture](architecture.md) for how it works, [Development guide](development.md) for contributing, [Harness interfaces](harness.md) for the CLI, JSON-RPC and Python APIs, and the [2026-10-06 review](review.md) for the latest assessment.
 
-Real-model acceptance completed multi-file coding, actual sandbox checks, Skill creation, evidence-based security analysis, and memory/Skill reuse after restart in a registered project. The final acceptance captured 35 model requests and 70 tool calls. Separate real HTTP checks verify native isolation, read-only mode, cancellation, project boundaries, and conversation management. See [Stage 2 acceptance](acceptance-stage2.md) for scenarios, evidence, commands, and limits.
+## Install and start
 
-The subsequent [Codex capability review](codex-gap-review.md) closes concrete tool/prompt gaps. Its separate real-model acceptance captured 14 requests and 26 tool calls for hash-guarded multi-file repair and a read-only vulnerability review. Stage 3/4 acceptance added **41 real model requests and 63 tool calls** for multi-file CSV repair, background worker input/cleanup, three-call context reduction, continued CLI implementation, restarted approval and a real embedded extension. See [Stage 3 acceptance](acceptance-stage3.md), [Stage 4 acceptance](acceptance-stage4.md) and [Harness interfaces](harness.md). External Claude and Linux-native acceptance remain separate unperformed checks.
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22.12+ with npm. Linux additionally needs Bash and bubblewrap:
 
-The completed [code and architecture review](review.md) records the domain/application/infrastructure/interfaces package refactor, app/features/shared/api frontend structure, corrected dependency direction, native selection/lifecycle fixes and the terminal-polling file-context correction. Its closure evidence is separate from earlier real-model workloads.
+```bash
+sudo apt-get install bash bubblewrap util-linux   # Debian/Ubuntu
+```
 
-See [Architecture](architecture.md) for the whole-system design and the [Architecture Reference](reference/README.md) for every module, class, function, callback, and dependency role. The [Development Guide](development.md) defines repository conventions. [AGENTS.md](../AGENTS.md) is the root entry point for coding agents.
+Windows needs nothing extra: commands use the built-in Windows PowerShell inside an AppContainer. WSL, a VM or administrator setup are not required.
 
-## Start the application
+From the repository root:
 
-Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22.12+ and npm. From the repository root:
-
-```powershell
+```bash
 uv sync --dev --locked
 npm --prefix web ci
 npm --prefix web run build
-Copy-Item .env.example .env   # Only if .env does not already exist.
+cp .env.example .env          # optional; PowerShell: Copy-Item .env.example .env
+uv run rtagent serve          # or: uv run python -m rtagent
 ```
 
-Configure the endpoint and model in .env:
+Open **http://127.0.0.1:8001**. Use `uv run rtagent serve --port 8080` for another port. The service listens on loopback only and has no login; it is a single-user local tool, not a server to expose on a network.
+
+Start-up applies database migrations. Runtime data lives in `STUDIO_DATA_DIR` (default `var/`), which Git ignores.
+
+## Configure a model
+
+The left sidebar's **Settings** holds global configuration; the controls under the message box choose the model and workspace access for each Run.
+
+1. **Settings → Providers** lists the endpoints the studio can call: OpenAI-compatible (streaming Chat Completions with tool calls) and Anthropic Messages. Add one with **Add OpenAI-compatible** or **Add Anthropic**, set its base URL, paste the API key and press **Save key**. A local endpoint without a key works too.
+2. **Settings → Models** lists each provider's models. **Refresh models** asks the provider for its model list (`GET /models`); a model ID can also be added by hand. Each provider also sets temperature, max output tokens and context window. The **Default model** applies to new conversations and to the CLI and API.
+3. The **model button** under the message box picks the model for the next Run, sets its **reasoning effort** (Low/Medium/High for OpenAI-compatible models; up to Extra high and Max for Anthropic), refreshes all model lists, or opens **Manage models…**. A conversation reopens with the model and access its last Run used.
+
+Keys are stored on this computer in the data directory (`credentials.json`; on Linux readable only by your account, on Windows protected by the folder's permissions like `.env`) and are never sent back to the browser; Settings shows only where a key comes from and its last four characters. Without a saved key, the server reads the environment variable named under **Key variable name** (for example `OPENAI_API_KEY`), from the process environment or `.env`. **Remove saved key** falls back to that variable.
+
+`.env` can also seed providers at start-up, which is convenient for scripts:
 
 ```dotenv
-STUDIO_DATA_DIR=var
-STUDIO_WORKSPACE_ROOT=.
-STUDIO_PROVIDER=openai
+STUDIO_PROVIDER=openai             # or anthropic, or fake for the simulated model
 OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=
-OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5
+OPENAI_API_KEY=sk-...
 ```
 
-Start with `uv run python -m rtagent.main` and open **http://127.0.0.1:8001**. Enter a task and click **Run**, or press **Ctrl+Enter / Cmd+Enter**. Open **Prompt** to edit the preset and **Inspector** to examine requests. **Preview** inspects the current draft without calling a model. It updates after a 300 ms pause when input, variables, preset blocks, or selected Skills change. Empty input can inspect system instructions. The last valid result stays visible during an update/error; Run captures current input and is never gated by Preview. Inspection does not save preset edits or create history. The `rtagent` console command also works; launching the module avoids holding that executable open during Windows dependency updates.
+`ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` and `ANTHROPIC_API_KEY` do the same for an `anthropic` provider. Values set in `.env` update their provider and the default model again at the next start.
 
-Open **Tools** to search the catalog, inspect argument schemas, and see Allowed, Approval required, Disabled, or Blocked by read-only. **Edit permissions** opens the same versioned Settings editor. Selecting a prompt preset changes instructions; permissions remain controlled by Settings.
+Each Run records the provider, model, effort and access it used, so its snapshot stays reproducible after settings change. With Anthropic models the Run keeps the model's thinking blocks between its own tool calls, as the Messages API requires; later turns receive the conversation without them. Leave temperature empty for models that reject it, such as current Claude models.
 
-The app opens directly without login or a workspace access token. Startup applies migrations. Use one server worker on loopback. Changing the workspace root or .env provider options requires a restart. Explicit .env provider values override saved settings on startup; edits in **Settings** apply immediately to new Runs until the next restart. API keys stay on the server.
+If a request fails, the error states the provider's reason and HTTP status (with any credential removed). Nothing is retried automatically, and a missing model is a configuration error rather than a silent switch to simulation.
 
-For a keyless local endpoint, leave the credential reference in Settings empty. The adapter requires streaming Chat Completions and tool calls. It does not silently rewrite roles, retry requests, or fall back to simulation.
+For offline development, choose **Simulated model** in the model picker or set `STUDIO_PROVIDER=fake`. It answers with canned text but runs real tools: `/read README.md`, `/echo hello` (which requires approval), `/tool bash {"command":"ls"}` (Linux) or `/tool powershell {"command":"Get-Location"}` (Windows), and `/slow` to try **Stop**.
 
-## Commands and workspace tools
+## Use the studio
 
-**Windows uses native AppContainer isolation and Windows PowerShell**, included in Windows 10/11. It does not require WSL, a Linux distribution, a VM, an administrator setup, or a separate local account. The model receives a `powershell` tool with PowerShell syntax; Bash scripts are not silently translated. Git Bash's MSYS runtime is not supported inside this AppContainer.
+### Run a task
 
-**Linux uses Bash and bubblewrap.** On Debian/Ubuntu, install the dependencies:
+Type a task in the message box and press **Run** or **Ctrl+Enter** (**Cmd+Enter** on macOS). The empty conversation suggests a few starting tasks. The preset selector beside the box switches between the built-in presets:
 
-```bash
-sudo apt-get update
-sudo apt-get install bash bubblewrap util-linux
-```
+| Preset | Focus |
+| --- | --- |
+| Security analysis (default) | Trace attacker-controlled input to sensitive operations; report evidence and impact. |
+| General agent | Ordinary project work from inspection to a concrete result. |
+| Coding | Implement within the existing architecture and verify with real commands. |
+| Debugging | Reproduce first, change one cause at a time, re-run the reproduction. |
+| Code review | Report actionable findings with locations; do not modify files unless asked. |
 
-**Workspace** checks the actual backend by executing a command in the sandbox. An unavailable sandbox reports an error; commands never fall back to unrestricted host execution.
+Presets change how the agent works, not what it is allowed to do. Mention `$skill-name` in a task to load a Skill (see below).
 
-- On Windows, commands run in a unique AppContainer with no network capabilities. A private workspace copy has read/write or read-only ACLs. PowerShell starts at `Workspace:\`; `$env:RTAGENT_WORKSPACE` gives the native directory. A Job Object limits the process tree to 32 processes and terminates descendants on completion, timeout, Stop, or server exit. Original project and system ACLs are not modified.
-- On Linux, private mount/process/network namespaces expose the project at /workspace, read-only system binaries/libraries, and scratch storage. The host home and network are not mounted into that environment.
-- Server credential variables and the host PATH are not forwarded. Existing .env files, Git metadata, runtime databases, the configured data directory, and dependency/cache directories are excluded. .env.example remains readable. AppContainer retains access to Windows resources normally readable by sandboxed applications; it is not a VM or a claim that every public host file is hidden.
-- Command network access is disabled, including local host services. Windows uses AppContainer enforcement; Linux uses a private network namespace. The separate allowlisted fetch_url tool downloads a bounded public HTTPS file without granting commands network access.
-- **Settings → Workspace sandbox** selects workspace-write or read-only. Read-only also removes native file/memory/skill mutation tools from model exposure. Scratch storage remains writable.
-- Command deadlines, bounded stdout/stderr, and process-tree cleanup apply. Timeout/cancellation can leave partial project edits; inspect those files before repeating a write.
+Beside the preset are the model button (see [Configure a model](#configure-a-model)) and **Workspace access**, which sets what the Run may change:
 
-On Windows, changed files are copied back after all command processes stop, with checks against concurrent host edits. Edits appear after the call completes. The copy is limited to 64 MiB and 10,000 entries in each direction, excluding dependencies and runtime data. Links, aliases, unsupported files, and conflicting edits fail explicitly. Copy-back is not an atomic multi-file transaction. Linux uses a direct workspace mount.
+| Access | Effect |
+| --- | --- |
+| Read only | Commands see the workspace read-only and the model is not offered file-changing tools. |
+| Ask before changes | Allowed tools that edit files, run commands or call MCP servers wait for your approval. Reading and searching stay allowed. |
+| Workspace write | Tools run as permitted in **Settings → Tools**. |
 
-Windows commands can use built-in PowerShell and explicitly registered trusted runtimes; arbitrary host development environments are not imported. Settings accepts up to three specific runtime folders, staged read-only without modifying original ACLs (20,000 entries/256 MiB total). Python finds offline workspace packages at .rtagent/packages. **Public download hosts** accepts up to twenty exact HTTPS hostnames. fetch_url rejects private/non-global DNS answers, credentials/query/fragment, redirects/proxies and existing destinations; downloads cap at 16 MiB and can require SHA-256. General shell networking, full PTY/ConPTY terminals and disk quotas remain outside these stages. The boundary assumes the workspace is not concurrently modified by a hostile host process. See [Microsoft's AppContainer documentation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer).
+Access only tightens permissions; a tool disabled in Settings stays disabled. Commands always run in the sandbox without network access.
 
-For a Python runtime, `uv run python -c "import sys; from pathlib import Path; print(Path(sys.base_prefix).resolve())"` prints its real folder. Enter that folder in Settings, rather than a drive/home/workspace ancestor or a linked alias. Installing dependencies remains an explicit task: download a known artifact with an expected digest, inspect it, then use an offline install/extraction in the sandbox.
+While the agent works, its reply streams into the conversation. Each tool call appears as one line: the tool, what it acts on (a path, command or search), and its outcome (done, failed, exit code, needs approval). Expand a line to see the arguments and the result: command output, file contents, search matches or a colored diff. Long command output keeps its beginning and end, with an explicit marker for the omitted middle.
 
-**Processes** shows owned background commands with bounded output, PID/status, **Send line**, **Close stdin** and **Stop process**. The model uses start_process/poll_process/send_process_input/stop_process under ordinary permissions. At most four processes run; each has an absolute deadline capped by the original Run budget. Input is a UTF-8 pipe (8 KiB/frame), not terminal emulation. Successful Runs may leave a command active for later turns. Stop, timeout, Run failure/cancellation and service exit clean up its process tree. Restart retains interrupted evidence and never relaunches it. Windows files copy back after exit. Archive/delete/workspace moves require stopping active writers; conversation copies never clone processes.
+When a tool requires approval, the Run pauses with an **Approve once / Reject** card showing the exact arguments. A rejected call returns an error to the model, which can continue another way. Approvals survive a page refresh or service restart.
 
-Native file tools use relative paths and reject traversal/links. `read_text` reads a line range from UTF-8 files up to 2 MiB and returns the full-file hash, range/total/next-line metadata, and explicit truncation. Request another range instead of assuming a truncated result is complete. `search_files` matches relative globs; `search_text` searches literal text with line numbers, optional case sensitivity, and bounded scan/results. Neither launches an unrestricted host search process.
+**Stop run** cancels the Run and waits for its processes to be cleaned up. It cannot undo files that were already written.
 
-`write_text` directly writes up to 64 KiB and requires the last-read hash for replacement. `edit_text` requires exactly one literal match. `apply_patch` supports Add/Update/Delete with exact line contexts and hashes for existing files. It preflights all paths/contexts/hashes before changing up to twenty files, returns bounded diffs, and preserves unrelated line endings. Each replacement is atomic; the whole patch is not. A later failure reports completed paths so the agent can inspect effects before retrying. File tools use application path checks; command tools use OS isolation.
+### Inspect what happened
 
-`update_plan` records a bounded plan with pending/in_progress/completed items and at most one active step. Chat derives the latest plan from paired tool receipts; it survives refresh, restart and conversation copies. Plan completion is the agent's progress report, while tool results establish whether verification actually passed.
+**Inspector → Run trace** lists every model request and tool call of a turn in execution order. For a model request it shows the canonical messages with their sources, the prepared request, the actual outbound body, usage and provider metadata. The view is redacted by default; **Show original trace** reveals the local original, and **Export JSON** downloads a labelled, redacted copy.
 
-MCP servers run **outside the command sandbox**, under their configured transports and permissions. Add a stdio executable and arguments or Streamable HTTP URL in Settings, select **Save & discover**, then enable individual tools. New MCP tools default to Disabled. Connections are stateless; IDA/Ghidra workflows need separate integration acceptance.
+**Preview** (or **Inspector → Prompt preview**) compiles the current draft without running anything: final message sequence, block activation, prepared request and the tool schemas the model would receive. It updates as you edit and never blocks **Run**.
 
-## Projects and workspace selection
+### Edit prompts
 
-Use **Projects → Add project → Choose folder** in the sidebar. Windows opens Explorer's system folder dialog; a Linux desktop uses installed zenity or kdialog. The selected path suggests a project name that you can edit before adding it. Cancellation preserves the existing field. If desktop selection is unavailable, enter an existing absolute path manually. Each Project has one workspace root. Selecting a different Project opens a new draft; choose an existing conversation explicitly to continue its history. New conversations use that folder for file tools, sandbox commands, AGENTS.md, .rtagent/MEMORY.md, and .agents/skills. Tool permissions, model settings, and limits remain shared in Settings; workspace-write permits native writes, and read-only removes model mutation tools.
+**Prompt** opens the preset editor. Blocks have a role (system, user or assistant), a position (before the conversation history or just before your message), optional `{{variables}}` and activation rules. Workspace instructions, memory and Skills appear in their real position between the blocks. Edits are drafts with **Undo**, **Redo** and **Discard** until you **Save preset**; saving creates a new revision, and earlier Runs keep the version they used. **Export**/**Import** moves presets between installations.
 
-**Default workspace** uses STUDIO_WORKSPACE_ROOT for existing conversations without a Project. The conversation menu's **Change workspace** moves an idle conversation to a saved Project or back to the default root. Future Runs use the new root; historical Runs and copied evidence keep their original roots. Finish/cancel active work before moving it. Duplicate/fork preserves the selected Project; workspace files are shared, not copied.
+### Manage conversations
 
-The workspace path appears in the conversation header, Workspace, and each saved Run's Inspector. Ordinary history folders organize conversations separately from Project filesystem roots. Registering a Project does not copy files, create directories, or expose application runtime data as a workspace. Project root paths are fixed registrations; richer project management is later work.
+The sidebar groups conversations by project, with search, an **Archived** filter and flat folders. A conversation's **…** menu can rename, move to a folder, change its workspace, duplicate, fork from an earlier turn, archive or delete it. **Fork here** on a turn does the same from that point. Copies share no state with the original and never repeat model or tool calls.
 
-## Memory and Skills
+Long conversations can be summarized: **Context** shows estimated history size and **Compact older turns** asks the model for a summary of all but the most recent turns. The original messages are kept, and **Restore full context** switches back.
 
-**Workspace → Memory** edits .rtagent/MEMORY.md. The agent uses read_memory/save_memory for the same file. There is no vector store or hidden automatic summarization. Conversation compaction is a separate explicit action, not an automatic memory update.
+**Processes** lists background commands the agent started, with their output, and lets you send input lines, close stdin or stop them.
 
-Prompt composer shows the active project's selected root instruction document, memory, catalog, and selected Skill sources in their actual insertion position. At each directory, the first nonempty AGENTS.override.md takes priority over AGENTS.md. Root instructions are captured initially; `read_instructions` loads the chain from the workspace root to a requested directory or file parent, with deeper rules taking precedence and a 32 KiB combined cap. Linked Markdown documents are read only when the agent requests them.
+## Projects, memory and Skills
 
-At submission, root instructions, memory, and Skill metadata are captured with explicit sources in the Run snapshot alongside `runtime:environment`. They are not repeatedly appended to conversation history. Later edits affect new Runs. Memory updates reject stale hashes. Local memory is ignored by this repository's Git configuration; never put credentials in it.
+A **project** is a registered folder. **Projects → + (Add project) → Choose folder** opens your system's folder picker (Windows Explorer, or zenity/kdialog on Linux; manual entry when unavailable). Each conversation belongs to one project, or to the default workspace (`STUDIO_WORKSPACE_ROOT`, the current directory by default). Selecting a project starts a new conversation there; an idle conversation can be moved with **Change workspace**. Each Run records the folder it used.
 
-Workspace skills live at `.agents/skills/<name>/SKILL.md`:
+At the start of each Run, the agent receives:
+
+- **Instructions:** the first non-empty `AGENTS.override.md` or `AGENTS.md` at the project root. The `read_instructions` tool loads the chain for deeper directories, where deeper files take precedence.
+- **Memory:** `.rtagent/MEMORY.md`, editable in **Workspace → Memory** and through the agent's `read_memory`/`save_memory` tools. It is plain Markdown; there is no hidden summarization.
+- **Skill catalog:** the name and description of each Skill. The agent loads a Skill's full text with `load_skill` when it matches the task, or you select it in **Workspace → Skills** or mention `$name`.
+
+Skills are folders with a `SKILL.md`:
 
 ```markdown
 ---
@@ -122,101 +135,80 @@ description: Review workspace evidence and prepare a report with file references
 Read the evidence, distinguish facts from assumptions, and cite file paths.
 ```
 
-Only name, description, and location enter the default catalog. The model calls load_skill when a description matches the task. To load a skill explicitly, select it in **Prompt → Workspace context → Skill catalog** or **Workspace → Skills** or mention **$evidence-review** in your task. Supporting files can live beside SKILL.md and be read with file tools. Invalid entries are shown in Workspace.
+Skills come from three places, and a name refers to exactly one Skill:
 
-The bundled **$skill-creator** guides the agent to inspect existing procedures, write one with save_skill, and load it again to validate the result. For example: “$skill-creator create a skill for reviewing this project's Python changes.” You can also create/edit skills directly in Workspace. Bundled skills are read-only; project skills can be committed after review. Skill text cannot grant permissions or alter the sandbox.
+- **Bundled:** **skill-creator** (writes and verifies a new Skill), **debugging** and **code-review**. Read-only.
+- **Global:** created in **Settings → Skills** and stored in the data directory (`skills/<name>/`); every project can use them.
+- **Project:** `.agents/skills/<name>/` in the project folder, managed in **Workspace → Skills** or saved by the agent with `save_skill`.
 
-**$debugging** guides reproduction, evidence-based diagnosis, a focused repair, and the same check after the fix. **$code-review** guides source/flow inspection, confirmed findings, and read-only review. These are small procedure files; select read-only in Settings when the execution boundary must prohibit native mutations.
+A project Skill cannot reuse the name of a bundled or global Skill; the conflict is reported instead of one silently replacing the other. Skills are text; they cannot grant permissions or change the sandbox.
 
-## Conversations and prompt editing
+## Isolation and permissions
 
-The sidebar separates **Active** and **Archived** conversations, supports title search, and groups history in flat folders. Use a conversation's **…** menu to rename it, move it, duplicate it, choose a fork point, archive/restore it, or delete it. Folder menus rename or delete a folder; deleting a folder moves its conversations to **Unfiled** and preserves their records.
+### Tool permissions
 
-**Duplicate** copies the full saved conversation and its completed runs/traces. **Fork** copies history through a selected successful turn; **Fork here** performs the same operation from a turn header. Copies have independent IDs and a **Copied history** label. They never repeat model/tool calls, clone checkpoints, or copy workspace files. Copies keep their source conversation’s Project for future work; saved Run roots remain immutable. Only successful turns become input history for subsequent runs. Finish or cancel an active Run before copying, archiving, or deleting its conversation.
+**Tools** lists every tool with its argument schema and its status for the workspace access currently selected: Allowed, Approval required, Disabled, or Blocked by read-only. **Settings → Tools** sets each tool's default permission. New MCP tools start disabled; starting background processes, sending them input and downloading files start at "ask".
 
-Chat displays all turns together. The conversation toolbar and message input stay fixed while history scrolls. Archived conversations can be inspected; restore one to send another message.
+The native tools are: `list_files`, `search_files`, `search_text`, `read_text`, `read_instructions`, `write_text`, `edit_text`, `apply_patch`, `update_plan`, `bash` (Linux) or `powershell` (Windows), `start_process`, `poll_process`, `send_process_input`, `stop_process`, `fetch_url`, `read_memory`, `save_memory`, `load_skill`, `save_skill` and `echo`.
 
-In **Prompt**, the **Active preset** selector stays usable with unsaved changes. **New**, **Duplicate**, and **Rename** have separate controls. Each preset keeps its draft while switching; **Undo**, **Redo**, and **Discard changes** make edits reversible. Blocks are grouped into **Before conversation** and **Before your message** positions. Saving advances the preset revision; draft edits are local to the current page and are lost on reload.
+**Workspace access** under the message box tightens these per Run (see [Run a task](#run-a-task)). **Read only** mounts the workspace read-only for commands and removes every file-changing tool from what the model is offered.
 
-The five built-in presets share six editable blocks for identity, boundaries, practical work, native tools, memory/Skills, and reporting, followed by a seventh task-focus block. They now include background/input/deadline, trusted-runtime/download and derived-summary instructions. Coding emphasizes implementation and verification; Debugging emphasizes reproduction and root cause; Code review emphasizes evidence and findings; General agent handles ordinary project work; Security analysis remains the default. Exact recognized unchanged shipped presets upgrade automatically; user edits and existing Run snapshots remain unchanged. New start/input/download permissions begin at Ask; poll/stop are Allowed. Explicit choices are preserved.
+### File tools
 
-Open **Context** to inspect original/effective history estimates and **Compact older turns**, retaining one to ten recent successful turns intact. Compaction calls the selected model with no tools and records its requests/usage. The source history and previous Run snapshots remain unchanged. New Runs use a labeled derived summary plus recent history; **Restore full context** restores all source messages. Failed/cancelled/stale reductions never activate. Estimates are history-only byte heuristics, distinct from full Prompt inspection and actual token usage. A budget error requires an explicit user action; there is no silent trimming.
+File tools take relative paths, reject `..`, links and absolute paths, and never touch credentials (`.env`, `.env.*` except `.env.example`), Git metadata, databases (`.db`, `.sqlite`), the studio's data directory, or dependency folders (`.venv`, `node_modules`, `__pycache__`). Replacing a file requires the hash from the last read, so a concurrent change is detected instead of overwritten. `apply_patch` validates every file before changing any; each file is replaced atomically, but a multi-file patch is not a transaction, and a failure reports which files were already changed.
 
-Prompt and Workspace Skills have bounded JSON **Import/Export** controls. Presets import with new preset/block IDs; Skills publish only new validated names with their text resources. Packages exclude settings and execution state. [Harness interfaces](harness.md) covers CLI/JSON-RPC, HTTP/Python clients, trusted tool/hooks integration, reusable formats and Messages provider setup.
+### Commands
 
-## Execution records
-
-STUDIO_DATA_DIR contains app.db (settings, presets, sessions, snapshots, events, receipts) and checkpoints.db (LangGraph state). Runtime files, .env, raw traces, and local memory are excluded from Git.
-
-Each model call records canonical messages, prepared and captured application-level requests, transformations, metadata, and returned usage. Missing usage/cost data stays null. Token estimates use a byte heuristic; configured context overflow fails explicitly without hidden trimming.
-
-Approvals survive restarts. Unknown outcomes require a recovery decision rather than automatic retry. Stop awaits local cleanup but does not undo completed edits or remote effects. Only successful turns enter session history. Refresh/SSE reconnect reload saved state without creating another Run. Deleting an idle conversation removes its associated records and checkpoints. Original traces remain local; exports are labeled redacted copies.
-
-## Development and live verification
-
-Use `npm --prefix web run dev` alongside the backend for Vite at http://127.0.0.1:5173. Regenerate API types after contract changes:
-
-```powershell
-uv run python scripts/export_api.py
-npm --prefix web run generate:api
-```
-
-Validate changed behavior against the running service first. A repeatable check with a real HTTP server and OS tools is available:
-
-```powershell
-uv run python scripts/smoke_workspace.py
-uv run python scripts/smoke_conversations.py
-uv run python scripts/smoke_projects.py
-uv run python scripts/smoke_agent_tools.py
-uv run python scripts/smoke_stage3.py
-uv run python scripts/smoke_stage4.py
-uv run python scripts/smoke_desktop.py --native
-```
-
-It temporarily binds port 8766 and uses a disposable workspace with an explicitly simulated model. It exercises Windows AppContainer/PowerShell or Linux bubblewrap/Bash. It verifies direct Run retry identity, actual command/file operations, hidden host paths, network isolation, memory/Skills, context provenance, read-only enforcement, and cancellation cleanup. It does not call a model service or modify the selected user workspace.
-
-The conversation check uses port 8767 with separate temporary data. It verifies fork boundaries, duplicate traces and provenance, stale-edit rejection, archive/restore, folder rename/delete, and continuing a fork after deleting its source.
-
-The project check uses port 8769 and sibling temporary folders to verify project-bound files, commands, instructions, memory, Skills, idle moves, frozen Run roots, and busy-session rejection. The desktop check uses port 8776 and isolated folders. On Windows, `--native` opens and operates only its owned system dialogs to verify selection, cancellation, disconnect and shutdown; omit that option on a headless machine. It also verifies typed errors and explicit Skill authoring under agent read-only settings.
-
-The agent-tool check uses port 8770. It verifies actual search exclusions, ranged reads and full hashes, nested instruction priority, Add/Update/Delete patches, stale/ambiguous rejection, line-ending preservation, read-only enforcement, native commands, and plan persistence/copies/restart.
-
-For explicit real-model acceptance on Windows with the main service running:
-
-```powershell
-uv run python scripts/acceptance_stage2.py --live
-uv run python scripts/acceptance_agent_tools.py --live
-```
-
-Both use the configured real provider and may incur model usage. Each owns port 8768, a registered project, and separate data; run them separately. Local results stay under ignored var. The agent-tool acceptance uses Coding and Code review presets, guarded multi-file patches, scoped instructions, recorded plans and actual literal search, with independent sandbox checks. No real service is called by the default offline tests.
-
-For manual offline checks, explicitly select **Simulated model** in Settings or set STUDIO_PROVIDER=fake. Commands such as `/read README.md`, `/echo hello`, and `/tool powershell {"command":"Get-Location"}` (Windows) or `/tool bash {"command":"pwd"}` (Linux) use simulated decisions with real tools. `/slow` exercises Stop. Simulation is a development aid, not the default provider.
-
-```powershell
-uv run pytest
-uv run ruff check src tests scripts migrations
-uv run black --check src tests scripts migrations
-uv run isort --check-only src tests scripts migrations
-npm --prefix web run lint
-npm --prefix web run typecheck
-npm --prefix web run test -- --run
-npm --prefix web run format:check
-npm --prefix web run build
-uv run python scripts/check_docs.py
-uv run python scripts/check_layers.py
-```
-
-Browser checks use a separate backend and temporary data. Build first, then run `npx playwright install chromium` and `npm run test:e2e` from web/. Offline checks do not replace acceptance against a real model.
-
-## Delivery stages
-
-The previous foundation/compiler/conversation/tools/recovery milestones are all subdivisions of **Stage 1**. These stages describe delivery boundaries, not instructions to build speculative infrastructure now.
-
-| Stage | Scope | Exit criteria / status |
+| | Linux | Windows |
 | --- | --- | --- |
-| **1 — Inspectable execution foundation** | Web workspace, prompt blocks, provider boundary, single-agent loop, MCP, traces, persistence, approvals, recovery | Implemented locally; a basic live-model/native-tool loop has passed on Windows. |
-| **2 — Working local agent** | Direct Run, live composition, Projects/workspace binding, native commands/read/write/edit, OS isolation, instructions, memory, Skills and skill creation | Complete on Windows; real-model coding/analysis, restart reuse, and native/project boundary checks passed. See [acceptance](acceptance-stage2.md). Linux requires acceptance on its own host. |
-| **3 — Daily agent use** | Explicit context compaction, context accounting, session branching, diff review, command output streaming, interactive/background process lifecycle, practical dependency/network policies | Complete on Windows; substantial real-model work, preserved history, native stream/Unicode pipes/tree cleanup and explicit dependency policy passed. See [acceptance](acceptance-stage3.md). Full terminal emulation and Linux-host acceptance are outside this delivery claim. |
-| **4 — Extensible harness** | Stable programmatic run interface, CLI/JSON/RPC, focused lifecycle/tool hooks, reusable prompt/skill packages, more providers | Implemented and accepted with the shared loop, actual CLI/RPC, trusted extensions and package/provider HTTP contracts. See [acceptance](acceptance-stage4.md); external Claude remains unverified. |
-| **5 — Security analysis workflows** | Stateful MCP, accepted IDA/Ghidra/debugger/browser integrations, evidence/artifacts, reusable analysis skills | Complete representative authorized reverse-engineering, debugging, and CTF tasks with real tools and inspectable evidence. |
-| **6 — Evaluation and justified scale** | Reproducible task sets, replay/comparison, A/B and ablation, usage/cost reporting; bounded delegation, more workers, PostgreSQL or teams only when needed | Give each capability a real workload and its own acceptance criteria. Preserve the simple local path. |
+| Shell | Bash in bubblewrap namespaces | Windows PowerShell in a fresh AppContainer |
+| Workspace | Mounted at `/workspace`; edits apply directly | Private copy; edits copied back after the command exits, with conflict checks |
+| Hidden | Credentials, `.git`, databases and the data directory are masked | Same, and dependency folders are not copied |
+| System | `/usr` and `/etc` read-only; private `/tmp` and home | Normal AppContainer access to shared Windows resources |
+| Network | None (private network namespace) | None (no AppContainer capabilities) |
+| Cleanup | Process group killed on exit, timeout or Stop | Job Object (max 32 processes) terminated |
+
+The command tool is `bash` on Linux and `powershell` on Windows. A data directory moved between the two (for example from Windows to WSL) keeps its shell permission: at start-up it is carried over to the native tool.
+
+Commands also have a deadline, bounded output and no access to server credentials or the host `PATH`. If the sandbox is unavailable, commands fail; they never fall back to running on the host. **Workspace** shows whether the sandbox works.
+
+On Linux, dependency folders such as `.venv` and `node_modules` stay visible so a project's tests can run offline. A virtual environment's interpreter usually links outside the project; add that interpreter's folder (the parent of `home` in `.venv/pyvenv.cfg`) under **Settings → Sandbox → Trusted runtime directories** and it is mounted read-only at the same path. On Windows, trusted runtimes are copied into the sandbox (up to 20,000 files and 256 MiB). At most three can be registered.
+
+### Downloads and MCP
+
+`fetch_url` downloads a public HTTPS file (up to 16 MiB, optionally checked against a SHA-256) from hosts you list in **Settings → Sandbox → Allowed HTTPS download hosts**. It refuses redirects, proxies, credentials in URLs and private or local addresses, and writes only new files. It does not give commands network access.
+
+MCP servers (stdio commands or Streamable HTTP URLs) are configured in **Settings → MCP servers** and run **outside** the sandbox, with their own permissions. **Save & discover** lists each server's tools on the same page, where you set their permissions; after a restart they are discovered again automatically the first time they are needed.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| "No model is selected…" when running | Choose a model under the message box. If the list is empty, add the provider's models in **Settings → Models**. |
+| "Model request failed (HTTP 401): …" | The provider rejected the key, or none was found. **Settings → Providers** shows where the key comes from; paste and save it there. |
+| "… does not accept reasoning effort …" | The selected effort is not supported by that provider's API. Pick another level or Default. |
+| A Claude model rejects temperature | Leave **Temperature** empty in **Settings → Models**. |
+| "The model reached its N-token output limit…" | A tool call (often a large file write) was cut off. Raise **Max output tokens**. |
+| Workspace shows the sandbox as unavailable on Linux | Install `bubblewrap`; check that unprivileged user namespaces are enabled. |
+| "Excluded paths cannot be links…" | A credential-like name (such as `.env`) is a symlink; replace it with a regular file. |
+| A command cannot find `python`, `node` or a project venv | Register the runtime under **Settings → Sandbox → Trusted runtime directories**. |
+| Run stays "queued" | Four Runs from other conversations are active; it starts when one finishes. |
+| A Run is "interrupted" | The service restarted, or a call's outcome is unknown. Review each uncertain call and choose **Retry** or record a verified result before resuming. |
+
+## Status and roadmap
+
+As of 2026-10-07:
+
+- Stages 1–4 below are implemented. Real-model acceptance ran on Windows ([records](history/README.md)); the Linux sandbox is covered by automated tests against real bubblewrap, but a live-model Linux acceptance and a check against Anthropic's hosted API have not been run. The Messages adapter, thinking replay and reasoning effort are tested against recorded protocol fixtures.
+- Not implemented: full terminal emulation (PTY/ConPTY), command network access, disk quotas, stateful MCP sessions, specialized reverse-engineering integrations.
+
+| Stage | Scope | Status |
+| --- | --- | --- |
+| 1 — Inspectable execution | Web workspace, prompt blocks, provider boundary, agent loop, MCP, traces, approvals, recovery | Done |
+| 2 — Working local agent | Direct Run, projects, native file tools and commands with OS isolation, instructions, memory, Skills | Done |
+| 3 — Daily agent use | Context compaction, conversation branching, diffs, streamed command output, background processes, dependency/download policy | Done |
+| 4 — Extensible harness | CLI, JSON-RPC, Python client and embedding, hooks, trusted local tools, preset/Skill packages, Messages provider | Done |
+| 5 — Security analysis workflows | Stateful MCP, IDA/Ghidra/debugger/browser integrations, evidence artifacts, analysis Skills | Planned |
+| 6 — Evaluation | Reproducible task sets, replay/comparison, A/B testing, cost reporting | Planned |
+
+Later stages should add capabilities with a real workload and acceptance criteria each, while keeping the single-user local path simple.

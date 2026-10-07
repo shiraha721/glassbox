@@ -323,7 +323,7 @@ export function ConversationHistory({
                   </button>
                   <button
                     role="menuitem"
-                    disabled={!!menu.session.active_run_id || !menu.session.messages.length}
+                    disabled={!!menu.session.active_run_id || !menu.session.message_count}
                     onClick={() => openDialog({ kind: 'fork', session: menu.session })}
                   >
                     <GitBranch size={15} /> Fork conversation

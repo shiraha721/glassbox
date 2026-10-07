@@ -1,12 +1,16 @@
 """Bridge native command pipes to bounded asynchronous progress and explicit stdin."""
 
 import asyncio
+import json
 import queue
 import threading
 from dataclasses import dataclass, field
-from typing import Any
 
 from rtagent.domain.execution import OutputCallback
+
+# Per-stream character budgets; both fit a 64 KiB tool result with its JSON envelope.
+OUTPUT_HEAD = 8_000
+OUTPUT_TAIL = 16_000
 
 
 @dataclass
@@ -46,53 +50,111 @@ class CommandControl:
             raise ValueError("Command input is full; wait for the process to consume it.") from exc
 
 
-class OutputRelay:
-    """Coalesce bounded native pipe fragments before calling async persistence callbacks."""
+class OutputBuffer:
+    """Keep the start and the latest end of one decoded stream within a fixed budget.
 
-    def __init__(self, callback: OutputCallback | None) -> None:
-        """Bind one call's event loop and output consumer without starting a process."""
-        self.callback = callback
+    Command summaries, failures and server logs usually appear last, so a prefix alone hides
+    what matters most. The marker states exactly how much text was dropped in between."""
+
+    def __init__(self, head: int = OUTPUT_HEAD, tail: int = OUTPUT_TAIL) -> None:
+        """Start empty with character budgets for the retained beginning and end."""
+        self.head_limit, self.tail_limit = head, tail
+        self.head, self.tail, self.omitted = "", "", 0
+
+    def append(self, text: str) -> None:
+        """Fill the head first, then keep only the newest tail characters."""
+        if len(self.head) < self.head_limit:
+            room = self.head_limit - len(self.head)
+            self.head, text = self.head + text[:room], text[room:]
+        if text:
+            self.tail += text
+            if len(self.tail) > self.tail_limit:
+                self.omitted += len(self.tail) - self.tail_limit
+                self.tail = self.tail[-self.tail_limit :]
+
+    @property
+    def truncated(self) -> bool:
+        """Report whether any text between the head and tail was dropped."""
+        return self.omitted > 0
+
+    def text(self) -> str:
+        """Render the retained text with an explicit omission marker."""
+        if not self.omitted:
+            return self.head + self.tail
+        return f"{self.head}\n[... {self.omitted} characters omitted ...]\n{self.tail}"
+
+
+class CommandOutput:
+    """Own a command's bounded stdout/stderr and publish rate-limited snapshots.
+
+    Producers may write from a native drain thread. Consumers receive the complete bounded
+    text of a changed stream, so they replace stored output rather than appending deltas."""
+
+    def __init__(self, callback: OutputCallback | None, interval: float = 0.1) -> None:
+        """Bind the running loop and an optional async consumer without starting a process."""
+        self.callback, self.interval = callback, interval
+        self.streams = {"stdout": OutputBuffer(), "stderr": OutputBuffer()}
         self.loop = asyncio.get_running_loop()
-        self.queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        self.lock = threading.Lock()
+        self.changed = asyncio.Event()
+        self.dirty: set[str] = set()
+        self.finished = False
 
-    def publish(self, stream: str, text: str, truncated: bool = False) -> None:
-        """Accept already bounded decoded output from Linux or a Windows drain thread."""
+    def write(self, stream: str, text: str) -> None:
+        """Retain decoded output from the event loop or a Windows drain thread."""
+        if not text:
+            return
+        with self.lock:
+            self.streams[stream].append(text)
+            self.dirty.add(stream)
         if self.callback:
-            self.loop.call_soon_threadsafe(
-                self.queue.put_nowait, {"stream": stream, "text": text, "truncated": truncated}
-            )
+            self.loop.call_soon_threadsafe(self.changed.set)
+
+    def result(self, stream: str) -> tuple[str, bool]:
+        """Return a stream's final bounded text and whether it was truncated."""
+        with self.lock:
+            return self.streams[stream].text(), self.streams[stream].truncated
+
+    async def _flush(self) -> None:
+        with self.lock:
+            frames = [
+                {
+                    "stream": name,
+                    "text": self.streams[name].text(),
+                    "truncated": self.streams[name].truncated,
+                }
+                for name in sorted(self.dirty)
+            ]
+            self.dirty.clear()
+        for frame in frames:
+            await self.callback(frame)
 
     async def drain(self) -> None:
-        """Emit coalesced progress until the owner sends an explicit completion sentinel."""
+        """Publish coalesced snapshots until close() flushes the final state."""
         if not self.callback:
             return
-        while True:
-            first = await self.queue.get()
-            if first is None:
-                return
-            await asyncio.sleep(0.1)
-            frames = [first]
-            finished = False
-            while not self.queue.empty():
-                frame = self.queue.get_nowait()
-                if frame is None:
-                    finished = True
-                    break
-                frames.append(frame)
-            for stream in ("stdout", "stderr"):
-                selected = [frame for frame in frames if frame["stream"] == stream]
-                if selected:
-                    await self.callback(
-                        {
-                            "stream": stream,
-                            "text": "".join(frame["text"] for frame in selected),
-                            "truncated": any(frame["truncated"] for frame in selected),
-                        }
-                    )
-            if finished:
-                return
+        while not self.finished:
+            await self.changed.wait()
+            self.changed.clear()
+            if not self.finished:
+                await asyncio.sleep(self.interval)
+            await self._flush()
+        await self._flush()
 
-    async def finish(self, reader: asyncio.Task[None]) -> None:
-        """Flush queued output before a final command receipt or cancellation is recorded."""
-        self.queue.put_nowait(None)
+    async def close(self, reader: asyncio.Task[None]) -> None:
+        """Flush retained output before a final command receipt or cancellation is recorded."""
+        self.finished = True
+        self.changed.set()
         await asyncio.shield(reader)
+
+
+def command_result(result: dict) -> str:
+    """Serialize a command result within the 64 KiB tool limit, dropping older output first.
+
+    JSON escaping can multiply the size of retained text, so the character budgets alone
+    cannot guarantee the serialized bound."""
+    while len(json.dumps(result, ensure_ascii=False).encode()) > 65536:
+        for key in ("stdout", "stderr"):
+            result[key] = result[key][len(result[key]) // 2 :]
+        result["truncated"] = True
+    return json.dumps(result, ensure_ascii=False)

@@ -8,10 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-from acceptance_stage2 import api, run_task, start_server
+from acceptance_local_agent import api, run_task, service_key, share_key, start_server
 
 from rtagent.domain import ProviderConfig
-from rtagent.infrastructure.config import Settings, resolve_secret
+from rtagent.infrastructure.config import Settings
 
 FIXTURES = {
     "AGENTS.md": "Keep changes focused. Preserve check.ps1 and KEEP.txt. Use native PowerShell; no network or dependencies are needed. Follow instructions for the src directory.\n",
@@ -41,7 +41,7 @@ async def main() -> None:
     if (
         provider.adapter != "openai"
         or not provider.model
-        or (provider.credential_ref and not resolve_secret(provider.credential_ref))
+        or (provider.credential_ref and not service_key(provider))
     ):
         parser.error("Configure a real provider and its server-side credential first.")
     root = Path("var") / ("agent-tools-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
@@ -59,6 +59,7 @@ async def main() -> None:
         openai_base_url=provider.base_url,
         _env_file=None,
     )
+    share_key(provider, settings)
     server, serving = await start_server(settings)
     try:
         async with httpx.AsyncClient(
@@ -67,7 +68,10 @@ async def main() -> None:
             state = await api(client, "GET", "/bootstrap")
             config = state["config"]
             config["provider"] = provider.model_copy(
-                update={"max_output_tokens": max(4096, provider.max_output_tokens)}
+                update={
+                    "max_output_tokens": max(4096, provider.max_output_tokens),
+                    "profile_id": None,
+                }
             ).model_dump()
             await api(client, "PUT", "/config", config)
             project = await api(

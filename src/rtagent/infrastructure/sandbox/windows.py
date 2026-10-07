@@ -16,7 +16,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable
 from contextlib import ExitStack
 from ctypes import wintypes as W
 from pathlib import Path
@@ -24,12 +23,16 @@ from typing import BinaryIO
 from uuid import uuid4
 
 from rtagent.domain import AppError
-from rtagent.infrastructure.sandbox.command_io import CommandControl, OutputCallback, OutputRelay
+from rtagent.infrastructure.sandbox.command_io import (
+    CommandControl,
+    CommandOutput,
+    OutputCallback,
+    command_result,
+)
 from rtagent.infrastructure.sandbox.files import SandboxFiles
 from rtagent.infrastructure.workspace.files import Workspace
 from rtagent.infrastructure.workspace.toolchains import copy_toolchains
 
-OUTPUT_LIMIT = 24_000
 VOID = C.c_void_p
 SIZE = C.c_size_t
 KERNEL = C.WinDLL("kernel32", use_last_error=True)
@@ -179,28 +182,13 @@ def _grant(path: Path, sid: str, access: str) -> None:
         )
 
 
-def _drain(
-    descriptor: int, result: dict, key: str, publish: Callable[[str, str, bool], None] | None = None
-) -> None:
-    """Keep draining the pipe after its output limit so the child cannot deadlock."""
-    data = bytearray()
-    truncated = False
+def _drain(descriptor: int, output: CommandOutput, key: str) -> None:
+    """Drain a pipe completely so the child cannot block, retaining bounded text."""
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     with os.fdopen(descriptor, "rb", buffering=0) as stream:
         while chunk := stream.read(8192):
-            remaining = max(0, OUTPUT_LIMIT - len(data))
-            retained = chunk[:remaining]
-            data.extend(retained)
-            changed = len(chunk) > remaining and not truncated
-            truncated |= len(chunk) > remaining
-            if publish and (retained or changed):
-                publish(key, decoder.decode(retained), truncated)
-    if publish:
-        tail = decoder.decode(b"", final=True)
-        if tail:
-            publish(key, tail, truncated)
-    result[key] = data.decode("utf-8", errors="replace")
-    result[key + "_truncated"] = truncated
+            output.write(key, decoder.decode(chunk))
+    output.write(key, decoder.decode(b"", final=True))
 
 
 def _feed_input(stream: BinaryIO, control: CommandControl) -> None:
@@ -239,8 +227,8 @@ class WindowsSandbox:
         cwd: str,
         deadline: float,
         stop: threading.Event,
+        output: CommandOutput,
         control: CommandControl | None = None,
-        publish: Callable[[str, str, bool], None] | None = None,
         toolchains: list[Path] | None = None,
     ) -> dict:
         system = Path(os.environ["SystemRoot"]) / "System32"
@@ -314,7 +302,7 @@ class WindowsSandbox:
             )
             + "\0\0"
         )
-        result = {"stdout": "", "stderr": "", "timed_out": False}
+        result: dict = {"timed_out": False}
         with ExitStack() as cleanup:
             job = _create_job(None, None)
             _check(job)
@@ -330,9 +318,7 @@ class WindowsSandbox:
                 read, write = os.pipe()
                 writer = cleanup.enter_context(os.fdopen(write, "wb", buffering=0))
                 streams.append(writer)
-                reader = threading.Thread(
-                    target=_drain, args=(read, result, key, publish), daemon=True
-                )
+                reader = threading.Thread(target=_drain, args=(read, output, key), daemon=True)
                 reader.start()
                 readers.append(reader)
             input_writer = None
@@ -441,8 +427,6 @@ class WindowsSandbox:
             code = W.DWORD()
             _check(_exit_code(process.process, C.byref(code)))
             result["exit_code"] = code.value
-        flags = [result.pop(key + "_truncated", False) for key in ("stdout", "stderr")]
-        result["truncated"] = any(flags)
         return result
 
     def _execute(
@@ -452,8 +436,8 @@ class WindowsSandbox:
         mode: str,
         timeout: float,
         stop: threading.Event,
+        output: CommandOutput,
         control: CommandControl | None = None,
-        publish: Callable[[str, str, bool], None] | None = None,
         toolchain_roots: list[str] | None = None,
     ) -> dict:
         directory = self.workspace.path(cwd)
@@ -487,16 +471,10 @@ class WindowsSandbox:
             if toolchains:
                 _grant(root / "toolchains", sid_text.value, "RX")
             if stop.is_set() or time.monotonic() >= deadline:
-                result = {
-                    "stdout": "",
-                    "stderr": "",
-                    "exit_code": None,
-                    "truncated": False,
-                    "timed_out": not stop.is_set(),
-                }
+                result = {"exit_code": None, "timed_out": not stop.is_set()}
             else:
                 result = self._run_process(
-                    root, sid, command, relative, deadline, stop, control, publish, toolchains
+                    root, sid, command, relative, deadline, stop, output, control, toolchains
                 )
             result.update(
                 {
@@ -540,8 +518,9 @@ class WindowsSandbox:
     ) -> str:
         """Run blocking Win32 calls off the event loop and finish cleanup on cancellation."""
         stop = control.stop if control else threading.Event()
-        relay = OutputRelay(on_output)
-        reader = asyncio.create_task(relay.drain())
+        # Background processes persist snapshots; a slower cadence bounds their write rate.
+        output = CommandOutput(on_output, interval=0.5 if control else 0.1)
+        publisher = asyncio.create_task(output.drain())
         worker = asyncio.create_task(
             asyncio.to_thread(
                 self._execute,
@@ -550,8 +529,8 @@ class WindowsSandbox:
                 mode,
                 timeout,
                 stop,
+                output,
                 control,
-                relay.publish,
                 toolchain_roots,
             )
         )
@@ -562,12 +541,17 @@ class WindowsSandbox:
             await asyncio.shield(worker)
             raise
         finally:
-            await relay.finish(reader)
-        while len(json.dumps(result, ensure_ascii=False).encode()) > 65536:
-            result["stdout"] = result["stdout"][: len(result["stdout"]) // 2]
-            result["stderr"] = result["stderr"][: len(result["stderr"]) // 2]
-            result["truncated"] = True
-        return json.dumps(result, ensure_ascii=False)
+            await output.close(publisher)
+        stdout, stdout_truncated = output.result("stdout")
+        stderr, stderr_truncated = output.result("stderr")
+        return command_result(
+            {
+                "stdout": stdout,
+                "stderr": stderr,
+                **result,
+                "truncated": stdout_truncated or stderr_truncated,
+            }
+        )
 
     async def status(self, refresh: bool = False) -> dict:
         """Probe a real AppContainer without making ordinary app startup depend on it."""

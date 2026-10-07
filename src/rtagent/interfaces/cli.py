@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 
-from rtagent.domain import AppError
+from rtagent.domain import AppError, ModelChoice
 from rtagent.interfaces.client import AgentClient
 from rtagent.interfaces.rpc import serve_rpc
 
@@ -17,7 +17,8 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     root.add_argument("--url", default="http://127.0.0.1:8001", help="Existing local service URL.")
     commands = root.add_subparsers(dest="command")
-    commands.add_parser("serve", help="Start the Web service on loopback port 8001.")
+    serve = commands.add_parser("serve", help="Start the Web service on loopback.")
+    serve.add_argument("--port", type=int, default=8001)
     commands.add_parser("rpc", help="Forward newline JSON-RPC 2.0; stdout is JSON only.")
     run = commands.add_parser("run", help="Submit a direct Run; Preview is optional.")
     run.add_argument("task", nargs="?")
@@ -26,6 +27,11 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--project")
     run.add_argument("--preset", default="general-agent")
     run.add_argument("--skill", action="append", default=[])
+    run.add_argument(
+        "--model", help="PROVIDER_ID:MODEL for this Run, e.g. openai:gpt-5 or simulated:simulated."
+    )
+    run.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"])
+    run.add_argument("--access", choices=["read-only", "ask", "workspace-write"])
     run.add_argument("--wait", action="store_true")
     run.add_argument("--timeout", type=float, default=600)
     run.add_argument("--json", action="store_true")
@@ -62,12 +68,22 @@ async def execute(args: argparse.Namespace) -> int:
             task = args.task_file.read_text(encoding="utf-8") if args.task_file else args.task
             if task is None:
                 task = sys.stdin.read(100001)
+            model = None
+            if args.model or args.effort:
+                if not args.model or ":" not in args.model:
+                    raise AppError("cli_model", "Use --model PROVIDER_ID:MODEL with --effort.")
+                provider_id, name = args.model.split(":", 1)
+                model = ModelChoice(
+                    provider_id=provider_id, model=name, reasoning_effort=args.effort
+                )
             view = await client.run(
                 task,
                 session_id=args.session,
                 project_id=args.project,
                 preset_id=args.preset,
                 skills=args.skill,
+                model=model,
+                access=args.access,
             )
             if args.wait:
                 print(
@@ -157,7 +173,7 @@ def main() -> None:
     if args.command in {None, "serve"}:
         from rtagent.interfaces.http.app import serve
 
-        serve()
+        serve(getattr(args, "port", 8001))
         return
     try:
         raise SystemExit(asyncio.run(execute(args)))

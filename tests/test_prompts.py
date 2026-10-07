@@ -123,3 +123,13 @@ def test_malformed_operator_is_an_application_error():
     """Malformed JSON operators produce a compiler error rather than a Python type error."""
     with pytest.raises(AppError, match="operator"):
         condition_value({"field": "provider", "op": [], "value": "fake"}, {"provider": "fake"})
+
+
+def test_conditions_are_evaluated_only_for_otherwise_active_blocks():
+    """A disabled block's condition is not evaluated; an active block's missing field fails."""
+    condition = {"field": "variables.missing", "op": "eq", "value": 1}
+    disabled = Block(id="d", name="Off", template="x", order=1, enabled=False, condition=condition)
+    compiled = compile_blocks([disabled])
+    assert compiled.activation_report[0]["reason"] == "disabled"
+    with pytest.raises(AppError, match="missing"):
+        compile_blocks([disabled.model_copy(update={"enabled": True})])

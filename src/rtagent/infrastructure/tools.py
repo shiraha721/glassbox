@@ -15,9 +15,17 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import ValidationError
 
-from rtagent.domain import AppError, MCPServer, StudioConfig, TaskPlan, ToolDefinition, digest
+from rtagent.domain import (
+    SHELL_TOOL,
+    AppError,
+    MCPServer,
+    StudioConfig,
+    TaskPlan,
+    ToolDefinition,
+    digest,
+)
 from rtagent.domain.execution import current_execution
-from rtagent.infrastructure.config import resolve_secret
+from rtagent.infrastructure.credentials import CredentialStore
 from rtagent.infrastructure.sandbox.linux import BashSandbox
 from rtagent.infrastructure.sandbox.processes import ProcessManager, process_view
 from rtagent.infrastructure.storage import Repository
@@ -25,6 +33,8 @@ from rtagent.infrastructure.workspace.downloads import fetch_url
 from rtagent.infrastructure.workspace.files import MEMORY_PATH, Workspace
 
 WRITE_TOOLS = {"write_text", "edit_text", "apply_patch", "save_memory", "save_skill", "fetch_url"}
+# Tools that change files or run code; "Ask before changes" requires approval for each call.
+CHANGE_TOOLS = WRITE_TOOLS | {"bash", "powershell", "start_process", "send_process_input"}
 ToolHandler = Callable[[dict, Workspace], Awaitable[str]]
 
 
@@ -112,15 +122,18 @@ def native_tools() -> list[ToolDefinition]:
             input_schema=TaskPlan.model_json_schema(),
         ),
         tool(
-            "powershell" if os.name == "nt" else "bash",
+            SHELL_TOOL,
             (
                 "Run Windows PowerShell in a native Windows AppContainer. Use PowerShell syntax, "
                 "relative paths or Workspace:\\; $env:RTAGENT_WORKSPACE is the native directory. "
-                "Changes are copied back after the command stops. "
+                "Changes are copied back after the command stops. Dependency folders are not "
+                "copied. "
                 if os.name == "nt"
                 else "Run Bash inside the Linux workspace sandbox at /workspace. "
             )
-            + "Network access is disabled. Credentials, runtime data, Git metadata, and dependency folders are excluded. Returns exit code, stdout, stderr, and timeout status.",
+            + "Network access is disabled. Credentials, runtime data and Git metadata are hidden. "
+            "Returns exit code, stdout, stderr (long output keeps its beginning and end) and "
+            "timeout status.",
             {
                 "command": {"type": "string", "minLength": 1, "maxLength": 16000},
                 "cwd": string,
@@ -227,7 +240,7 @@ def native_tools() -> list[ToolDefinition]:
 
 
 @asynccontextmanager
-async def mcp_session(server: MCPServer):
+async def mcp_session(server: MCPServer, credentials: CredentialStore):
     # One context owns the subprocess and both SDK streams; cancellation closes all of them.
     """Own a fresh stateless MCP session and close its transports on exit."""
     async with AsyncExitStack() as stack:
@@ -240,7 +253,7 @@ async def mcp_session(server: MCPServer):
                 if key in os.environ
             }
             environment.update(
-                {key: resolve_secret(reference) for key, reference in server.env.items()}
+                {key: credentials.resolve(reference) for key, reference in server.env.items()}
             )
             streams = await stack.enter_async_context(
                 stdio_client(
@@ -252,7 +265,7 @@ async def mcp_session(server: MCPServer):
         else:
             if not server.url.startswith(("http://", "https://")):
                 raise AppError("mcp_config", "An HTTP(S) MCP URL is required.")
-            secret = resolve_secret(server.credential_ref)
+            secret = credentials.resolve(server.credential_ref)
             headers = {"Authorization": "Bearer " + secret} if secret else {}
             client = await stack.enter_async_context(
                 httpx.AsyncClient(headers=headers, timeout=60, follow_redirects=False)
@@ -268,10 +281,16 @@ async def mcp_session(server: MCPServer):
 class ToolRegistry:
     """Discover tools and execute schemas pinned to a Run snapshot."""
 
-    def __init__(self, workspace: Path, data_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        data_dir: Path | None = None,
+        credentials: CredentialStore | None = None,
+    ):
         """Bind local tools to one resolved workspace and seed the native catalog."""
         self.workspace = workspace.resolve()
         self.files = Workspace(self.workspace, data_dir)
+        self.credentials = credentials or CredentialStore(None)
         self.workspaces: dict[Path, ToolRegistry] = {}
         self.processes: ProcessManager | None = None
         self.local_tools: dict[str, tuple[ToolDefinition, ToolHandler]] = {}
@@ -283,6 +302,9 @@ class ToolRegistry:
             self.sandbox = BashSandbox(self.files)
         self.catalog: dict[str, ToolDefinition] = {}
         self.errors: dict[str, str] = {}
+        # Fingerprint of the MCP server settings the current catalog was discovered from.
+        self.discovered: str | None = None
+        self.discovery = asyncio.Lock()
         self.reset()
 
     def for_workspace(self, root: Path) -> "ToolRegistry":
@@ -291,7 +313,7 @@ class ToolRegistry:
         if root == self.workspace:
             return self
         if root not in self.workspaces:
-            self.workspaces[root] = ToolRegistry(root, self.files.data_dir)
+            self.workspaces[root] = ToolRegistry(root, self.files.data_dir, self.credentials)
         registry = self.workspaces[root]
         registry.catalog, registry.errors = self.catalog, self.errors
         registry.processes = self.processes
@@ -303,14 +325,18 @@ class ToolRegistry:
         if self.processes is None:
             self.processes = ProcessManager(repository)
 
-    def reset(self) -> None:
-        """Discard discovered schemas when connection configuration changes."""
-        self.catalog = {
+    def _base_catalog(self) -> dict[str, ToolDefinition]:
+        """Native tools with schema hashes plus explicitly registered trusted local tools."""
+        catalog = {
             tool.name: tool.model_copy(update={"schema_hash": digest(tool.input_schema)})
             for tool in native_tools()
         }
-        self.errors = {}
-        self.catalog.update({name: value[0] for name, value in self.local_tools.items()})
+        catalog.update({name: value[0] for name, value in self.local_tools.items()})
+        return catalog
+
+    def reset(self) -> None:
+        """Discard discovered schemas when connection configuration changes."""
+        self.catalog, self.errors, self.discovered = self._base_catalog(), {}, None
 
     def register(
         self, definition: ToolDefinition, handler: ToolHandler, *, writes_workspace: bool = True
@@ -358,26 +384,54 @@ class ToolRegistry:
             schema_hash=digest(tool.inputSchema),
         )
 
+    async def ensure_discovered(self, config: StudioConfig) -> None:
+        """Discover saved MCP servers once per configuration, e.g. after a service restart.
+
+        Without this, permissions for MCP tools would refer to an empty catalog after every
+        restart and each Run would fail until the user refreshed discovery by hand."""
+        if not config.mcp_servers:
+            return
+        async with self.discovery:
+            if self.discovered != digest([server.model_dump() for server in config.mcp_servers]):
+                await self._discover(config)
+
     async def discover(self, config: StudioConfig) -> list[ToolDefinition]:
-        """Refresh bounded discovery pages and retain safe per-server failures."""
-        self.reset()
+        """Explicitly refresh discovery for the saved MCP servers."""
+        async with self.discovery:
+            return await self._discover(config)
+
+    async def _discover(self, config: StudioConfig) -> list[ToolDefinition]:
+        """List bounded tool pages per server, keeping safe per-server failures.
+
+        The new catalog replaces the old one only when complete, so concurrent readers never
+        observe a partially discovered catalog."""
+        catalog, errors = self._base_catalog(), {}
         for server in config.mcp_servers:
             try:
-                async with asyncio.timeout(15), mcp_session(server) as session:
+                async with asyncio.timeout(15), mcp_session(server, self.credentials) as session:
                     cursor = None
                     for _ in range(20):
                         page = await session.list_tools(cursor=cursor)
                         for tool in page.tools:
                             definition = self.definition(server, tool)
-                            self.catalog[definition.name] = definition
+                            catalog[definition.name] = definition
                         cursor = page.nextCursor
                         if not cursor:
                             break
             except Exception as exc:
-                self.errors[server.id] = (
+                errors[server.id] = (
                     f"Discovery failed ({type(exc).__name__}). Check the server configuration."
                 )
-        return list(self.catalog.values())
+        self.catalog, self.errors = catalog, errors
+        self.discovered = digest([server.model_dump() for server in config.mcp_servers])
+        return list(catalog.values())
+
+    def changes_workspace(self, name: str) -> bool:
+        """Whether a tool can change files, run code or reach an external MCP server."""
+        definition = self.catalog.get(name)
+        return name in CHANGE_TOOLS or bool(
+            definition and (definition.server_id or definition.writes_workspace)
+        )
 
     def selected(self, config: StudioConfig) -> list[ToolDefinition]:
         """Intersect discovered tools with the locally configured permission map."""
@@ -420,7 +474,7 @@ class ToolRegistry:
                 )
             return text
         if name in {"bash", "powershell"}:
-            if name != ("powershell" if os.name == "nt" else "bash"):
+            if name != SHELL_TOOL:
                 raise AppError(
                     "tool_unavailable", "This command tool belongs to a different operating system."
                 )
@@ -507,7 +561,7 @@ class ToolRegistry:
         )
         if server is None:
             raise AppError("tool_unavailable", "MCP server is absent from the Run snapshot.")
-        async with mcp_session(server) as session:
+        async with mcp_session(server, self.credentials) as session:
             current, cursor = None, None
             for _ in range(20):
                 page = await session.list_tools(cursor=cursor)

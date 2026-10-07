@@ -25,11 +25,12 @@ def import_preset(package: PresetPackage) -> Preset:
 def export_skill(workspace: Workspace, name: str) -> SkillPackage:
     """Export one validated Skill and supporting UTF-8 files, rejecting links and excluded names."""
     entry = workspace.load_skill(name)
-    directory = (
-        workspace.bundled_skills / name
-        if entry["builtin"]
-        else workspace.path(f"{SKILL_ROOT}/{name}")
-    )
+    if entry["scope"] == "builtin":
+        directory = workspace.bundled_skills / name
+    elif entry["scope"] == "global" and workspace.global_skills is not None:
+        directory = workspace.global_skills / name
+    else:
+        directory = workspace.path(f"{SKILL_ROOT}/{name}")
     files = {}
     for root, dirs, names in os.walk(directory, followlinks=False):
         for filename in [*dirs, *names]:
@@ -51,6 +52,8 @@ def import_skill(workspace: Workspace, package: SkillPackage) -> dict:
     name = workspace.skill_name(package.name)
     if (workspace.bundled_skills / name).exists():
         raise AppError("tool_denied", "Bundled skills cannot be replaced.", 403)
+    if workspace.global_skills is not None and (workspace.global_skills / name).exists():
+        raise AppError("file_conflict", "A global skill with this name already exists.", 409)
     target = workspace.path(f"{SKILL_ROOT}/{name}")
     destinations: set[str] = set()
     for relative in package.files:
@@ -101,7 +104,7 @@ def import_skill(workspace: Workspace, package: SkillPackage) -> dict:
                 path = staging / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(text.encode())
-            workspace._skill(staging / "SKILL.md", name, True)
+            workspace._skill(staging / "SKILL.md", name, "builtin")  # Validate only.
             target.parent.mkdir(parents=True, exist_ok=True)
             # Rename a sibling filesystem directory only after complete data validation.
             os.rename(staging, target)

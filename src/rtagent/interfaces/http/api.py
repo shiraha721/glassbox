@@ -3,19 +3,23 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Annotated, Any
 
 from anyio import CancelScope
-from fastapi import APIRouter, Header, Request, Response
+from fastapi import APIRouter, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from rtagent.domain import (
+    EFFORT_LEVELS,
+    AppError,
     ApprovalDecision,
     CompactionView,
     CompactRequest,
     ContextRestore,
     ContextView,
     Contract,
+    CredentialSave,
+    CredentialStatus,
     DraftPreviewRequest,
     ErrorEnvelope,
     FolderCreate,
@@ -34,11 +38,13 @@ from rtagent.domain import (
     ProjectCreate,
     ProjectView,
     PromptInspection,
+    ProviderProfile,
     ResumeRequest,
     RunEvent,
     RunView,
     SessionCopy,
     SessionCreate,
+    SessionSummary,
     SessionUpdate,
     SessionView,
     SkillDocument,
@@ -48,7 +54,9 @@ from rtagent.domain import (
     StudioConfig,
     ToolDefinition,
     TraceView,
+    WorkspaceSkills,
     WorkspaceView,
+    credential_reference,
 )
 from rtagent.domain.lifecycle import TERMINAL
 from rtagent.infrastructure.sandbox.processes import process_view
@@ -110,7 +118,7 @@ async def skill_import(
 @router.get("/runs/{run_id}/event-log", response_model=list[RunEvent])
 async def event_log(run_id: str, request: Request, after: int = 0) -> list[dict]:
     """Read a finite event page for CLI/RPC clients without subscribing to SSE."""
-    await request.app.state.studio.repository.run(run_id)
+    await request.app.state.studio.repository.run_progress(run_id)
     return await request.app.state.studio.repository.read_events(run_id, max(0, after))
 
 
@@ -144,12 +152,37 @@ class Bootstrap(Contract):
 
     config: StudioConfig
     presets: list[Preset]
-    sessions: list[SessionView]
+    sessions: list[SessionSummary]
     folders: list[FolderView]
     projects: list[ProjectView]
     tools: list[ToolDefinition]
     tool_errors: dict[str, str]
     workspace_root: str
+    # Where each key referenced by providers and MCP servers comes from; never the value.
+    credentials: list[CredentialStatus]
+    effort_levels: dict[str, list[str]]
+
+
+class ModelList(Contract):
+    """Model IDs a provider reports it serves."""
+
+    models: list[str]
+
+
+def credential_name(name: str) -> str:
+    """Accept only environment-variable-style key names in credential routes."""
+    try:
+        return credential_reference(name)
+    except ValueError as exc:
+        raise AppError("credential_name", str(exc)) from None
+
+
+def referenced_credentials(config: StudioConfig) -> list[str]:
+    """Collect the key names the saved providers and MCP servers refer to."""
+    names = [profile.credential_ref for profile in config.providers]
+    for server in config.mcp_servers:
+        names.extend([server.credential_ref, *server.env.values()])
+    return [name for name in dict.fromkeys(names) if name]
 
 
 @router.get("/health")
@@ -162,8 +195,9 @@ async def health() -> dict[str, str]:
 async def bootstrap(request: Request) -> Bootstrap:
     """Load settings, presets, sessions, and the currently discovered tool catalog."""
     studio = request.app.state.studio
+    config = await studio.repository.config()
     return Bootstrap(
-        config=await studio.repository.config(),
+        config=config,
         presets=await studio.repository.list_presets(),
         sessions=await studio.repository.list_sessions(),
         folders=await studio.repository.list_folders(),
@@ -171,7 +205,62 @@ async def bootstrap(request: Request) -> Bootstrap:
         tools=list(studio.registry.catalog.values()),
         tool_errors=studio.registry.errors,
         workspace_root=str(studio.registry.workspace),
+        credentials=await studio.credential_status(referenced_credentials(config)),
+        effort_levels={adapter: list(levels) for adapter, levels in EFFORT_LEVELS.items()},
     )
+
+
+@router.get("/credentials", response_model=list[CredentialStatus])
+async def credentials(
+    request: Request, name: Annotated[list[str] | None, Query()] = None
+) -> list[CredentialStatus]:
+    """Report where named keys come from, for draft settings not saved yet."""
+    return await request.app.state.studio.credential_status(
+        [credential_name(item) for item in name or []]
+    )
+
+
+@router.put("/credentials/{name}", response_model=CredentialStatus)
+async def save_credential(name: str, body: CredentialSave, request: Request) -> CredentialStatus:
+    """Store a key entered in Settings; the response never contains the value."""
+    return await request.app.state.studio.save_credential(credential_name(name), body.value)
+
+
+@router.delete("/credentials/{name}", response_model=CredentialStatus)
+async def delete_credential(name: str, request: Request) -> CredentialStatus:
+    """Forget a stored key; an environment variable of the same name still applies."""
+    return await request.app.state.studio.delete_credential(credential_name(name))
+
+
+@router.post("/providers/models", response_model=ModelList)
+async def provider_models(body: ProviderProfile, request: Request) -> ModelList:
+    """List the models a provider serves, using the server-side key for its reference."""
+    return ModelList(models=await request.app.state.studio.list_models(body))
+
+
+@router.get("/skills", response_model=WorkspaceSkills)
+async def global_skills(request: Request) -> WorkspaceSkills:
+    """List bundled and global skills shared by every project."""
+    return await request.app.state.studio.global_skills()
+
+
+@router.get("/skills/{name}", response_model=SkillDocument)
+async def global_skill(name: str, request: Request) -> SkillDocument:
+    """Load a bundled or global skill."""
+    return await request.app.state.studio.global_skill(name)
+
+
+@router.put("/skills", response_model=SkillDocument)
+async def save_global_skill(body: SkillSave, request: Request) -> SkillDocument:
+    """Create or update a global skill with conflict detection."""
+    return await request.app.state.studio.save_global_skill(body)
+
+
+@router.delete("/skills/{name}", status_code=204)
+async def delete_global_skill(name: str, expected_hash: str, request: Request) -> Response:
+    """Delete a global skill whose current content the user has seen."""
+    await request.app.state.studio.delete_global_skill(name, expected_hash)
+    return Response(status_code=204)
 
 
 @router.put("/config", response_model=StudioConfig)
@@ -213,8 +302,6 @@ async def save_skill(
 @router.put("/presets/{preset_id}", response_model=Preset)
 async def save_preset(preset_id: str, body: Preset, request: Request) -> Preset:
     """Persist an edited preset whose identifier matches the requested resource."""
-    from rtagent.domain import AppError
-
     if preset_id != body.id:
         raise AppError("preset_id", "The route and preset ID must match.")
     return await request.app.state.studio.repository.save_preset(body)
@@ -271,8 +358,6 @@ async def compaction_evidence(
     session_id: str, identifier: str, request: Request, redacted: bool = True
 ) -> dict[str, Any]:
     """Read original or labelled redacted model evidence for one owned reduction."""
-    from rtagent.domain import AppError
-
     record = await request.app.state.studio.repository.compaction(identifier)
     if record["session_id"] != session_id:
         raise AppError("not_found", "Compaction does not belong to this conversation.", 404)
@@ -328,8 +413,7 @@ async def delete_session(session_id: str, request: Request) -> None:
 @router.get("/sessions/{session_id}/runs", response_model=list[RunView])
 async def session_runs(session_id: str, request: Request) -> list[RunView]:
     """List saved Run projections for a conversation."""
-    studio = request.app.state.studio
-    return [await studio.view(run["id"]) for run in await studio.repository.list_runs(session_id)]
+    return await request.app.state.studio.run_views(session_id=session_id)
 
 
 @router.post("/prompts/inspect", response_model=PromptInspection)
@@ -382,7 +466,7 @@ async def resume_run(run_id: str, body: ResumeRequest, request: Request) -> RunV
 async def trace(run_id: str, request: Request, raw: bool = False) -> dict[str, Any]:
     """Return redacted evidence by default; raw access is an explicit local choice."""
     studio = request.app.state.studio
-    await studio.repository.run(run_id)
+    await studio.repository.run_progress(run_id)
     calls = await studio.repository.trace(run_id)
     return {"schema_version": 1, "redacted": not raw, "calls": calls if raw else redact(calls)}
 
@@ -419,10 +503,8 @@ async def run_events(
     run_id: str, request: Request, after: int = 0, last_event_id: str | None = Header(default=None)
 ) -> StreamingResponse:
     """Replay persisted SSE events; browser reconnection never resumes execution."""
-    from rtagent.domain import AppError
-
     studio = request.app.state.studio
-    run = await studio.repository.run(run_id)
+    run = await studio.repository.run_progress(run_id)
     try:
         cursor = int(last_event_id) if last_event_id is not None else after
     except ValueError as exc:
@@ -439,7 +521,7 @@ async def run_events(
             # yielding so cancellation cannot return a half-closed SQLite connection.
             with CancelScope(shield=True):
                 page = await studio.repository.read_events(run_id, cursor)
-                current = await studio.repository.run(run_id)
+                current = await studio.repository.run_progress(run_id)
             for item in page:
                 cursor = item["seq"]
                 yield f"id: {cursor}\nevent: {item['type']}\ndata: {json.dumps(redact(item))}\n\n"

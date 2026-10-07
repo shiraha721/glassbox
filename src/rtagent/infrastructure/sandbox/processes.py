@@ -97,8 +97,8 @@ class ProcessManager:
         """Capture bounded progress and wait for OS cleanup before persisting completion."""
 
         async def output(frame: dict) -> None:
-            """Persist only output retained by the native drain, with its actual launch PID."""
-            data[frame["stream"]] += frame["text"]
+            """Persist the latest bounded output snapshot with its actual launch PID."""
+            data[frame["stream"]] = frame["text"]
             data["truncated"] |= frame["truncated"]
             data["pid"], data["stdin_closed"] = control.pid, control.input_closed
             await self.repository.save_process(identifier, run_id, "running", data)

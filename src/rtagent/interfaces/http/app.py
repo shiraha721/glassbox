@@ -66,9 +66,12 @@ class LocalAccessMiddleware:
         if scope["path"].startswith("/api/"):
             headers = Headers(scope=scope)
             origin = headers.get("origin")
-            if (origin is not None and origin not in self.allowed_origins) or headers.get(
-                "sec-fetch-site"
-            ) == "cross-site":
+            # The page served by this process is always allowed, whatever port it runs on.
+            # TrustedHostMiddleware still rejects non-loopback Host values (DNS rebinding).
+            same_origin = origin == f"{scope['scheme']}://{headers.get('host')}"
+            if (
+                origin is not None and not same_origin and origin not in self.allowed_origins
+            ) or headers.get("sec-fetch-site") == "cross-site":
                 await error_response(
                     AppError("origin_denied", "Request origin is not allowed.", 403)
                 )(scope, receive, send_headers)
@@ -178,11 +181,11 @@ def create_app(
     return app
 
 
-def serve() -> None:
-    """Start the local studio on its dedicated default port."""
+def serve(port: int = 8001) -> None:
+    """Start the local studio on loopback; the browser boundary accepts its own origin."""
     import uvicorn
 
-    uvicorn.run("rtagent.interfaces.http.app:create_app", factory=True, host="127.0.0.1", port=8001)
+    uvicorn.run("rtagent.interfaces.http.app:create_app", factory=True, host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

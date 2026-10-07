@@ -7,7 +7,14 @@ from typing import Any
 import httpx
 
 from rtagent.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall
-from rtagent.infrastructure.config import resolve_secret
+from rtagent.infrastructure.providers.errors import (
+    error_message,
+    provider_failure,
+    truncated_output,
+)
+
+# Content blocks the adapter understands. Thinking is on by default for current Claude models.
+BLOCK_TYPES = {"text", "tool_use", "thinking", "redacted_thinking"}
 
 
 def prepare_anthropic(
@@ -17,9 +24,9 @@ def prepare_anthropic(
     if not config.model.strip():
         raise AppError(
             "provider_not_configured",
-            "Set ANTHROPIC_MODEL and ANTHROPIC_BASE_URL or configure Messages in Settings.",
+            "No model is selected. Choose one below the message box or in Settings → Models.",
         )
-    if config.temperature > 1:
+    if config.temperature is not None and config.temperature > 1:
         raise AppError("provider_temperature", "Anthropic Messages temperature must not exceed 1.")
     systems, messages, pending = [], [], set()
     for item in compiled.messages:
@@ -67,16 +74,24 @@ def prepare_anthropic(
             blocks.append(
                 {"type": "tool_use", "id": call.id, "name": call.name, "input": call.args}
             )
+        # Within a Run, thinking blocks go back exactly as received (the API requires them
+        # before tool results). Earlier turns are sent without them: their signatures bind
+        # the prompt they were produced under, which a new Run rebuilds.
+        if item.blocks and item.source != "history":
+            blocks = item.blocks
         messages.append({"role": item.role, "content": blocks})
     if pending:
         raise AppError("tool_protocol", "Unpaired tool uses cannot be sent to a model.")
     body: dict[str, Any] = {
         "model": config.model,
         "max_tokens": config.max_output_tokens,
-        "temperature": config.temperature,
         "stream": True,
         "messages": messages,
     }
+    if config.temperature is not None:
+        body["temperature"] = config.temperature
+    if config.reasoning_effort:
+        body["output_config"] = {"effort": config.reasoning_effort}
     if systems:
         body["system"] = systems
     if tools:
@@ -113,6 +128,7 @@ async def stream_anthropic(
     config: ProviderConfig,
     prepared: dict[str, Any],
     on_wire: Callable[[dict[str, Any] | None], Awaitable[None]],
+    key: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     """Capture body before transmission and reconstruct only supported text/tool blocks and usage."""
 
@@ -123,7 +139,6 @@ async def stream_anthropic(
             raise AppError("request_mismatch", "Messages request differs from its preview.", 409)
         await on_wire(body)
 
-    key = resolve_secret(config.credential_ref)
     headers = {"anthropic-version": "2023-06-01"}
     if key:
         headers["x-api-key"] = key
@@ -139,19 +154,18 @@ async def stream_anthropic(
                 "POST", config.base_url.rstrip("/") + "/messages", json=prepared, headers=headers
             ) as response:
                 if response.status_code != 200:
-                    raise AppError(
-                        "provider_error",
-                        f"Messages returned HTTP {response.status_code}; check provider configuration.",
-                        502,
-                    )
+                    body = (await response.aread())[:4096]
+                    try:
+                        detail = error_message(json.loads(body))
+                    except ValueError:
+                        detail = body.decode("utf-8", errors="replace")
+                    raise provider_failure(detail, key, response.status_code)
                 async for event in sse_events(response):
                     kind = event.get("type")
                     if kind == "ping":
                         continue
                     if kind == "error":
-                        raise AppError(
-                            "provider_error", "Messages reported a streaming error.", 502
-                        )
+                        raise provider_failure(error_message(event) or "streaming error", key)
                     if kind == "message_start":
                         if started:
                             raise AppError(
@@ -163,14 +177,11 @@ async def stream_anthropic(
                         usage.update(message.get("usage", {}))
                     elif kind == "content_block_start":
                         index, block = event["index"], event["content_block"]
-                        if (
-                            not started
-                            or index in blocks
-                            or block["type"] not in {"text", "tool_use"}
-                        ):
+                        if not started or index in blocks or block["type"] not in BLOCK_TYPES:
                             raise AppError(
                                 "provider_protocol",
-                                "Unsupported or duplicate Messages content block; thinking/server tools are not enabled.",
+                                "Unsupported or duplicate Messages content block; server tools "
+                                "are not enabled.",
                                 502,
                             )
                         blocks[index] = {**block, "json": ""}
@@ -191,6 +202,11 @@ async def stream_anthropic(
                         elif delta["type"] == "input_json_delta" and block["type"] == "tool_use":
                             block["json"] += delta["partial_json"]
                             output_size += len(delta["partial_json"].encode())
+                        elif delta["type"] == "thinking_delta" and block["type"] == "thinking":
+                            block["thinking"] = block.get("thinking", "") + delta["thinking"]
+                            output_size += len(delta["thinking"].encode())
+                        elif delta["type"] == "signature_delta" and block["type"] == "thinking":
+                            block["signature"] = block.get("signature", "") + delta["signature"]
                         else:
                             raise AppError(
                                 "provider_protocol", "Unsupported Messages delta type.", 502
@@ -224,14 +240,24 @@ async def stream_anthropic(
                         raise AppError("provider_protocol", "Messages output exceeds 1 MiB.", 502)
     except AppError:
         raise
+    except httpx.TimeoutException:
+        raise provider_failure("the provider did not respond in time; no retry was made.") from None
+    except httpx.TransportError:
+        raise provider_failure("could not connect to the configured base URL.") from None
     except Exception as exc:
-        raise AppError(
-            "provider_error",
-            f"Messages request failed ({type(exc).__name__}); no automatic retry.",
-            502,
-        ) from None
+        raise provider_failure(f"{type(exc).__name__}; no automatic retry.", key) from None
     if not complete:
         raise AppError("provider_protocol", "Messages stream ended without message_stop.", 502)
+    if metadata.get("stop_reason") == "refusal":
+        # A safety classifier declined the request: an HTTP 200, not a protocol failure.
+        details = metadata.get("stop_details")
+        category = details.get("category") if isinstance(details, dict) else None
+        raise AppError(
+            "provider_refusal",
+            f"The model declined this request{f' ({category})' if category else ''}. Rephrase "
+            "the task with its authorization context, or choose another model.",
+            502,
+        )
     ordered = [blocks[index] for index in sorted(blocks)]
     try:
         calls = [
@@ -244,6 +270,8 @@ async def stream_anthropic(
             if block["type"] == "tool_use"
         ]
     except (ValueError, TypeError):
+        if metadata.get("stop_reason") == "max_tokens":
+            raise truncated_output(config.max_output_tokens) from None
         raise AppError("provider_protocol", "Invalid Messages tool arguments.", 502) from None
     if len({call.id for call in calls}) != len(calls) or any(not call.id for call in calls):
         raise AppError(
@@ -252,9 +280,31 @@ async def stream_anthropic(
     text = "".join(block["text"] for block in ordered if block["type"] == "text")
     if not text and not calls:
         raise AppError("provider_protocol", "Messages returned no supported content.", 502)
+    # Keep the exact content array when it holds reasoning, so tool continuations can echo it.
+    replay = (
+        [replay_block(block, calls) for block in ordered]
+        if any(block["type"] in {"thinking", "redacted_thinking"} for block in ordered)
+        else []
+    )
     yield {
         "kind": "result",
-        "message": Message(role="assistant", content=text, tool_calls=calls),
+        "message": Message(role="assistant", content=text, tool_calls=calls, blocks=replay),
         "usage": usage,
         "metadata": metadata,
     }
+
+
+def replay_block(block: dict[str, Any], calls: list[ToolCall]) -> dict[str, Any]:
+    """Rebuild one received content block in the shape the API accepts back."""
+    if block["type"] == "thinking":
+        return {
+            "type": "thinking",
+            "thinking": block.get("thinking", ""),
+            "signature": block.get("signature", ""),
+        }
+    if block["type"] == "redacted_thinking":
+        return {"type": "redacted_thinking", "data": block["data"]}
+    if block["type"] == "tool_use":
+        call = next(call for call in calls if call.id == block["id"])
+        return {"type": "tool_use", "id": call.id, "name": call.name, "input": call.args}
+    return {"type": "text", "text": block["text"]}

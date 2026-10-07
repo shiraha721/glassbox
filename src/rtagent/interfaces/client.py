@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 import httpx
 
-from rtagent.domain import AppError, PreviewRequest, RunView, uid
+from rtagent.domain import AppError, ModelChoice, PreviewRequest, RunView, WorkspaceAccess, uid
 from rtagent.domain.lifecycle import TERMINAL
 
 
@@ -94,8 +94,13 @@ class AgentClient:
         variables: dict[str, Any] | None = None,
         skills: list[str] | None = None,
         key: str | None = None,
+        model: ModelChoice | None = None,
+        access: WorkspaceAccess | None = None,
     ) -> RunView:
-        """Read current revisions and submit direct Run through the same compiler as Web."""
+        """Read current revisions and submit direct Run through the same compiler as Web.
+
+        `model` and `access` choose the model and workspace access for this Run only; by
+        default the saved default model and workspace policy apply."""
         boot = await self.request("GET", "/bootstrap")
         if session_id:
             if project_id:
@@ -118,6 +123,8 @@ class AgentClient:
                 input=task,
                 variables=variables or {},
                 skills=skills or [],
+                model=model,
+                access=access,
             ),
             key or uid(),
         )

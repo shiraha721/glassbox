@@ -5,7 +5,7 @@ These instructions apply to the entire repository. Read and follow the [Developm
 Read in this order:
 
 1. [Project guide](docs/README.md): scope, delivery status, setup, and roadmap.
-2. [System architecture](docs/architecture.md): implemented module boundaries, data, APIs, and acceptance criteria.
+2. [System architecture](docs/architecture.md): implemented module boundaries, execution flow, data, sandboxes, and APIs.
 3. [Development guide](docs/development.md): repository constraints and supported commands.
 4. The relevant source modules and configuration. Actual files determine implemented capabilities.
 

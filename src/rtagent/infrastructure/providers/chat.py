@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 
 from rtagent.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall, uid
-from rtagent.infrastructure.config import resolve_secret
+from rtagent.infrastructure.providers.errors import sdk_failure, truncated_output
 from rtagent.infrastructure.providers.messages import prepare_anthropic, stream_anthropic
 
 
@@ -46,7 +46,7 @@ def model(config: ProviderConfig, key: str, client: httpx.AsyncClient | None = N
     if not config.model.strip():
         raise AppError(
             "provider_not_configured",
-            "Set OPENAI_MODEL and OPENAI_BASE_URL in .env, or configure the model in Settings.",
+            "No model is selected. Choose one below the message box or in Settings → Models.",
         )
     url = urlparse(config.base_url)
     if (
@@ -65,6 +65,7 @@ def model(config: ProviderConfig, key: str, client: httpx.AsyncClient | None = N
         base_url=config.base_url,
         api_key=key or "local-no-key",
         temperature=config.temperature,
+        reasoning_effort=config.reasoning_effort,
         max_tokens=config.max_output_tokens,
         max_retries=0,
         timeout=90,
@@ -156,11 +157,10 @@ async def fake_stream(
     if current.startswith("Earlier derived summary:\n") and not tools:
         text = "Simulated conversation summary. Original evidence is retained; no model service was called."
     elif results:
-        result_text = results[-1].content
         text = (
-            "## Tool result\n\n"
-            + result_text
-            + "\n\n---\nThis is a simulated response. The tool result above is real; no model service was called. Inspect the request trace to see how it entered the next model call."
+            "The tool result below is real; this reply is simulated and no model service was "
+            "called. Inspect the turn to see how the result entered the next model request.\n\n"
+            f"````text\n{results[-1].content}\n````"
         )
     else:
         text = (
@@ -198,9 +198,11 @@ async def generate(
     tools: list[dict[str, Any]],
     prepared: dict[str, Any],
     on_wire: Callable[[dict[str, Any] | None], Awaitable[None]],
+    key: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream model output and capture the checked request before network transmission.
 
+    `key` is the resolved credential, supplied by the caller that owns credential storage.
     Simulated calls record no wire body. Real calls fail closed if SDK serialization
     differs from the prepared payload, and never retry automatically."""
     if config.adapter == "fake":
@@ -209,7 +211,7 @@ async def generate(
             yield event
         return
     if config.adapter == "anthropic":
-        async for event in stream_anthropic(config, prepared, on_wire):
+        async for event in stream_anthropic(config, prepared, on_wire, key):
             yield event
         return
 
@@ -226,7 +228,7 @@ async def generate(
     async with httpx.AsyncClient(
         event_hooks={"request": [capture]}, follow_redirects=False, timeout=90
     ) as client:
-        instance = model(config, resolve_secret(config.credential_ref), client)
+        instance = model(config, key, client)
         total = None
         try:
             async for chunk in instance.astream(
@@ -238,17 +240,15 @@ async def generate(
         except AppError:
             raise
         except Exception as exc:
-            # Provider exceptions can include URLs, headers, or credential-bearing bodies.
+            # Keep the provider's explanation but never its URL, headers or request body.
+            raise sdk_failure(exc, key) from None
+        if total is None:
+            raise AppError("provider_protocol", "The model returned an empty stream.", 502)
+        if total.invalid_tool_calls:
+            if total.response_metadata.get("finish_reason") == "length":
+                raise truncated_output(config.max_output_tokens)
             raise AppError(
-                "provider_error",
-                f"Model request failed ({type(exc).__name__}). Check endpoint, model, and credential configuration.",
-                502,
-            ) from None
-        if total is None or total.invalid_tool_calls:
-            raise AppError(
-                "provider_protocol",
-                "The model returned an empty stream or invalid tool arguments.",
-                502,
+                "provider_protocol", "The model returned invalid tool-call arguments.", 502
             )
         message = Message(
             role="assistant",

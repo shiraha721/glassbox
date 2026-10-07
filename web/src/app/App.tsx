@@ -6,7 +6,9 @@ import {
   Code2,
   Eye,
   FolderOpen,
+  Layers,
   PanelLeft,
+  Pencil,
   Play,
   Plus,
   SlidersHorizontal,
@@ -41,8 +43,21 @@ import { useLivePreview } from '../features/prompts/useLivePreview';
 import { ToolsPanel } from '../features/tools/ToolCatalog';
 import { ContextPanel } from '../features/chat/ContextPanel';
 import { ProcessesPanel } from '../features/chat/ProcessesPanel';
+import { StatusBadge } from '../shared/StatusBadge';
+import { ModelPicker } from '../features/composer/ModelPicker';
+import { AccessPicker } from '../features/composer/AccessPicker';
+import { useRunChoice } from '../features/composer/useRunChoice';
+import { effectiveConfig } from '../features/composer/choices';
+import type { SettingsPage } from '../features/settings/pages';
+
+type Panel = 'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes';
 
 const emptyRuns: Run[] = [];
+const starters = [
+  'Summarize how this project is organized and how to run its tests.',
+  'Find the cause of the failing tests and fix it.',
+  'Review the code under src/ for security issues and report evidence.',
+];
 
 /** Load the local workspace directly, without accounts or an unlock screen. */
 export default function App() {
@@ -91,13 +106,11 @@ function Workspace({ data }: { data: Bootstrap }) {
   const [tab, setTab] = useState<'preview' | 'trace'>(() =>
     localStorage.getItem('studio.session') ? 'trace' : 'preview',
   );
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState<SettingsPage | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.matchMedia('(min-width: 761px)').matches,
   );
-  const [panel, setPanel] = useState<
-    'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes' | null
-  >(null);
+  const [panel, setPanel] = useState<Panel | null>(null);
   const [skills, setSkills] = useState<string[]>([]);
   const submission = useRef<{ fingerprint: string; key: string; body: RunRequest } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -112,13 +125,21 @@ function Workspace({ data }: { data: Bootstrap }) {
     queryKey: ['runs', session?.id],
     enabled: !!session,
     queryFn: () => request<Run[]>(`/sessions/${session!.id}/runs`),
+    // Events refresh the active Run; this slower poll only covers a missed event stream.
     refetchInterval: (query) =>
-      query.state.data?.some((run) => !terminal(run.status)) ? 2000 : false,
+      query.state.data?.some((run) => !terminal(run.status)) ? 3000 : false,
   });
   const runs = runQuery.data || emptyRuns;
+  const [choice, setChoice] = useRunChoice(data, session?.id || '', runs, runQuery.isSuccess);
+  // An unset model sends no choice, so the server explains what to configure.
+  const runChoice = {
+    model: choice.model.model ? choice.model : null,
+    access: choice.access,
+  };
   const run = runs.find((item) => item.id === selectedRun) || runs.at(-1);
   const active = runs.find((item) => !terminal(item.status));
   const latestRun = active || runs.at(-1);
+  const workspaceRoot = project?.workspace_root || data.workspace_root;
   const workspaceQuery = useQuery({
     queryKey: ['workspace', projectId],
     queryFn: () => request<WorkspaceView>(workspacePath('', projectId)),
@@ -136,10 +157,11 @@ function Workspace({ data }: { data: Bootstrap }) {
       input,
       variables,
       skills,
+      ...runChoice,
     }),
     workspaceQuery.dataUpdatedAt,
   );
-  useRunEvents(active?.id, !!active);
+  useRunEvents(active);
   useEffect(() => {
     const root = conversationScroll.current;
     if (root && followLatest.current) root.scrollTop = root.scrollHeight;
@@ -210,6 +232,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       input,
       variables: parsed as Record<string, unknown>,
       skills,
+      ...runChoice,
     };
   };
   const buildPreview = () => {
@@ -226,6 +249,7 @@ function Workspace({ data }: { data: Bootstrap }) {
         input,
         variables,
         skills,
+        choice,
         preset: { ...preset, revision: 0 },
       });
     let pending = submission.current;
@@ -262,9 +286,20 @@ function Workspace({ data }: { data: Bootstrap }) {
     setPanel(null);
     await refresh();
   };
-  const changeInput = (text: string) => {
-    setInput(text);
-  };
+  const canRun = !busy && !!input.trim() && !active && !session?.compacting_id;
+  const togglePanel = (name: Panel) => setPanel(panel === name ? null : name);
+  const panelButton = (name: Panel, label: string, icon: React.ReactNode, disabled = false) => (
+    <button
+      className="panel-toggle"
+      disabled={disabled}
+      aria-pressed={panel === name}
+      title={label}
+      onClick={() => togglePanel(name)}
+    >
+      {icon}
+      <span className="toggle-label">{label}</span>
+    </button>
+  );
   return (
     <div className="studio">
       <aside
@@ -274,7 +309,9 @@ function Workspace({ data }: { data: Bootstrap }) {
         hidden={!sidebarOpen}
       >
         <div className="sidebar-heading">
-          <Code2 size={18} />
+          <span className="brand-mark" aria-hidden>
+            <Code2 size={15} />
+          </span>
           <strong>Agent Studio</strong>
           <button
             className="icon-button"
@@ -285,7 +322,7 @@ function Workspace({ data }: { data: Bootstrap }) {
           </button>
         </div>
         <button
-          className="nav-button new-conversation"
+          className="button new-conversation"
           disabled={busy}
           onClick={() =>
             void perform(async () => {
@@ -328,11 +365,12 @@ function Workspace({ data }: { data: Bootstrap }) {
           <button
             className="nav-button"
             disabled={busy}
-            onClick={() => setPanel(panel === 'workspace' ? null : 'workspace')}
+            aria-pressed={panel === 'workspace'}
+            onClick={() => togglePanel('workspace')}
           >
             <FolderOpen size={16} /> Workspace
           </button>
-          <button className="nav-button" disabled={busy} onClick={() => setSettings(true)}>
+          <button className="nav-button" disabled={busy} onClick={() => setSettings('providers')}>
             <SlidersHorizontal size={16} /> Settings
           </button>
         </div>
@@ -356,63 +394,31 @@ function Workspace({ data }: { data: Bootstrap }) {
             <PanelLeft size={18} />
           </button>
           <div className="conversation-heading">
-            <h1 title={session?.title}>{session?.title || 'New conversation'}</h1>
-            <span
-              className="workspace-caption"
-              title={project?.workspace_root || data.workspace_root}
-            >
-              {project?.name || 'Default workspace'} ·{' '}
-              {project?.workspace_root || data.workspace_root}
+            <div className="row tight">
+              <h1 title={session?.title}>{session?.title || 'New conversation'}</h1>
+              {session?.archived && <span className="badge">Archived</span>}
+              {latestRun && <StatusBadge status={latestRun.status} testId="run-status" />}
+            </div>
+            <span className="workspace-caption" title={workspaceRoot}>
+              <FolderOpen size={12} />
+              {project?.name || 'Default workspace'} · {workspaceRoot}
             </span>
           </div>
-          {session?.archived && <span className="badge">Archived</span>}
-          {latestRun && (
-            <span className={`status status-${latestRun.status}`} data-testid="run-status">
-              {latestRun.status.replaceAll('_', ' ')}
-            </span>
-          )}
-          <div className="topbar-actions">
-            <button
-              className="button quiet"
-              disabled={!session}
-              aria-pressed={panel === 'processes'}
-              onClick={() => setPanel(panel === 'processes' ? null : 'processes')}
-            >
-              <Terminal size={15} /> Processes
-            </button>
-            <button
-              className="button quiet"
-              disabled={!session || busy}
-              aria-pressed={panel === 'context'}
-              onClick={() => setPanel(panel === 'context' ? null : 'context')}
-            >
-              Context{session?.compaction_id ? ' · compacted' : ''}
-            </button>
-            <button
-              className="button quiet"
-              disabled={busy}
-              aria-pressed={panel === 'tools'}
-              onClick={() => setPanel(panel === 'tools' ? null : 'tools')}
-            >
-              <Wrench size={15} /> Tools
-            </button>
-            <button
-              className="button quiet"
-              disabled={busy}
-              aria-pressed={panel === 'prompt'}
-              onClick={() => setPanel(panel === 'prompt' ? null : 'prompt')}
-            >
-              <SlidersHorizontal size={15} /> Prompt{dirty ? ' *' : ''}
-            </button>
-            <button
-              className="button quiet"
-              disabled={busy}
-              aria-pressed={panel === 'inspector'}
-              onClick={() => setPanel(panel === 'inspector' ? null : 'inspector')}
-            >
-              <Eye size={15} /> Inspector
-            </button>
-          </div>
+          <nav className="topbar-actions" aria-label="Panels">
+            {panelButton('processes', 'Processes', <Terminal size={15} />, !session)}
+            {panelButton('context', 'Context', <Layers size={15} />, !session || busy)}
+            {panelButton('tools', 'Tools', <Wrench size={15} />, busy)}
+            {panelButton(
+              'prompt',
+              'Prompt',
+              <span className="toggle-icon">
+                <SlidersHorizontal size={15} />
+                {dirty && <span className="dirty-dot" title="Unsaved prompt changes" />}
+              </span>,
+              busy,
+            )}
+            {panelButton('inspector', 'Inspector', <Eye size={15} />, busy)}
+          </nav>
         </header>
         {error && (
           <div className="error-banner" role="alert">
@@ -424,42 +430,6 @@ function Workspace({ data }: { data: Bootstrap }) {
         )}
         <main className="workbench">
           <section className="conversation" aria-label="Conversation workspace">
-            {runs.length > 0 && (
-              <div className="conversation-toolbar">
-                <label htmlFor="run-selector">
-                  {runs.length} {runs.length === 1 ? 'turn' : 'turns'}
-                </label>
-                <select
-                  id="run-selector"
-                  aria-label="Run history"
-                  value={run?.id || ''}
-                  onChange={(event) => {
-                    setSelectedRun(event.target.value);
-                    setTab('trace');
-                    followLatest.current = event.target.value === runs.at(-1)?.id;
-                    document
-                      .getElementById(`turn-${event.target.value}`)
-                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }}
-                >
-                  {runs.map((item, index) => (
-                    <option key={item.id} value={item.id}>
-                      #{index + 1} · {item.input.slice(0, 45)} · {item.status}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="button small quiet"
-                  disabled={busy}
-                  onClick={() => {
-                    setTab('trace');
-                    setPanel('inspector');
-                  }}
-                >
-                  Inspect turn
-                </button>
-              </div>
-            )}
             <div
               className="conversation-scroll"
               ref={conversationScroll}
@@ -481,7 +451,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                     run={turn}
                     index={index}
                     busy={busy}
-                    selected={turn.id === run?.id}
+                    selected={turn.id === run?.id && panel === 'inspector'}
                     canFork={!session?.active_run_id && turn.status === 'succeeded'}
                     onInspect={() => {
                       setSelectedRun(turn.id);
@@ -524,13 +494,31 @@ function Workspace({ data }: { data: Bootstrap }) {
               ) : (
                 <div className="conversation-empty">
                   <span className="empty-agent">
-                    <Bot size={25} />
+                    <Bot size={24} />
                   </span>
-                  <h2>New conversation</h2>
-                  <p>Send a message to start working.</p>
-                  <button className="button small quiet" onClick={() => setPanel('prompt')}>
-                    Edit prompt
-                  </button>
+                  <h2>What should the agent work on?</h2>
+                  <p>
+                    The agent reads and edits files in{' '}
+                    <code title={workspaceRoot}>{project?.name || 'the default workspace'}</code>{' '}
+                    and runs commands in an isolated sandbox without network access.
+                  </p>
+                  {!session?.archived && (
+                    <div className="starter-list">
+                      {starters.map((text) => (
+                        <button
+                          key={text}
+                          className="starter"
+                          disabled={busy}
+                          onClick={() => {
+                            setInput(text);
+                            document.getElementById('task-input')?.focus();
+                          }}
+                        >
+                          {text}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -557,44 +545,32 @@ function Workspace({ data }: { data: Bootstrap }) {
             ) : (
               <div className="task-dock">
                 <div className="task-composer">
-                  <div className="task-context">
-                    <span>Message</span>
-                    <button className="text-button" onClick={() => setPanel('prompt')}>
-                      Preset: {preset.name}
-                      {dirty ? ' · unsaved' : ''}
-                    </button>
-                  </div>
                   <label className="sr-only" htmlFor="task-input">
                     Task
                   </label>
                   <textarea
                     id="task-input"
                     value={input}
-                    onChange={(event) => changeInput(event.target.value)}
-                    placeholder="Message the agent…"
-                    rows={3}
+                    onChange={(event) => setInput(event.target.value)}
+                    placeholder={
+                      active ? 'The agent is working…' : 'Describe a task for the agent…'
+                    }
+                    rows={2}
                     disabled={!!active || busy}
                     onKeyDown={(event) => {
-                      if (
-                        event.key === 'Enter' &&
-                        (event.ctrlKey || event.metaKey) &&
-                        input.trim() &&
-                        !active &&
-                        !session?.compacting_id &&
-                        !busy
-                      ) {
+                      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && canRun) {
                         event.preventDefault();
                         void perform(start);
                       }
                     }}
                   />
                   {skills.length > 0 && (
-                    <div className="selected-skills">Skills: {skills.join(', ')}</div>
+                    <div className="selected-skills">
+                      Skills: {skills.map((name) => `$${name}`).join(', ')}
+                    </div>
                   )}
                   <details className="task-variables">
-                    <summary>
-                      Input variables <span className="subtle">JSON</span>
-                    </summary>
+                    <summary>Input variables</summary>
                     <textarea
                       aria-label="Input variables JSON"
                       disabled={!!active || busy}
@@ -607,16 +583,49 @@ function Workspace({ data }: { data: Bootstrap }) {
                     />
                   </details>
                   <div className="composer-actions">
-                    <button
-                      className="model-button"
-                      disabled={busy}
-                      onClick={() => setSettings(true)}
-                      title="Model settings"
-                    >
-                      {data.config.provider.adapter === 'fake'
-                        ? 'Simulated model'
-                        : data.config.provider.model || 'Configure model'}
-                    </button>
+                    <div className="composer-context">
+                      <select
+                        className="preset-select"
+                        aria-label="Prompt preset"
+                        title="Prompt preset"
+                        value={preset.id}
+                        disabled={busy || !!active}
+                        onChange={(event) => {
+                          const next = drafts.presets.find(
+                            (item) => item.id === event.target.value,
+                          );
+                          if (next) drafts.select(next);
+                        }}
+                      >
+                        {drafts.presets.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                            {item.id === preset.id && dirty ? ' (unsaved)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="icon-button"
+                        aria-label="Edit prompt"
+                        title="Edit prompt blocks"
+                        onClick={() => setPanel('prompt')}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <ModelPicker
+                        data={data}
+                        choice={choice.model}
+                        disabled={busy || !!active}
+                        onChange={(model) => setChoice({ ...choice, model })}
+                        onManage={() => setSettings('models')}
+                        onRefreshed={refresh}
+                      />
+                      <AccessPicker
+                        access={choice.access}
+                        disabled={busy || !!active}
+                        onChange={(access) => setChoice({ ...choice, access })}
+                      />
+                    </div>
                     <div className="row">
                       {active ? (
                         <button
@@ -634,13 +643,19 @@ function Workspace({ data }: { data: Bootstrap }) {
                         </button>
                       ) : (
                         <>
-                          <button className="button" disabled={busy} onClick={buildPreview}>
+                          <button
+                            className="button"
+                            disabled={busy}
+                            title="Inspect the exact model input without running"
+                            onClick={buildPreview}
+                          >
                             <Eye size={14} />
                             Preview
                           </button>
                           <button
                             className="button primary"
-                            disabled={busy || !input.trim() || !!session?.compacting_id}
+                            disabled={!canRun}
+                            title="Run (Ctrl+Enter)"
                             onClick={() => void perform(start)}
                           >
                             <Play size={13} />
@@ -650,7 +665,10 @@ function Workspace({ data }: { data: Bootstrap }) {
                       )}
                     </div>
                   </div>
-                  <div className="input-hint">Ctrl+Enter to run</div>
+                </div>
+                <div className="input-hint">
+                  <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run · mention <code>$skill-name</code> to
+                  load a skill
                 </div>
               </div>
             )}
@@ -701,11 +719,19 @@ function Workspace({ data }: { data: Bootstrap }) {
           </div>
           <div className="utility-pane" hidden={panel !== 'inspector'}>
             <Inspector
-              key={run?.id || 'empty'}
+              visible={panel === 'inspector'}
               preview={inspection.preview}
               previewUpdating={inspection.updating}
               previewError={inspection.error}
+              runs={runs}
               run={run}
+              onRun={(id) => {
+                setSelectedRun(id);
+                followLatest.current = id === runs.at(-1)?.id;
+                document
+                  .getElementById(`turn-${id}`)
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
               tab={tab}
               onTab={setTab}
               onClose={() => setPanel(null)}
@@ -717,6 +743,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                 key={session.id}
                 session={session}
                 config={data.config}
+                model={runChoice.model}
                 onClose={() => setPanel(null)}
                 onChanged={refresh}
               />
@@ -731,11 +758,12 @@ function Workspace({ data }: { data: Bootstrap }) {
             <div className="utility-pane">
               <ToolsPanel
                 tools={data.tools}
-                config={data.config}
+                config={effectiveConfig(data.config, data.tools, choice.access)}
+                access={choice.access}
                 onClose={() => setPanel(null)}
                 onSettings={() => {
                   setPanel(null);
-                  setSettings(true);
+                  setSettings('tools');
                 }}
               />
             </div>
@@ -759,7 +787,8 @@ function Workspace({ data }: { data: Bootstrap }) {
       {settings && (
         <Settings
           data={data}
-          onClose={() => setSettings(false)}
+          page={settings}
+          onClose={() => setSettings(null)}
           onSaved={async () => {
             submission.current = null;
             await refresh();

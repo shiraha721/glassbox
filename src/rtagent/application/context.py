@@ -6,6 +6,7 @@ from typing import Any
 
 from rtagent.domain import AppError, Block, CompactionView, Preset, StudioConfig
 from rtagent.domain.prompts import compile_prompt
+from rtagent.infrastructure.credentials import CredentialStore
 from rtagent.infrastructure.providers.chat import generate, prepare, transformations
 from rtagent.infrastructure.storage import Repository
 
@@ -43,7 +44,9 @@ def estimated_tokens(messages: list[dict[str, Any]]) -> int:
     return (len(json.dumps(messages, ensure_ascii=False).encode()) + 3) // 4
 
 
-async def reduce_context(repository: Repository, record: dict[str, Any]) -> None:
+async def reduce_context(
+    repository: Repository, record: dict[str, Any], credentials: CredentialStore
+) -> None:
     """Summarize explicit source chunks, then activate the result only if its revision still matches."""
     data = record["data"]
     identifier = record["id"]
@@ -120,7 +123,8 @@ async def reduce_context(repository: Repository, record: dict[str, Any]) -> None
                     await repository.save_compaction(identifier, data)
 
                 result = None
-                async for event in generate(config.provider, compiled, [], prepared, on_wire):
+                key = credentials.resolve(config.provider.credential_ref)
+                async for event in generate(config.provider, compiled, [], prepared, on_wire, key):
                     if event["kind"] == "result":
                         result = event
                 if (

@@ -313,7 +313,7 @@ async def verify(
 async def main(network: bool = False, public_dns: bool = False) -> None:
     """Own the listening server and scratch resources, including cleanup after a failed assertion."""
     with tempfile.TemporaryDirectory(
-        prefix="rtagent-stage3-", ignore_cleanup_errors=True
+        prefix="rtagent-context-processes-", ignore_cleanup_errors=True
     ) as temporary:
         root = Path(temporary)
         workspace = root / "workspace"

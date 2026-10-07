@@ -222,6 +222,15 @@ async def test_access_boundary_and_stale_preview(studio_client):
     assert (
         await client.get("/api/v1/bootstrap", headers={"Host": "attacker.example"})
     ).status_code == 400
+    # The page served by this process is same-origin on any port; rebinding still fails on Host.
+    same_origin = {"Host": "127.0.0.1:8790", "Origin": "http://127.0.0.1:8790"}
+    assert (
+        await client.post("/api/v1/folders", json={"name": "Port"}, headers=same_origin)
+    ).is_success
+    rebound = {"Host": "attacker.example:8790", "Origin": "http://attacker.example:8790"}
+    assert (
+        await client.post("/api/v1/folders", json={"name": "X"}, headers=rebound)
+    ).status_code == 400
     run, _, session_id, preview = await start(client)
     await wait_state(client, run["id"], {"succeeded"})
     response = await client.post(
@@ -262,3 +271,156 @@ async def test_approval_checkpoint_survives_runner_restart(studio_client):
         assert any(message["content"] == "durable" for message in completed["messages"])
     finally:
         await replacement.close()
+
+
+async def test_bootstrap_lists_summaries_and_runs_own_their_snapshot(studio_client):
+    client, app = studio_client
+    run, _body, session_id, _preview = await start(client, "/read README.md")
+    await wait_state(client, run["id"], {"succeeded"})
+    [summary] = (await client.get("/api/v1/bootstrap")).json()["sessions"]
+    # Navigation data excludes histories; the session resource still returns them.
+    assert "messages" not in summary and summary["message_count"] == 4
+    session = (await client.get(f"/api/v1/sessions/{session_id}")).json()
+    assert len(session["messages"]) == session["message_count"] == 4
+    async with app.state.studio.repository.engine.connect() as connection:
+        assert (
+            await connection.execute(select(func.count()).select_from(previews))
+        ).scalar_one() == 0
+    trace = (await client.get(f"/api/v1/runs/{run['id']}/trace")).json()["calls"]
+    assert [call["kind"] for call in trace] == ["model", "tool", "model"]
+
+
+async def test_runs_in_different_conversations_execute_concurrently(studio_client):
+    client, _app = studio_client
+    first, *_ = await start(client, "/slow")
+    second, *_ = await start(client, "/slow")
+    both = []
+    for _ in range(100):
+        both = [
+            (await client.get(f"/api/v1/runs/{run['id']}")).json()["status"]
+            for run in (first, second)
+        ]
+        if both == ["running", "running"]:
+            break
+        await asyncio.sleep(0.03)
+    assert both == ["running", "running"]
+    for run in (first, second):
+        await client.post(f"/api/v1/runs/{run['id']}/cancel")
+        await wait_state(client, run["id"], {"cancelled"})
+
+
+async def direct_run(client, text, **choices):
+    """Submit a direct Run in a new conversation with optional model and access choices."""
+    boot = (await client.get("/api/v1/bootstrap")).json()
+    session = (await client.post("/api/v1/sessions", json={})).json()
+    preset = boot["presets"][0]
+    body = {
+        "session_id": session["id"],
+        "expected_session_revision": 0,
+        "preset_id": preset["id"],
+        "preset_revision": preset["revision"],
+        "config_revision": boot["config"]["revision"],
+        "input": text,
+        **choices,
+    }
+    response = await client.post("/api/v1/runs", json=body, headers={"Idempotency-Key": text})
+    assert response.status_code == 202, response.text
+    return response.json()
+
+
+async def test_run_choices_set_model_and_workspace_access(studio_client):
+    client, _app = studio_client
+    simulated = {"provider_id": "simulated", "model": "simulated"}
+    asked = await direct_run(client, "/read README.md", model=simulated, access="ask")
+    # Reading is not a change, so ask mode leaves it allowed.
+    done = await wait_state(client, asked["id"], {"succeeded"})
+    assert (done["access"], done["provider_id"], done["model"]) == ("ask", "simulated", "simulated")
+    gated = await direct_run(
+        client,
+        '/tool write_text {"path": "new.txt", "content": "x"}',
+        model=simulated,
+        access="ask",
+    )
+    waiting = await wait_state(client, gated["id"], {"waiting_approval"})
+    assert waiting["approval"]["name"] == "write_text"
+    await client.post(f"/api/v1/runs/{gated['id']}/cancel")
+    read_only = await direct_run(
+        client, '/tool write_text {"path": "other.txt", "content": "x"}', access="read-only"
+    )
+    finished = await wait_state(client, read_only["id"], {"succeeded"})
+    # The write tool is not offered, so the simulated model cannot call it.
+    assert not any(message["role"] == "tool" for message in finished["messages"])
+    unknown = {"provider_id": "missing", "model": "x"}
+    response = await client.post(
+        "/api/v1/prompts/inspect",
+        json={
+            "preset": (await client.get("/api/v1/bootstrap")).json()["presets"][0],
+            "config_revision": (await client.get("/api/v1/bootstrap")).json()["config"]["revision"],
+            "model": unknown,
+        },
+    )
+    assert response.status_code == 422 and "not configured" in response.text
+    # A default model that names a provider takes its connection from that provider, so an
+    # edit that changes the request format under the same provider is rejected, not ignored.
+    config = (await client.get("/api/v1/bootstrap")).json()["config"]
+    profile = config["providers"][0]
+    other = "anthropic" if profile["adapter"] == "openai" else "openai"
+    config["provider"].update(profile_id=profile["id"], adapter=other, model="x")
+    response = await client.put("/api/v1/config", json=config)
+    assert response.status_code == 422 and response.json()["error"]["code"] == "provider_mismatch"
+
+
+async def test_credentials_are_write_only(studio_client):
+    client, _app = studio_client
+    secret = "sk-browser-entered-0123456789"
+    saved = await client.put("/api/v1/credentials/STUDIO_UI_KEY", json={"value": secret})
+    assert saved.json() == {"name": "STUDIO_UI_KEY", "source": "stored", "hint": "6789"}
+    listed = await client.get("/api/v1/credentials", params={"name": "STUDIO_UI_KEY"})
+    assert secret not in listed.text and listed.json()[0]["source"] == "stored"
+    boot = (await client.get("/api/v1/bootstrap")).json()
+    assert secret not in json.dumps(boot)
+    assert boot["effort_levels"]["anthropic"][-1] == "max"
+    assert (
+        await client.put("/api/v1/credentials/not-a-name", json={"value": "x"})
+    ).status_code == 422
+    removed = await client.delete("/api/v1/credentials/STUDIO_UI_KEY")
+    assert removed.json()["source"] == "missing"
+
+
+async def test_global_skills_are_shared_by_projects(studio_client, tmp_path):
+    client, _app = studio_client
+    skill = {
+        "name": "house-style",
+        "description": "Shared review rules.",
+        "instructions": "Be brief.",
+    }
+    saved = (await client.put("/api/v1/skills", json=skill)).json()
+    assert saved["scope"] == "global"
+    other = tmp_path / "other-project"
+    other.mkdir()
+    project = (
+        await client.post("/api/v1/projects", json={"name": "Other", "workspace_root": str(other)})
+    ).json()
+    workspace = (await client.get(f"/api/v1/workspace?project_id={project['id']}")).json()
+    assert any(item["name"] == "house-style" for item in workspace["skills"])
+    conflict = {**skill, "description": "Project copy."}
+    response = await client.put(
+        f"/api/v1/workspace/skills?project_id={project['id']}", json=conflict
+    )
+    assert response.status_code == 409 and "global skill" in response.text
+    # A project folder created outside the studio is reported, not silently shadowed.
+    (other / ".agents/skills/house-style").mkdir(parents=True)
+    (other / ".agents/skills/house-style/SKILL.md").write_text(
+        "---\nname: house-style\ndescription: Copy.\n---\n\nBody.\n"
+    )
+    workspace = (await client.get(f"/api/v1/workspace?project_id={project['id']}")).json()
+    assert "global skill" in workspace["skill_errors"]["house-style"]
+    listed = (await client.get("/api/v1/skills")).json()
+    assert {item["scope"] for item in listed["skills"]} == {"builtin", "global"}
+    response = await client.delete(
+        "/api/v1/skills/house-style", params={"expected_hash": saved["hash"]}
+    )
+    assert response.status_code == 204
+    assert (
+        await client.delete("/api/v1/skills/debugging", params={"expected_hash": "x"})
+    ).status_code == 404

@@ -13,7 +13,8 @@ import httpx
 import uvicorn
 
 from rtagent.domain import ProviderConfig, StudioConfig
-from rtagent.infrastructure.config import Settings, resolve_secret
+from rtagent.infrastructure.config import Settings
+from rtagent.infrastructure.credentials import CredentialStore
 from rtagent.interfaces.http.app import create_app
 
 FIXTURES = {
@@ -75,6 +76,20 @@ Export-ModuleMember -Function Get-ExportPath, Save-Export
     "public/example.txt": "Export root sample.\n",
     "private/note.txt": "Fixture data, never a host credential.\n",
 }
+
+
+def service_key(provider: ProviderConfig) -> str:
+    """Resolve the running service's key, whether saved in Settings or in the environment."""
+    store = CredentialStore(Settings().data_dir.resolve() / "credentials.json")
+    return store.resolve(provider.credential_ref)
+
+
+def share_key(provider: ProviderConfig, settings: Settings) -> None:
+    """Give an isolated acceptance service the same key without printing or committing it."""
+    if provider.credential_ref:
+        CredentialStore(settings.data_dir / "credentials.json").save(
+            provider.credential_ref, service_key(provider)
+        )
 
 
 async def api(client: httpx.AsyncClient, method: str, path: str, body: Any = None) -> Any:
@@ -289,12 +304,12 @@ async def main() -> None:
     if (
         provider.adapter != "openai"
         or not provider.model
-        or (provider.credential_ref and not resolve_secret(provider.credential_ref))
+        or (provider.credential_ref and not service_key(provider))
     ):
         parser.error(
             "Configure a real OpenAI-compatible provider and its server-side credential first."
         )
-    root = Path("var") / ("stage2-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
+    root = Path("var") / ("local-agent-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
     workspace = (root / "workspace").resolve()
     workspace.mkdir(parents=True)
     for name, content in FIXTURES.items():
@@ -311,6 +326,7 @@ async def main() -> None:
         openai_model=provider.model,
         openai_base_url=provider.base_url,
     )
+    share_key(provider, settings)
     server, serving = await start_server(settings)
     try:
         async with httpx.AsyncClient(
@@ -318,8 +334,12 @@ async def main() -> None:
         ) as client:
             state = await api(client, "GET", "/bootstrap")
             config = StudioConfig.model_validate(state["config"])
+            # An explicit connection, independent of the isolated service's providers.
             config.provider = provider.model_copy(
-                update={"max_output_tokens": max(4096, provider.max_output_tokens)}
+                update={
+                    "max_output_tokens": max(4096, provider.max_output_tokens),
+                    "profile_id": None,
+                }
             )
             await api(client, "PUT", "/config", config.model_dump())
             project = await api(

@@ -10,13 +10,29 @@ from rtagent.domain import AppError, Block, CompiledPrompt, Message, Preset, Stu
 VARIABLE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z_0-9]*)\s*\}\}")
 # Canonical fingerprint of the unchanged six-block Stage 2 starter, excluding its revision.
 STAGE2_STARTER_HASH = "cb98b7f2651093ea5d0810d1b70e8be8cf76cfcab9e597bb34bc9276b0d8472a"
-# Exact unchanged Stage 2 presets; revisions are omitted so restarts never overwrite edits.
+# Digests of earlier shipped presets, without revisions. Only an exact match is upgraded, so
+# restarts never overwrite user edits. Add the current digests here before changing the text.
 PREVIOUS_BUILTIN_HASHES = {
-    "security-analysis": "ca78619b48f9722a2054394b3fb9fe833e1da416d92a89b57f89e7e3fafd2518",
-    "general-agent": "20f66bb93a42e943c3233c1ac44461f69064b2edb2eefd909d53bc1dde14203c",
-    "coding": "1b189ed67bae4c00d3febbe312d36f90f2e518cbdc071e1ae6fb2e0d051242c0",
-    "debugging": "9e68d9474f670cb792cc995935d6db1d8f5b742216fc83821618291d3fedb8d7",
-    "code-review": "6dae62f93a7199f6815271903abacfb0d1ab11a059753759d12a4af922e2dbe1",
+    "security-analysis": {
+        "ca78619b48f9722a2054394b3fb9fe833e1da416d92a89b57f89e7e3fafd2518",
+        "dabee3cbd9e89d223c8c4199edefff532888a8139de0973f3bd6b79501805f45",
+    },
+    "general-agent": {
+        "20f66bb93a42e943c3233c1ac44461f69064b2edb2eefd909d53bc1dde14203c",
+        "293452cd222d4bd66c50816e4018e312f044b62de7ae5cbf3df287be64165673",
+    },
+    "coding": {
+        "1b189ed67bae4c00d3febbe312d36f90f2e518cbdc071e1ae6fb2e0d051242c0",
+        "c6ab91acb01152feaf45e96761b8dc96c1841bfcd64b8eb0d47896c94b247dad",
+    },
+    "debugging": {
+        "9e68d9474f670cb792cc995935d6db1d8f5b742216fc83821618291d3fedb8d7",
+        "bfdcd7ab318d826a79ccdce57d3d18233c39f75f2fb66bdb25bf511cb7733e0b",
+    },
+    "code-review": {
+        "6dae62f93a7199f6815271903abacfb0d1ab11a059753759d12a4af922e2dbe1",
+        "d18b9613015c0aa3348e1205ab6fafa8ad369552b669887eda883953ca139607",
+    },
 }
 
 
@@ -74,8 +90,9 @@ def default_preset(revision: int = 1) -> Preset:
             "failure details and the returned diffs. Use the "
             "exposed native command tool: PowerShell syntax for powershell on Windows, Bash "
             "syntax for bash on Linux. Inspect executable availability rather than assuming a "
-            "host development environment exists in the sandbox. Commands have no network, "
-            "and credentials, Git metadata, runtime data, and dependency directories are excluded. "
+            "host development environment exists in the sandbox. Commands have no network; "
+            "credentials, Git metadata and runtime data are hidden. The runtime environment "
+            "message states the exact boundary. Long output keeps its beginning and end. "
             "Use relative paths and bounded output. Inspect current files after timeout or "
             "cancellation before repeating a write; partial changes may remain. For a long-lived "
             "command, use start_process, retain its returned ID, poll_process for actual output, "
@@ -233,9 +250,8 @@ def is_legacy_default(preset: Preset) -> bool:
 
 def is_previous_builtin(preset: Preset) -> bool:
     """Upgrade only exact shipped content, keeping edited presets and frozen Runs intact."""
-    return digest(preset.model_dump(exclude={"revision"})) == PREVIOUS_BUILTIN_HASHES.get(
-        preset.id
-    ) or is_legacy_default(preset)
+    fingerprint = digest(preset.model_dump(exclude={"revision"}))
+    return fingerprint in PREVIOUS_BUILTIN_HASHES.get(preset.id, set()) or is_legacy_default(preset)
 
 
 def condition_value(condition: dict[str, Any], context: dict[str, Any], depth: int = 0) -> bool:
@@ -314,7 +330,6 @@ def compile_prompt(
             )
         positions.add(position)
         block_ids.add(block.id)
-        matches = condition_value(block.condition, context) if block.condition is not None else True
         reason = "included"
         if not block.enabled:
             reason = "disabled"
@@ -327,7 +342,7 @@ def compile_prompt(
             block.model_allowlist is not None and config.provider.model not in block.model_allowlist
         ):
             reason = "model_filter"
-        elif not matches:
+        elif block.condition is not None and not condition_value(block.condition, context):
             reason = "condition_false"
         entry = {"block_id": block.id, "name": block.name, "reason": reason, "tokens": 0}
         report.append(entry)
