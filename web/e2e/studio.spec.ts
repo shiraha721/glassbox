@@ -908,8 +908,10 @@ test('automatic compaction summarizes older turns once enabled and can be undone
   await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
   await settings.getByLabel('Close settings').click();
   try {
-    await startTask(page, 'Earlier evidence to summarize. '.repeat(200));
-    await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+    // The simulated reply echoes the task, so together they pass the 1,000-token threshold;
+    // streaming that echo is slow, hence the longer wait.
+    await startTask(page, 'Earlier evidence to summarize. '.repeat(100));
+    await expect(page.getByTestId('run-status')).toHaveText('succeeded', { timeout: 20_000 });
     await startTask(page, 'Keep this recent turn.');
     await expect(page.getByTestId('run-status')).toHaveText('succeeded');
     await page.getByRole('button', { name: 'Context', exact: true }).click();
@@ -1065,4 +1067,25 @@ test('a web search service is chosen in Settings with a write-only key', async (
       data: { ...saved, search: { provider: 'none', base_url: '', credential_ref: '' } },
     });
   }
+});
+
+test('an image attached in the composer is sent with the task', async ({ page }) => {
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  await openWorkspace(page);
+  await page
+    .getByLabel('Attach images', { exact: true })
+    .setInputFiles({ name: 'pixel.png', mimeType: 'image/png', buffer: pixel });
+  const strip = page.getByRole('list', { name: 'Attached images' });
+  await expect(strip.getByRole('img', { name: 'Attached image 1' })).toBeVisible();
+  await page.getByLabel('Task', { exact: true }).fill('Describe the attached image.');
+  await page.screenshot({ path: 'test-results/attachments.png' });
+  await startTask(page, 'Describe the attached image.');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await expect(strip).not.toBeAttached();
+  const turn = page.locator('.conversation-turn').last();
+  await expect(turn.getByRole('img', { name: 'Image 1 sent with the task' })).toBeVisible();
+  await expect(turn.locator('.agent-activity')).toContainText('Attached images: 1');
 });

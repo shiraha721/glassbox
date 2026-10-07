@@ -5,9 +5,20 @@ import math
 import re
 from typing import Any
 
-from rtagent.domain import AppError, Block, CompiledPrompt, Message, Preset, StudioConfig, digest
+from rtagent.domain import (
+    AppError,
+    Attachment,
+    Block,
+    CompiledPrompt,
+    Message,
+    Preset,
+    StudioConfig,
+    digest,
+)
 
 VARIABLE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z_0-9]*)\s*\}\}")
+# A rough provider cost of one attached image, for the context estimate.
+IMAGE_TOKENS = 1600
 # Canonical fingerprint of the unchanged six-block Stage 2 starter, excluding its revision.
 STAGE2_STARTER_HASH = "cb98b7f2651093ea5d0810d1b70e8be8cf76cfcab9e597bb34bc9276b0d8472a"
 # Digests of earlier shipped presets, without revisions. Only an exact match is upgraded, so
@@ -307,6 +318,7 @@ def compile_prompt(
     tools: list[dict[str, Any]],
     delta: list[Message] | None = None,
     workspace_context: list[Message] | None = None,
+    attachments: list[Attachment] | None = None,
 ) -> CompiledPrompt:
     """Compile a frozen configuration without I/O or implicit message transformations.
 
@@ -380,11 +392,20 @@ def compile_prompt(
         + (workspace_context or [])
         + history
         + slots["before_input"]
-        + [Message(role="user", content=user_input, source="current_input")]
+        + [
+            Message(
+                role="user",
+                content=user_input,
+                source="current_input",
+                attachments=attachments or [],
+            )
+        ]
         + (delta or [])
     )
     encoded = [message.model_dump() for message in messages]
     estimate = math.ceil(len(json.dumps({"messages": encoded, "tools": tools}).encode()) / 4)
+    # Images are sent as data the byte heuristic never sees; count a typical image's cost.
+    estimate += IMAGE_TOKENS * sum(len(message.attachments) for message in messages)
     limit = config.provider.context_window
     if limit is not None and estimate + config.provider.max_output_tokens > limit:
         raise AppError(

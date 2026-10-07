@@ -33,6 +33,7 @@ const base: Run = {
   active_tool: null,
   changed_files: [],
   command: null,
+  attachments: [],
 };
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ id, name, args });
 const assistant = (calls: ReturnType<typeof call>[], content = '') => ({
@@ -42,6 +43,7 @@ const assistant = (calls: ReturnType<typeof call>[], content = '') => ({
   tool_calls: calls,
   tool_call_id: null,
   blocks: [],
+  attachments: [],
 });
 const result = (id: string, content: unknown) => ({
   role: 'tool' as const,
@@ -50,6 +52,7 @@ const result = (id: string, content: unknown) => ({
   tool_calls: [],
   tool_call_id: id,
   blocks: [],
+  attachments: [],
 });
 
 function renderTurn(run: Run) {

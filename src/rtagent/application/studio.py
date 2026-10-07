@@ -17,6 +17,7 @@ from rtagent.application.evaluation import batch_view, eval_record, eval_summary
 from rtagent.application.runner import Runner
 from rtagent.domain import (
     AppError,
+    Attachment,
     CommandInfo,
     CommandUse,
     CompactionView,
@@ -68,6 +69,7 @@ from rtagent.domain import (
 from rtagent.domain.lifecycle import ACTIVE_PROCESSES, TERMINAL
 from rtagent.domain.policies import grant_for
 from rtagent.domain.prompts import compile_prompt
+from rtagent.infrastructure.attachments import AttachmentStore
 from rtagent.infrastructure.packages import export_skill, import_preset, import_skill
 from rtagent.infrastructure.providers.catalog import list_models
 from rtagent.infrastructure.providers.chat import prepare, transformations
@@ -123,6 +125,7 @@ class Studio:
         self.compaction_tasks: dict[str, asyncio.Task[None]] = {}
         self.eval_tasks: dict[str, asyncio.Task[None]] = {}
         self.auto_tasks: set[asyncio.Task[CompactionView | None]] = set()
+        self.attachments = AttachmentStore(registry.files.data_dir / "attachments")
         runner.on_committed = self.schedule_auto_compaction
 
     async def close(self) -> None:
@@ -493,6 +496,15 @@ class Studio:
             for item in found
         ]
 
+    async def save_attachment(self, data: bytes) -> Attachment:
+        """Store an image to attach to a task; the same image is stored once."""
+        return await asyncio.to_thread(self.attachments.save, data)
+
+    async def attachment(self, identifier: str) -> tuple[bytes, str]:
+        """An attached image's bytes and type, for showing it in the conversation."""
+        info = await asyncio.to_thread(self.attachments.info, identifier)
+        return await asyncio.to_thread(self.attachments.load, identifier), info.media_type
+
     async def git_status(self, project_id: str | None = None) -> GitStatus:
         """Read the selected workspace's Git branch and changed files for the user."""
         registry = await self.workspace_registry(project_id)
@@ -698,12 +710,17 @@ class Studio:
         variables: dict[str, Any],
         skills: list[str],
         registry: ToolRegistry,
+        attachments: list[str] | None = None,
     ) -> tuple[PromptInspection, list[Message], str]:
         """Share compilation and file capture between live inspection and immutable execution.
 
         Returns the inspection, the captured workspace context and the task text, which is the
         expanded template when the input invokes a custom slash command."""
         user_input, command = await asyncio.to_thread(registry.files.expand_command, user_input)
+        images = [
+            await asyncio.to_thread(self.attachments.info, identifier)
+            for identifier in dict.fromkeys(attachments or [])
+        ]
         tools = registry.selected(config)
         encoded_tools = [tool.model_dump() for tool in tools]
         # Shell variables also start with $. Only catalogued names are implicit skill mentions;
@@ -722,6 +739,7 @@ class Studio:
             variables,
             encoded_tools,
             workspace_context=workspace_context,
+            attachments=images,
         )
         prepared = prepare(config.provider, compiled, encoded_tools)
         return (
@@ -759,6 +777,7 @@ class Studio:
             request.variables,
             request.skills,
             registry,
+            request.attachments,
         )
         return inspection
 
@@ -792,6 +811,10 @@ class Studio:
             request.variables,
             request.skills,
             registry,
+            request.attachments,
+        )
+        current = next(
+            message for message in inspection.compiled.messages if message.source == "current_input"
         )
         preview = Preview(
             **inspection.model_dump(),
@@ -806,6 +829,7 @@ class Studio:
             "context_compaction_id": session.get("compaction_id"),
             "input": task,
             "command": inspection.command.model_dump() if inspection.command else None,
+            "attachments": [item.model_dump() for item in current.attachments],
             "variables": request.variables,
             "tools": [tool.model_dump() for tool in inspection.tools],
             "session_id": session["id"],

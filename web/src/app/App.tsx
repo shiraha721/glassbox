@@ -10,6 +10,7 @@ import {
   FlaskConical,
   FolderOpen,
   GitCompare,
+  ImagePlus,
   Layers,
   PanelLeft,
   Pencil,
@@ -26,6 +27,7 @@ import {
   request,
   terminal,
   workspacePath,
+  type Attachment,
   type Bootstrap,
   type Preset,
   type WorkspaceView,
@@ -57,6 +59,8 @@ import type { SettingsPage } from '../features/settings/pages';
 import { matchingCommands, useCommands } from '../features/composer/commands';
 import { CommandSuggestions } from '../features/composer/CommandSuggestions';
 import { GitPanel } from '../features/workspace/GitPanel';
+import { AttachmentStrip } from '../features/composer/AttachmentStrip';
+import { addImages, IMAGE_TYPES, imageFiles, uploadImages } from '../features/composer/attachments';
 
 type Panel = 'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes' | 'changes';
 
@@ -109,6 +113,8 @@ function Workspace({ data }: { data: Bootstrap }) {
   });
   const [selectedRun, setSelectedRun] = useState('');
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [variables, setVariables] = useState('{}');
   const [previewEnabled, setPreviewEnabled] = useState(false);
   const [tab, setTab] = useState<'preview' | 'trace'>(() =>
@@ -166,6 +172,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       input,
       variables,
       skills,
+      attachments: attachments.map((item) => item.hash),
       ...runChoice,
     }),
     workspaceQuery.dataUpdatedAt,
@@ -243,6 +250,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       input,
       variables: parsed as Record<string, unknown>,
       skills,
+      attachments: attachments.map((item) => item.hash),
       ...runChoice,
     };
   };
@@ -260,6 +268,7 @@ function Workspace({ data }: { data: Bootstrap }) {
         input,
         variables,
         skills,
+        attachments,
         choice,
         preset: { ...preset, revision: 0 },
       });
@@ -292,12 +301,22 @@ function Workspace({ data }: { data: Bootstrap }) {
     followLatest.current = true;
     setSelectedRun(created.id);
     setInput('');
+    setAttachments([]);
     setPreviewEnabled(false);
     setTab('trace');
     setPanel(null);
     await refresh();
   };
-  const canRun = !busy && !!input.trim() && !active && !session?.compacting_id;
+  const canRun = !busy && !uploading && !!input.trim() && !active && !session?.compacting_id;
+  const attach = (files: FileList | File[] | null | undefined) => {
+    const images = imageFiles(files);
+    if (!images.length) return;
+    setUploading(true);
+    void uploadImages(images)
+      .then((stored) => setAttachments((current) => addImages(current, stored)))
+      .catch((failure) => setError(errorMessage(failure)))
+      .finally(() => setUploading(false));
+  };
   const commands = useCommands(projectId, input.startsWith('/'));
   const commandMatches = matchingCommands(input, commands);
   const togglePanel = (name: Panel) => setPanel(panel === name ? null : name);
@@ -571,7 +590,23 @@ function Workspace({ data }: { data: Bootstrap }) {
               </div>
             ) : (
               <div className="task-dock">
-                <div className="task-composer">
+                <div
+                  className="task-composer"
+                  onDragOver={(event) => {
+                    if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    if (!event.dataTransfer.files.length) return;
+                    event.preventDefault();
+                    if (!active && !busy) attach(event.dataTransfer.files);
+                  }}
+                >
+                  <AttachmentStrip
+                    items={attachments}
+                    onRemove={(item) =>
+                      setAttachments((current) => current.filter((other) => other !== item))
+                    }
+                  />
                   <label className="sr-only" htmlFor="task-input">
                     Task
                   </label>
@@ -584,6 +619,13 @@ function Workspace({ data }: { data: Bootstrap }) {
                     }
                     rows={2}
                     disabled={!!active || busy}
+                    onPaste={(event) => {
+                      const images = imageFiles(event.clipboardData.files);
+                      if (images.length) {
+                        event.preventDefault();
+                        attach(images);
+                      }
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'Tab' && commandMatches.length) {
                         event.preventDefault();
@@ -622,6 +664,25 @@ function Workspace({ data }: { data: Bootstrap }) {
                   </details>
                   <div className="composer-actions">
                     <div className="composer-context">
+                      <label
+                        className="icon-button attach-button"
+                        title="Attach images (or paste or drop them)"
+                        aria-disabled={!!active || busy || uploading}
+                      >
+                        <ImagePlus size={15} />
+                        <input
+                          type="file"
+                          className="sr-only"
+                          aria-label="Attach images"
+                          accept={IMAGE_TYPES.join(',')}
+                          multiple
+                          disabled={!!active || busy || uploading}
+                          onChange={(event) => {
+                            attach(event.target.files);
+                            event.target.value = '';
+                          }}
+                        />
+                      </label>
                       <select
                         className="preset-select"
                         aria-label="Prompt preset"

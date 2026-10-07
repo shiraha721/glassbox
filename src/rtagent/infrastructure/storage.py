@@ -869,6 +869,7 @@ class Repository:
                                 "source": "history",
                                 "tool_calls": [],
                                 "tool_call_id": None,
+                                "attachments": run["snapshot"].get("attachments", []),
                             }
                         )
                         messages.extend(
@@ -1128,6 +1129,7 @@ class Repository:
             ),
             func.json_extract(snapshot, "$.access").label("access"),
             func.json_extract(snapshot, "$.command").label("command"),
+            func.json_extract(snapshot, "$.attachments").label("attachments"),
         ).order_by(runs.c.created_at, runs.c.id)
         if run_id is not None:
             query = query.where(runs.c.id == run_id)
@@ -1154,6 +1156,7 @@ class Repository:
             value["open_calls"] = [dict(call) for call in pending if call["run_id"] == value["id"]]
             value["changed_files"] = list(net_changes(changes.get(value["id"], [])))
             value["command"] = json.loads(value["command"]) if value["command"] else None
+            value["attachments"] = json.loads(value["attachments"]) if value["attachments"] else []
         return values
 
     async def file_changes(self, run_id: str) -> list[dict[str, Any]]:
@@ -1463,6 +1466,7 @@ class Repository:
                             "source": "history",
                             "tool_calls": [],
                             "tool_call_id": None,
+                            "attachments": run["snapshot"].get("attachments", []),
                         }
                     ]
                     + [{**message, "source": "history", "blocks": []} for message in messages],

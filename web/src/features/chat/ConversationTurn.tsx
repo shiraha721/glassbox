@@ -26,6 +26,7 @@ import { Json } from '../../shared/Json';
 import { Diff } from '../../shared/Diff';
 import { TaskPlan } from './TaskPlan';
 import { RunFiles } from './RunFiles';
+import { imageUrl } from '../composer/attachments';
 import { StatusBadge } from '../../shared/StatusBadge';
 import { modelLabel } from '../composer/choices';
 import { terminal, type Run, type ResumeRequest } from '../../api/client';
@@ -176,6 +177,17 @@ export function RunTurn({
             </>
           ) : (
             <p>{run.input}</p>
+          )}
+          {run.attachments.length > 0 && (
+            <ul className="attachment-strip sent" aria-label="Images sent with this task">
+              {run.attachments.map((item, imageIndex) => (
+                <li key={item.hash}>
+                  <a href={imageUrl(item)} target="_blank" rel="noreferrer">
+                    <img src={imageUrl(item)} alt={`Image ${imageIndex + 1} sent with the task`} />
+                  </a>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </div>

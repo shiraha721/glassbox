@@ -501,6 +501,20 @@ class ToolCall(Contract):
     args: dict[str, Any]
 
 
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+
+
+class Attachment(Contract):
+    """An image the user attached to a task, stored once in the data directory by its hash.
+
+    Messages carry only this reference; the image bytes are filled into a provider request
+    as it is sent, so histories, snapshots and receipts stay small."""
+
+    hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    media_type: Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+    size: int = Field(ge=1)
+
+
 class Message(Contract):
     """Canonical message with provenance and explicit tool-call pairing."""
 
@@ -512,6 +526,8 @@ class Message(Contract):
     # Provider content blocks to send back unchanged within the same Run, such as Messages
     # API thinking blocks with their signatures. Empty for most messages.
     blocks: list[dict[str, Any]] = Field(default_factory=list)
+    # Images sent with a user message (the task they were attached to).
+    attachments: list[Attachment] = Field(default_factory=list, max_length=10)
 
 
 class PlanItem(Contract):
@@ -581,6 +597,8 @@ class PreviewRequest(Contract):
     # Per-Run choices; omitted values use the saved default model and workspace policy.
     model: ModelChoice | None = None
     access: WorkspaceAccess | None = None
+    # Hashes of images uploaded with POST /attachments, sent with the task.
+    attachments: list[str] = Field(default_factory=list, max_length=10)
 
 
 class DraftPreviewRequest(Contract):
@@ -596,6 +614,7 @@ class DraftPreviewRequest(Contract):
     skills: list[str] = Field(default_factory=list, max_length=20)
     model: ModelChoice | None = None
     access: WorkspaceAccess | None = None
+    attachments: list[str] = Field(default_factory=list, max_length=10)
 
 
 class MemoryDocument(Contract):
@@ -1168,6 +1187,7 @@ class RunView(Contract):
     plan: TaskPlan | None = None
     active_tool: dict[str, Any] | None = None
     command: CommandUse | None = None
+    attachments: list[Attachment] = Field(default_factory=list)
     # Workspace paths with a net change by this Run's file tools (undo with /files/revert).
     changed_files: list[str] = Field(default_factory=list)
 

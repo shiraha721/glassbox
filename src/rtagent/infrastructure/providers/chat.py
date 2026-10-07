@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 
 from rtagent.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall, uid
+from rtagent.infrastructure.providers.attachments import DATA_URL, fill_attachments
 from rtagent.infrastructure.providers.errors import sdk_failure, truncated_output
 from rtagent.infrastructure.providers.messages import prepare_anthropic, stream_anthropic
 
@@ -22,6 +23,18 @@ def langchain_messages(messages: list[Message]) -> list:
     for message in messages:
         if message.role == "system":
             result.append(SystemMessage(content=message.content))
+        elif message.role == "user" and message.attachments:
+            result.append(
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": message.content},
+                        *(
+                            {"type": "image_url", "image_url": {"url": DATA_URL + item.hash}}
+                            for item in message.attachments
+                        ),
+                    ]
+                )
+            )
         elif message.role == "user":
             result.append(HumanMessage(content=message.content))
         elif message.role == "assistant":
@@ -128,6 +141,7 @@ async def fake_stream(
         i for i, message in enumerate(messages) if message.source == "current_input"
     )
     current = messages[current_index].content
+    images = messages[current_index].attachments
     # Prior turns must not satisfy a tool request in the current turn.
     results = [message for message in messages[current_index + 1 :] if message.role == "tool"]
     names = {tool["name"] for tool in tools}
@@ -165,7 +179,9 @@ async def fake_stream(
     else:
         text = (
             "## Workspace ready\n\nYour prompt was compiled and recorded successfully.\n\n"
-            + f"- **Messages:** {len(messages)}\n- **Available tools:** {len(tools)}\n- **Task:** {current}\n\n"
+            + f"- **Messages:** {len(messages)}\n- **Available tools:** {len(tools)}\n- **Task:** {current}\n"
+            + (f"- **Attached images:** {len(images)}\n" if images else "")
+            + "\n"
             + "This is the **simulated model**. Try `/read README.md` to inspect a local file or `/echo hello` to exercise tool approval. Configure an OpenAI-compatible endpoint in Settings for model-generated analysis."
         )
     for chunk in re.findall(r"[\s\S]{1,40}", text):
@@ -226,6 +242,7 @@ async def generate(
                 409,
             )
         await on_wire(body)
+        fill_attachments(request)
 
     async with httpx.AsyncClient(
         event_hooks={"request": [capture]}, follow_redirects=False, timeout=90

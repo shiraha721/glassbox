@@ -16,6 +16,7 @@ from langsmith import tracing_context
 
 from rtagent.domain import (
     AppError,
+    Attachment,
     Grant,
     Message,
     Preset,
@@ -32,6 +33,8 @@ from rtagent.domain.hooks import Hooks, matching_hooks
 from rtagent.domain.lifecycle import TERMINAL
 from rtagent.domain.policies import decide, granted
 from rtagent.domain.prompts import compile_prompt
+from rtagent.infrastructure.attachments import AttachmentStore
+from rtagent.infrastructure.providers.attachments import attachment_data
 from rtagent.infrastructure.providers.chat import generate, prepare, transformations
 from rtagent.infrastructure.shell_hooks import OUTPUT_LIMIT, run_hook
 from rtagent.infrastructure.storage import Repository
@@ -79,6 +82,7 @@ class Runner:
         # Told the Run ID after a Run succeeds and its messages are committed. It must only
         # schedule work: cancelling a Run waits for this task, so it cannot wait for locks.
         self.on_committed: Callable[[str], None] | None = None
+        self.attachments = AttachmentStore(registry.files.data_dir / "attachments")
 
     async def observe(self, event: RunEvent) -> None:
         """Start `run_end` shell hooks when a Run ends, then call the trusted event observer."""
@@ -354,6 +358,9 @@ class Runner:
                 workspace_context=[
                     Message.model_validate(item) for item in snapshot.get("workspace_context", [])
                 ],
+                attachments=[
+                    Attachment.model_validate(item) for item in snapshot.get("attachments", [])
+                ],
             )
             prepared = prepare(config.provider, compiled, snapshot["tools"])
             if step == 0 and prepared != snapshot["prepared_request"]:
@@ -389,18 +396,30 @@ class Runner:
             started = time.monotonic()
             response = None
             key = self.registry.credentials.resolve(config.provider.credential_ref)
-            async for event in generate(
-                config.provider, compiled, snapshot["tools"], prepared, on_wire, key
-            ):
-                if event["kind"] == "delta":
-                    await self.repository.delta(run_id, call_id, event["text"])
-                elif event["kind"] == "result":
-                    response = event["message"].model_dump()
-                    data["usage"] = event["usage"]
-                    data["cost"] = call_cost(
-                        event["usage"], config.provider.price, config.provider.adapter
-                    )
-                    data["response_metadata"] = event.get("metadata", {})
+            images = {
+                item.hash: item for message in compiled.messages for item in message.attachments
+            }
+            # Image data enters only the outgoing request; records keep the references.
+            token = attachment_data.set(
+                await asyncio.to_thread(self.attachments.encoded, list(images.values()))
+                if images
+                else None
+            )
+            try:
+                async for event in generate(
+                    config.provider, compiled, snapshot["tools"], prepared, on_wire, key
+                ):
+                    if event["kind"] == "delta":
+                        await self.repository.delta(run_id, call_id, event["text"])
+                    elif event["kind"] == "result":
+                        response = event["message"].model_dump()
+                        data["usage"] = event["usage"]
+                        data["cost"] = call_cost(
+                            event["usage"], config.provider.price, config.provider.adapter
+                        )
+                        data["response_metadata"] = event.get("metadata", {})
+            finally:
+                attachment_data.reset(token)
             if response is None:
                 raise AppError("provider_protocol", "No complete response was received.")
             data["latency_ms"] = round((time.monotonic() - started) * 1000)

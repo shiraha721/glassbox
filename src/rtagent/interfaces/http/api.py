@@ -13,6 +13,7 @@ from rtagent.domain import (
     EFFORT_LEVELS,
     AppError,
     ApprovalDecision,
+    Attachment,
     CommandInfo,
     CompactionView,
     CompactRequest,
@@ -68,6 +69,7 @@ from rtagent.domain import (
     credential_reference,
 )
 from rtagent.domain.lifecycle import TERMINAL
+from rtagent.infrastructure.attachments import IMAGE_LIMIT
 from rtagent.infrastructure.sandbox.processes import process_view
 from rtagent.infrastructure.tracing import redact
 
@@ -294,6 +296,32 @@ async def save_memory(
 ) -> MemoryDocument:
     """Save explicitly edited project notes."""
     return await request.app.state.studio.save_memory(body, project_id)
+
+
+@router.post("/attachments", response_model=Attachment, status_code=201)
+async def upload_attachment(request: Request) -> Attachment:
+    """Store an image sent as the raw request body (PNG, JPEG, GIF or WebP, at most 5 MiB)."""
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > IMAGE_LIMIT:
+            raise AppError("attachment_size", "Images can be at most 5 MiB.", 413)
+    return await request.app.state.studio.save_attachment(bytes(body))
+
+
+@router.get("/attachments/{identifier}", response_class=Response)
+async def attachment(identifier: str, request: Request) -> Response:
+    """Return a stored image with its verified type; it is never interpreted as a page."""
+    data, media_type = await request.app.state.studio.attachment(identifier)
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+            "Cache-Control": "private, max-age=31536000, immutable",
+        },
+    )
 
 
 @router.get("/workspace/git", response_model=GitStatus)

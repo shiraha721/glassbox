@@ -80,6 +80,8 @@ Type a task in the message box and press **Run** or **Ctrl+Enter** (**Cmd+Enter*
 
 Presets change how the agent works, not what it is allowed to do. Mention `$skill-name` in a task to load a Skill (see below).
 
+**Images** can go with a task: paste them into the message box, drop them on it, or use the image button beside the preset. PNG, JPEG, GIF and WebP images up to 5 MiB each are accepted, at most ten per task; the turn shows them with your message, and later turns of the conversation keep them in context. The model must accept images (most current Claude and GPT models do); a text-only model rejects the request with the provider's explanation. Images are stored once in the studio's data directory (`attachments/`) and stay there when a conversation is deleted.
+
 **Custom commands** are prompts you reuse. Save a Markdown file as `.agents/commands/<name>.md` in the workspace (or in `commands/` in the studio's data directory, for every project) and type `/name arguments` as the task. Typing `/` lists the available commands; **Tab** completes the first match. In the template, `$ARGUMENTS` stands for everything after the name and `$1` to `$9` for single words; arguments given to a template without placeholders are added at the end. Optional frontmatter sets what the list shows:
 
 ```markdown

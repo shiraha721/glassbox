@@ -396,6 +396,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Attachment
+         * @description Store an image sent as the raw request body (PNG, JPEG, GIF or WebP, at most 5 MiB).
+         */
+        post: operations["upload_attachment_api_v1_attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/attachments/{identifier}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Attachment
+         * @description Return a stored image with its verified type; it is never interpreted as a page.
+         */
+        get: operations["attachment_api_v1_attachments__identifier__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspace/git": {
         parameters: {
             query?: never;
@@ -1144,6 +1184,24 @@ export interface components {
             decision: "approve" | "approve_conversation" | "reject";
         };
         /**
+         * Attachment
+         * @description An image the user attached to a task, stored once in the data directory by its hash.
+         *
+         *     Messages carry only this reference; the image bytes are filled into a provider request
+         *     as it is sent, so histories, snapshots and receipts stay small.
+         */
+        Attachment: {
+            /** Hash */
+            hash: string;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+            /** Size */
+            size: number;
+        };
+        /**
          * AutoCompact
          * @description Opt-in compaction after a successful Run once the conversation history grows large.
          *
@@ -1591,6 +1649,8 @@ export interface components {
             model?: components["schemas"]["ModelChoice-Input"] | null;
             /** Access */
             access?: ("read-only" | "ask" | "workspace-write") | null;
+            /** Attachments */
+            attachments?: string[];
         };
         /**
          * ErrorEnvelope
@@ -2191,6 +2251,8 @@ export interface components {
             blocks: {
                 [key: string]: unknown;
             }[];
+            /** Attachments */
+            attachments: components["schemas"]["Attachment"][];
         };
         /**
          * ModelChoice
@@ -2379,6 +2441,8 @@ export interface components {
             model?: components["schemas"]["ModelChoice-Input"] | null;
             /** Access */
             access?: ("read-only" | "ask" | "workspace-write") | null;
+            /** Attachments */
+            attachments?: string[];
         };
         /**
          * ProcessInput
@@ -2769,6 +2833,8 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             command: components["schemas"]["CommandUse"] | null;
+            /** Attachments */
+            attachments: components["schemas"]["Attachment"][];
             /** Changed Files */
             changed_files: string[];
         };
@@ -4857,6 +4923,136 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MemoryDocument"];
                 };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    upload_attachment_api_v1_attachments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attachment"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    attachment_api_v1_attachments__identifier__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                identifier: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Forbidden */
             403: {

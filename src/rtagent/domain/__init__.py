@@ -4,10 +4,12 @@ from .changes import net_changes
 from .evaluation import final_text, grade, summarize_variant
 from .models import (
     EFFORT_LEVELS,
+    IMAGE_TYPES,
     SHELL_TOOL,
     SIMULATED,
     AppError,
     ApprovalDecision,
+    Attachment,
     AutoCompact,
     Block,
     CallView,
@@ -103,6 +105,7 @@ from .models import (
 )
 
 __all__ = [
+    "Attachment",
     "AutoCompact",
     "CommandInfo",
     "CommandRule",
@@ -129,6 +132,7 @@ __all__ = [
     "CredentialSave",
     "CredentialStatus",
     "EFFORT_LEVELS",
+    "IMAGE_TYPES",
     "ModelChoice",
     "ProviderProfile",
     "SHELL_TOOL",

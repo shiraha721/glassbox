@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from rtagent.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall
+from rtagent.infrastructure.providers.attachments import BASE64, fill_attachments
 from rtagent.infrastructure.providers.errors import (
     error_message,
     provider_failure,
@@ -65,6 +66,18 @@ def prepare_anthropic(
         blocks = (
             [{"type": "text", "text": item.content}] if item.content or not item.tool_calls else []
         )
+        # Images go before the text that refers to them, as the Messages API recommends.
+        blocks = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": attachment.media_type,
+                    "data": BASE64 + attachment.hash,
+                },
+            }
+            for attachment in item.attachments
+        ] + blocks
         for call in item.tool_calls:
             if not call.id or call.id in pending:
                 raise AppError(
@@ -150,6 +163,7 @@ async def stream_anthropic(
         if body != prepared:
             raise AppError("request_mismatch", "Messages request differs from its preview.", 409)
         await on_wire(body)
+        fill_attachments(request)
 
     headers = {"anthropic-version": "2023-06-01"}
     if key:

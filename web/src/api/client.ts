@@ -27,6 +27,7 @@ export type WorkspaceSkills = components['schemas']['WorkspaceSkills'];
 export type Grant = components['schemas']['Grant-Output'];
 export type CommandRule = components['schemas']['CommandRule'];
 export type ShellHook = components['schemas']['ShellHook-Output'];
+export type Attachment = components['schemas']['Attachment'];
 export type Eval = components['schemas']['Eval'];
 export type EvalCase = components['schemas']['EvalCase-Output'];
 export type EvalVariant = components['schemas']['EvalVariant-Output'];
@@ -68,18 +69,32 @@ export async function request<T>(
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    const message =
-      payload.error?.message ||
-      (Array.isArray(payload.detail)
-        ? payload.detail
-            .map((item: { loc: string[]; msg: string }) => `${item.loc.join('.')}: ${item.msg}`)
-            .join('; ')
-        : `Request failed (${response.status}).`);
-    throw new ApiError(message, response.status, payload.error?.code || 'request_error');
-  }
+  if (!response.ok) throw await failure(response);
   if (response.status === 204) return undefined as T;
+  return response.json();
+}
+
+/** Turn an error response into an ApiError with the server's code and explanation. */
+async function failure(response: Response): Promise<ApiError> {
+  const payload = await response.json().catch(() => ({}));
+  const message =
+    payload.error?.message ||
+    (Array.isArray(payload.detail)
+      ? payload.detail
+          .map((item: { loc: string[]; msg: string }) => `${item.loc.join('.')}: ${item.msg}`)
+          .join('; ')
+      : `Request failed (${response.status}).`);
+  return new ApiError(message, response.status, payload.error?.code || 'request_error');
+}
+
+/** Send a file as the raw request body, such as an image to attach to a task. */
+export async function upload<T>(path: string, file: Blob): Promise<T> {
+  const response = await fetch(`/api/v1${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  if (!response.ok) throw await failure(response);
   return response.json();
 }
 

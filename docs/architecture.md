@@ -43,9 +43,10 @@ src/rtagent/
     credentials.py     API keys saved from Settings (server-side only)
     tools.py           Tool catalog, schemas, dispatch, MCP sessions
     web.py             Web search services and reading public pages as text
+    attachments.py     Attached images stored by hash
     shell_hooks.py     User-configured hook commands with bounded time and output
     providers/         OpenAI-compatible (chat.py), Anthropic Messages (messages.py),
-                       model lists (catalog.py), errors
+                       model lists (catalog.py), image references (attachments.py), errors
     workspace/         File tools and their undo journal, Skills, memory and commands
                        (files.py), downloads, Git status and diffs (git.py), trusted runtimes
     sandbox/           linux.py, windows.py, command output/stdin (command_io.py),
@@ -181,7 +182,7 @@ Built-in presets are seeded on start. A stored built-in preset is upgraded only 
 | `compactions` | Summary jobs with source hash, provider calls and result. |
 | `processes` | Background command records with bounded output. |
 
-Outside the database, the data directory holds `credentials.json` (keys saved from Settings), `skills/` (global Skills) and `file-history/` (earlier versions of files that Runs changed, for undo). All are hidden from file tools and commands like the rest of the data directory.
+Outside the database, the data directory holds `credentials.json` (keys saved from Settings), `skills/` (global Skills), `commands/` (global slash commands), `file-history/` (earlier versions of files that Runs changed, for undo) and `attachments/` (images attached to tasks, named by their SHA-256). All are hidden from file tools and commands like the rest of the data directory.
 
 Rules that keep this consistent:
 
@@ -230,6 +231,12 @@ Both sandboxes take the same inputs (command, working directory, mode, timeout, 
 
 **Background processes (`sandbox/processes.py`).** `start_process` runs the same sandbox with a stdin pipe and returns once the process has started. At most four run at a time. Each belongs to its original Run, conversation and workspace root, has an absolute deadline no later than the Run time limit, and accepts stdin writes of up to 8 KiB each through a bounded queue. Stop, deadline, Run failure or cancellation, and service shutdown kill the process tree. A restart marks unfinished processes interrupted; they are never relaunched. Archiving, deleting or moving a conversation with a running process is refused.
 
+## Image attachments
+
+`POST /attachments` takes an image as the raw request body (at most 5 MiB); `AttachmentStore` identifies PNG, JPEG, GIF or WebP from the first bytes (never from the client's content type, and never SVG) and stores it as `attachments/<sha256>`. A submission names up to ten hashes; `_prepare` resolves them to `Attachment` records (`hash`, `media_type`, `size`) on the task message, the snapshot keeps them as `attachments`, and the committed user message carries them into history. The compile estimate adds 1,600 tokens per image.
+
+Image bytes never enter messages, snapshots, previews or receipts. Adapters render references: Chat Completions `image_url` parts with `attachment-data-url:<hash>`, Messages `image` blocks (before the text) with `attachment-base64:<hash>`. The Runner loads the base64 data of the images in the request it is about to send into a context variable; after the request hook has checked the body against the prepared request and recorded it, `fill_attachments` replaces exactly those whole-string references in the outgoing body. Other strings, and hashes of images not in that request, are left as they are. `GET /attachments/{hash}` serves an image for the conversation view with its verified type, `nosniff` and a `default-src 'none'` policy.
+
 ## Context compaction
 
 Compaction (`application/context.py`) summarizes all but the last N successful turns. It reserves the idle conversation, feeds the older messages to the configured model in UTF-8-safe chunks with no tools, and records every request like a Run's model calls. The summary activates only if the conversation's revision and the hash of the covered messages still match; it becomes a single user-role message labelled as derived, followed by the untouched recent messages. The originals remain in history, previous Runs are unchanged, and restoring full context just clears the pointer. Failed, cancelled or interrupted jobs never activate.
@@ -270,6 +277,7 @@ All routes live under `/api/v1` (`interfaces/http/api.py`); `/openapi.json` is t
 | Settings and tools | `PUT /config`, `POST /tools/refresh`, `PUT /presets/{id}`, preset export/import |
 | Models and keys | `POST /providers/models` (list a provider's models), `GET /credentials?name=…` (status only), `PUT/DELETE /credentials/{name}` |
 | Global Skills | `GET /skills`, `GET/DELETE /skills/{name}`, `PUT /skills` |
+| Attachments | `POST /attachments` (raw image body), `GET /attachments/{hash}` |
 | Workspace | `GET /workspace`, `PUT /workspace/memory`, Skill get/save/export/import, `GET /workspace/commands`, `GET /workspace/git`, `GET /workspace/git/diff` (optional `path`), all with optional `project_id` |
 | Projects | `POST /projects`, `POST /desktop/folder-picker` |
 | Conversations | `POST /sessions`, `GET/PATCH/DELETE /sessions/{id}`, `/copy`, `/runs`, `/context`, `/compact`, `/compactions/{id}`, `/processes` |
