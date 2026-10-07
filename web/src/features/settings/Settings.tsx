@@ -4,6 +4,7 @@ import {
   Cpu,
   Gauge,
   KeyRound,
+  Layers,
   Server,
   ShieldCheck,
   SlidersHorizontal,
@@ -18,6 +19,7 @@ import { ModelsPage } from './ModelsPage';
 import { McpPage } from './McpPage';
 import { SkillsPage } from './SkillsPage';
 import { CommandRules } from './CommandRules';
+import { ContextPage } from './ContextPage';
 import type { SettingsPage } from './pages';
 
 const pages = [
@@ -27,6 +29,7 @@ const pages = [
   { id: 'mcp', label: 'MCP servers', icon: Server },
   { id: 'skills', label: 'Skills', icon: BookOpen },
   { id: 'sandbox', label: 'Sandbox', icon: ShieldCheck },
+  { id: 'context', label: 'Context', icon: Layers },
   { id: 'limits', label: 'Run limits', icon: Gauge },
 ] as const;
 
@@ -232,6 +235,7 @@ export function Settings({
                   </p>
                 </>
               )}
+              {page === 'context' && <ContextPage draft={draft} onChange={change} />}
               {page === 'limits' && (
                 <>
                   <p className="page-intro">

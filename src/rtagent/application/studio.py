@@ -5,7 +5,7 @@ import os
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from rtagent.application.context import (
     compaction_view,
@@ -114,10 +114,16 @@ class Studio:
         self.commands = asyncio.Lock()
         self.compaction_tasks: dict[str, asyncio.Task[None]] = {}
         self.eval_tasks: dict[str, asyncio.Task[None]] = {}
+        self.auto_tasks: set[asyncio.Task[CompactionView | None]] = set()
+        runner.on_committed = self.schedule_auto_compaction
 
     async def close(self) -> None:
         """Stop explicit reduction and evaluation jobs before repository resources are closed."""
-        tasks = list(self.compaction_tasks.values()) + list(self.eval_tasks.values())
+        tasks = [
+            *self.auto_tasks,
+            *self.compaction_tasks.values(),
+            *self.eval_tasks.values(),
+        ]
         for task in tasks:
             task.cancel()
         if tasks:
@@ -152,7 +158,12 @@ class Studio:
             ],
         )
 
-    async def compact(self, session_id: str, request: CompactRequest) -> CompactionView:
+    async def compact(
+        self,
+        session_id: str,
+        request: CompactRequest,
+        trigger: Literal["manual", "auto"] = "manual",
+    ) -> CompactionView:
         """Start an explicit source-bound summary job while retaining every original message."""
         async with self.commands:
             session = await self.repository.session(session_id)
@@ -195,6 +206,7 @@ class Studio:
                 "calls": [],
                 "summary": "",
                 "through_run_id": older[-1]["id"],
+                "trigger": trigger,
             }
             record = await self.repository.begin_compaction(
                 session_id, request.expected_revision, data
@@ -205,6 +217,51 @@ class Studio:
             self.compaction_tasks[record["id"]] = task
             task.add_done_callback(lambda _completed: self.compaction_tasks.pop(record["id"], None))
             return compaction_view(record)
+
+    def schedule_auto_compaction(self, run_id: str) -> None:
+        """Check the opt-in compaction threshold in its own task after a Run commits."""
+        task = asyncio.create_task(self.auto_compact(run_id))
+        self.auto_tasks.add(task)
+        task.add_done_callback(self.auto_tasks.discard)
+
+    async def auto_compact(self, run_id: str) -> CompactionView | None:
+        """Start a recorded compaction when it is enabled and the history passed its size.
+
+        It goes through `compact`, so the summary is recorded, inspectable and reversible. Any
+        reason not to compact now (the user already sent another message, settings changed,
+        too few turns, nothing new to cover) skips it; the next successful Run checks again."""
+        config = await self.repository.config()
+        settings = config.auto_compact
+        if not settings.enabled:
+            return None
+        run = await self.repository.run(run_id)
+        session = await self.repository.session(run["session_id"])
+        if session["active_run_id"] or session["compacting_id"] or session["archived"]:
+            return None
+        history = await self.repository.effective_history(session)
+        if estimated_tokens(history) < settings.threshold_tokens:
+            return None
+        # Summarize with the model the conversation just used rather than the default.
+        provider = StudioConfig.model_validate(run["snapshot"]["config"]).provider
+        model = (
+            ModelChoice(
+                provider_id=provider.profile_id,
+                model=provider.model,
+                reasoning_effort=provider.reasoning_effort,
+            )
+            if provider.profile_id and provider.model
+            else None
+        )
+        request = CompactRequest(
+            expected_revision=session["revision"],
+            config_revision=config.revision,
+            keep_recent_turns=settings.keep_recent_turns,
+            model=model,
+        )
+        try:
+            return await self.compact(session["id"], request, trigger="auto")
+        except AppError:
+            return None
 
     async def stop_compaction(self, session_id: str, identifier: str) -> CompactionView:
         """Stop a selected reduction without activating partial summary text."""

@@ -6,6 +6,7 @@ import pytest
 
 from rtagent.domain import (
     AppError,
+    AutoCompact,
     Block,
     Message,
     Preset,
@@ -73,6 +74,60 @@ async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, 
         failed = await harness.repository.compaction(job.id)
         assert failed["status"] == "failed" and failed["data"]["calls"][0]["status"] == "succeeded"
         assert failed["data"]["usage"]["output_tokens"] is None
+
+
+async def test_auto_compaction_is_opt_in_recorded_and_reversible(tmp_path, monkeypatch):
+    """Once enabled, a Run that leaves the history past the threshold starts a recorded summary
+    of older turns; the original messages stay and Restore full context undoes it."""
+    settings = Settings(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    )
+
+    async def summarizer(_config, _compiled, _tools, _prepared, on_wire, _key=""):
+        await on_wire(None)
+        yield {
+            "kind": "result",
+            "message": Message(role="assistant", content="Derived summary."),
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+
+    monkeypatch.setattr("rtagent.application.context.generate", summarizer)
+    async with Harness(settings) as harness:
+        first = await harness.run("Large earlier evidence. " * 400)
+        assert (await harness.wait(first.id, 10)).status == "succeeded"
+        second = await harness.run("Keep the recent turn.", session_id=first.session_id)
+        assert (await harness.wait(second.id, 10)).status == "succeeded"
+        # Off by default, however large the history is.
+        assert await harness.studio.auto_compact(second.id) is None
+        config = await harness.repository.config()
+        config.auto_compact = AutoCompact(enabled=True, threshold_tokens=100_000)
+        config = await harness.studio.save_config(config)
+        # Below the threshold nothing happens.
+        assert await harness.studio.auto_compact(second.id) is None
+        config.auto_compact = AutoCompact(enabled=True, threshold_tokens=1_000, keep_recent_turns=1)
+        await harness.studio.save_config(config)
+        before = await harness.repository.session(first.session_id)
+
+        third = await harness.run("Trigger the check.", session_id=first.session_id)
+        assert (await harness.wait(third.id, 10)).status == "succeeded"
+        async with asyncio.timeout(5):
+            while not (records := await harness.repository.list_compactions(first.session_id)):
+                await asyncio.sleep(0.05)
+            await asyncio.gather(*harness.studio.compaction_tasks.values())
+        job = await harness.repository.compaction(records[0]["id"])
+        assert job["status"] == "succeeded" and job["data"]["trigger"] == "auto"
+        # The two older turns are covered and the newest turn stays verbatim.
+        assert job["data"]["through_run_id"] == second.id
+        session = await harness.repository.session(first.session_id)
+        assert session["compaction_id"] == job["id"]
+        assert session["messages"][: len(before["messages"])] == before["messages"]
+        context = await harness.studio.context(first.session_id)
+        assert context.compactions[0].trigger == "auto"
+        assert context.effective_estimated_tokens < context.raw_estimated_tokens
+        # Nothing new to cover: the next check is a no-op rather than another summary.
+        assert await harness.studio.auto_compact(third.id) is None
+        await harness.repository.reset_compaction(first.session_id, session["revision"])
+        assert (await harness.repository.session(first.session_id))["compaction_id"] is None
 
 
 async def test_restart_marks_reduction_and_process_intents_uncertain(tmp_path):

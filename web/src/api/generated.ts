@@ -1044,6 +1044,54 @@ export interface components {
             decision: "approve" | "approve_conversation" | "reject";
         };
         /**
+         * AutoCompact
+         * @description Opt-in compaction after a successful Run once the conversation history grows large.
+         *
+         *     It starts the same recorded compaction as the Context panel, with the Run's model, so the
+         *     summary is inspectable and Restore full context undoes it. Off unless the user enables it.
+         */
+        "AutoCompact-Input": {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Threshold Tokens
+             * @default 100000
+             */
+            threshold_tokens: number;
+            /**
+             * Keep Recent Turns
+             * @default 2
+             */
+            keep_recent_turns: number;
+        };
+        /**
+         * AutoCompact
+         * @description Opt-in compaction after a successful Run once the conversation history grows large.
+         *
+         *     It starts the same recorded compaction as the Context panel, with the Run's model, so the
+         *     summary is inspectable and Restore full context undoes it. Off unless the user enables it.
+         */
+        "AutoCompact-Output": {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Threshold Tokens
+             * @default 100000
+             */
+            threshold_tokens: number;
+            /**
+             * Keep Recent Turns
+             * @default 2
+             */
+            keep_recent_turns: number;
+        };
+        /**
          * Block
          * @description One configurable message, activated and ordered by the pure compiler.
          */
@@ -1253,6 +1301,12 @@ export interface components {
              * @default 0
              */
             model_calls: number;
+            /**
+             * Trigger
+             * @default manual
+             * @enum {string}
+             */
+            trigger: "manual" | "auto";
         };
         /**
          * CompiledPrompt
@@ -2735,6 +2789,7 @@ export interface components {
             command_rules?: components["schemas"]["CommandRule"][];
             /** Mcp Servers */
             mcp_servers?: components["schemas"]["MCPServer-Input"][];
+            auto_compact?: components["schemas"]["AutoCompact-Input"];
             /**
              * Max Steps
              * @default 20
@@ -2787,6 +2842,7 @@ export interface components {
             command_rules: components["schemas"]["CommandRule"][];
             /** Mcp Servers */
             mcp_servers: components["schemas"]["MCPServer-Output"][];
+            auto_compact: components["schemas"]["AutoCompact-Output"];
             /**
              * Max Steps
              * @default 20

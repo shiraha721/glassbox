@@ -7,6 +7,7 @@ from .models import (
     SIMULATED,
     AppError,
     ApprovalDecision,
+    AutoCompact,
     Block,
     CallView,
     CommandRule,
@@ -92,6 +93,7 @@ from .models import (
 )
 
 __all__ = [
+    "AutoCompact",
     "CommandRule",
     "Grant",
     "ModelPrice",

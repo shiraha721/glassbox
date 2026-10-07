@@ -333,6 +333,18 @@ class Grant(Contract):
     created_at: str = Field(default_factory=lambda: now())
 
 
+class AutoCompact(Contract):
+    """Opt-in compaction after a successful Run once the conversation history grows large.
+
+    It starts the same recorded compaction as the Context panel, with the Run's model, so the
+    summary is inspectable and Restore full context undoes it. Off unless the user enables it."""
+
+    enabled: bool = False
+    # Compared with the byte-based estimate of the history the next Run would send.
+    threshold_tokens: int = Field(default=100_000, ge=1_000, le=2_000_000)
+    keep_recent_turns: int = Field(default=2, ge=1, le=10)
+
+
 class StudioConfig(Contract):
     """Version provider, tool permissions, connections, and execution limits together."""
 
@@ -372,6 +384,7 @@ class StudioConfig(Contract):
     # Shell command prefixes with their own permission; see CommandRule.
     command_rules: list[CommandRule] = Field(default_factory=list, max_length=100)
     mcp_servers: list[MCPServer] = Field(default_factory=list, max_length=10)
+    auto_compact: AutoCompact = Field(default_factory=AutoCompact)
     max_steps: int = Field(default=20, ge=1, le=100)
     max_tool_calls: int = Field(default=40, ge=1, le=200)
     tool_timeout: float = Field(default=60, ge=0.1, le=300)
@@ -845,6 +858,8 @@ class CompactionView(Contract):
     error: str | None = None
     usage: dict[str, Any] = Field(default_factory=dict)
     model_calls: int = 0
+    # "auto" when started by the opt-in AutoCompact setting rather than the Context panel.
+    trigger: Literal["manual", "auto"] = "manual"
 
 
 class ContextUsage(Contract):

@@ -887,3 +887,46 @@ test('approving for the conversation covers later calls until revoked', async ({
   await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
   await settings.getByLabel('Close settings').click();
 });
+
+test('automatic compaction summarizes older turns once enabled and can be undone', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings
+    .getByRole('navigation', { name: 'Settings pages' })
+    .getByRole('button', { name: 'Context', exact: true })
+    .click();
+  await settings
+    .getByLabel("Compact automatically when a conversation's history grows large")
+    .check();
+  await settings.getByLabel('History size that triggers it (estimated tokens)').fill('1000');
+  await settings.getByLabel('Recent turns kept verbatim').selectOption('1');
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  await settings.getByLabel('Close settings').click();
+  try {
+    await startTask(page, 'Earlier evidence to summarize. '.repeat(200));
+    await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+    await startTask(page, 'Keep this recent turn.');
+    await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+    await page.getByRole('button', { name: 'Context', exact: true }).click();
+    const context = page.getByLabel('Conversation context', { exact: true });
+    await expect(context.getByTestId('auto-compact-status')).toContainText(
+      'Automatic compaction is on',
+    );
+    await expect(context.getByText('Active summary', { exact: true })).toBeVisible();
+    await expect(context.locator('.context-file summary')).toContainText('Automatic · succeeded');
+    // Both turns stay in the conversation; only the history sent to new runs changed.
+    await expect(page.locator('.conversation-turn')).toHaveCount(2);
+    await context.getByRole('button', { name: 'Restore full context' }).click();
+    await expect(context.getByText('Active summary', { exact: true })).not.toBeAttached();
+  } finally {
+    // Later tests share this server's settings.
+    const config = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
+    await page.request.put('/api/v1/config', {
+      data: { ...config, auto_compact: { ...config.auto_compact, enabled: false } },
+    });
+  }
+});

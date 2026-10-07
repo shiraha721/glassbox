@@ -180,6 +180,11 @@ export function ContextPanel({
               Compaction calls the model selected below the message box. Original messages stay in
               history; new runs use a summary and the recent turns. You can restore full context.
             </p>
+            <p className="subtle" data-testid="auto-compact-status">
+              {config.auto_compact?.enabled
+                ? `Automatic compaction is on: after a run, history over ~${config.auto_compact.threshold_tokens.toLocaleString()} tokens is summarized, keeping ${config.auto_compact.keep_recent_turns} recent turn${config.auto_compact.keep_recent_turns === 1 ? '' : 's'}.`
+                : 'Automatic compaction is off; turn it on in Settings › Context.'}
+            </p>
             <div className="row">
               <button
                 className="button primary"
@@ -237,6 +242,7 @@ export function ContextPanel({
                 {[...context.compactions].reverse().map((item) => (
                   <details key={item.id} className="context-file">
                     <summary>
+                      {item.trigger === 'auto' ? 'Automatic · ' : ''}
                       {item.status} · {item.covered_messages} messages ·{' '}
                       {new Date(item.created_at).toLocaleString()}
                     </summary>

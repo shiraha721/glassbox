@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from collections.abc import Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any, TypedDict
@@ -69,6 +70,9 @@ class Runner:
         self.tasks: dict[str, asyncio.Task] = {}
         self.semaphore = asyncio.Semaphore(MAX_ACTIVE_RUNS)
         self.shutting_down = False
+        # Told the Run ID after a Run succeeds and its messages are committed. It must only
+        # schedule work: cancelling a Run waits for this task, so it cannot wait for locks.
+        self.on_committed: Callable[[str], None] | None = None
 
     async def open(self) -> None:
         """Open checkpoints, build the explicit loop, and recover queued work."""
@@ -161,6 +165,8 @@ class Runner:
                     await self.repository.finish(
                         run_id, "succeeded", result["messages"], "completed"
                     )
+                    if self.on_committed:
+                        self.on_committed(run_id)
         except asyncio.CancelledError:
             run = await self.repository.run(run_id)
             await self.mark_unknown(run_id)

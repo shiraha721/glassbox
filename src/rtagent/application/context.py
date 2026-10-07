@@ -36,6 +36,7 @@ def compaction_view(record: dict[str, Any]) -> CompactionView:
         error=data.get("error"),
         usage=data.get("usage", {}),
         model_calls=len(data.get("calls", [])),
+        trigger=data.get("trigger", "manual"),
     )
 
 

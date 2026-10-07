@@ -1008,7 +1008,13 @@ class Repository:
                     select(presets.c.data).where(presets.c.id == snapshot["preset"]["id"])
                 )
             ).scalar_one()
-            if session["active_run_id"] or session["compacting_id"]:
+            if session["compacting_id"]:
+                raise AppError(
+                    "session_busy",
+                    "Context compaction is running. Wait for it, or stop it in Context.",
+                    409,
+                )
+            if session["active_run_id"]:
                 raise AppError("session_busy", "Finish or cancel the current Run first.", 409)
             if session["archived"]:
                 raise AppError(

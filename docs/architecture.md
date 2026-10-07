@@ -221,6 +221,8 @@ Both sandboxes take the same inputs (command, working directory, mode, timeout, 
 
 Compaction (`application/context.py`) summarizes all but the last N successful turns. It reserves the idle conversation, feeds the older messages to the configured model in UTF-8-safe chunks with no tools, and records every request like a Run's model calls. The summary activates only if the conversation's revision and the hash of the covered messages still match; it becomes a single user-role message labelled as derived, followed by the untouched recent messages. The originals remain in history, previous Runs are unchanged, and restoring full context just clears the pointer. Failed, cancelled or interrupted jobs never activate.
 
+Automatic compaction is off unless enabled in `StudioConfig.auto_compact` (Settings › Context). When on, the Runner calls `Studio.schedule_auto_compaction` after a Run succeeds and commits; the check runs in its own task, so cancelling a Run never waits on it. If the conversation is idle and the estimated effective history (what the next Run would send) is at least `threshold_tokens`, it starts the same `compact` job with the finished Run's model and `keep_recent_turns`, recording `trigger: "auto"` on the job. Any reason not to compact (a new Run already started, a settings or revision change, too few turns, nothing new to cover) skips it; the next successful Run checks again. A Run submitted while a job runs is refused with a message to wait or stop it.
+
 ## Prompt evaluation
 
 An evaluation compares prompts by running the same cases under each variant. It adds no execution path of its own: `Studio.start_batch` freezes the definition into an `eval_batches` row and starts a background task that, for each variant and case in turn, creates a hidden `kind="eval"` session, submits an ordinary `PreviewRequest` through `Studio.start` (so each item has a normal snapshot, receipts, trace and budgets), and polls the Run to a terminal state. Every item gets a fresh session, so no case sees another's history.
@@ -286,7 +288,7 @@ A lost submission response is retried with the same body and idempotency key, ev
 ## Design decisions and limits
 
 - **One process, SQLite, no queue.** Sufficient for a single local user; LangGraph checkpoints plus receipts make restarts safe without a broker.
-- **No hidden context management.** Over-budget prompts fail with a reason; compaction is an explicit, reversible action.
+- **No hidden context management.** Over-budget prompts fail with a reason; compaction is a recorded, reversible action, started from the Context panel or, when the user enables it, automatically after a Run, never by silently trimming a prompt.
 - **No claimed atomicity across systems.** A model call, a file write, `app.db` and `checkpoints.db` cannot commit together; receipts and explicit uncertainty handle the gaps.
 - **Text is data.** Files, tool output, memory, Skills and model replies cannot change permissions or settings.
 - **Not a security boundary against the local user.** The sandbox protects the host from agent commands; it does not authenticate local API clients. MCP servers and trusted local tools run with the service's own authority.
