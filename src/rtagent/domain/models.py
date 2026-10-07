@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -803,6 +804,163 @@ class ContextView(Contract):
     active_compaction_id: str | None
     compacting_id: str | None
     compactions: list[CompactionView]
+
+
+EvalCheckKind = Literal["succeeds", "contains", "not_contains", "equals", "regex"]
+
+
+class EvalCheck(Contract):
+    """How one eval case decides a Run passed, from its final assistant text.
+
+    `succeeds` only needs the Run to finish; the others match the text. Matching is a plain
+    byte check, not a tokenizer or a model judge, so results are deterministic and offline."""
+
+    kind: EvalCheckKind = "contains"
+    value: str = Field(default="", max_length=4000)
+    ignore_case: bool = True
+
+    @model_validator(mode="after")
+    def check_is_usable(self) -> "EvalCheck":
+        """A text check needs a value, and a regex must compile, so saving catches mistakes."""
+        if self.kind != "succeeds" and not self.value.strip():
+            raise ValueError("Enter the text or pattern this check should look for.")
+        if self.kind == "regex":
+            try:
+                re.compile(self.value)
+            except re.error as error:
+                raise ValueError(f"Invalid regular expression: {error}") from error
+        return self
+
+
+class EvalCase(Contract):
+    """One task the compared prompts each run, with the condition that marks it passed."""
+
+    id: str = Field(default_factory=uid)
+    name: str = Field(min_length=1, max_length=120)
+    input: str = Field(min_length=1, max_length=100_000)
+    variables: dict[str, Any] = Field(default_factory=dict)
+    check: EvalCheck = Field(default_factory=EvalCheck)
+
+
+class EvalVariant(Contract):
+    """One prompt under comparison: a preset, optionally with its own model and access."""
+
+    id: str = Field(default_factory=uid)
+    name: str = Field(min_length=1, max_length=120)
+    preset_id: str = Field(min_length=1, max_length=64)
+    model: ModelChoice | None = None
+    access: WorkspaceAccess | None = None
+
+
+class EvalDraft(Contract):
+    """The editable definition of an evaluation: the cases and the prompts to compare."""
+
+    name: str = Field(min_length=1, max_length=80)
+    cases: list[EvalCase] = Field(min_length=1, max_length=50)
+    variants: list[EvalVariant] = Field(min_length=1, max_length=10)
+
+    @field_validator("name")
+    @classmethod
+    def nonempty_name(cls, value: str) -> str:
+        """Keep evaluation names meaningful for the list and the comparison header."""
+        if not value.strip():
+            raise ValueError("Enter an evaluation name.")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def unique_members(self) -> "EvalDraft":
+        """Cases and variants are matched by id in results, so ids and names must be distinct."""
+        for label, items in (("case", self.cases), ("variant", self.variants)):
+            ids = [item.id for item in items]
+            names = [item.name.strip().lower() for item in items]
+            if len(set(ids)) != len(ids):
+                raise ValueError(f"Each {label} needs a distinct id.")
+            if len(set(names)) != len(names):
+                raise ValueError(f"Each {label} needs a distinct name.")
+        return self
+
+
+class EvalUpdate(EvalDraft):
+    """A revision-checked replacement of an existing evaluation definition."""
+
+    expected_revision: int = Field(ge=0)
+
+
+class Eval(Contract):
+    """A stored evaluation definition with its own revision, separate from Run snapshots."""
+
+    id: str
+    name: str
+    revision: int
+    created_at: str
+    cases: list[EvalCase]
+    variants: list[EvalVariant]
+
+
+class EvalSummary(Contract):
+    """Evaluation metadata plus the status of its most recent comparison, for the list."""
+
+    id: str
+    name: str
+    revision: int
+    created_at: str
+    case_count: int
+    variant_count: int
+    last_batch_id: str | None = None
+    last_status: str | None = None
+    last_run_at: str | None = None
+
+
+class EvalLabel(Contract):
+    """A stable id and display name for a case or variant referenced in results."""
+
+    id: str
+    name: str
+
+
+class EvalItemResult(Contract):
+    """One case run under one variant: its Run, grade, output snippet and recorded usage."""
+
+    case_id: str
+    variant_id: str
+    run_id: str | None = None
+    run_session_id: str | None = None
+    status: str
+    passed: bool | None = None
+    detail: str = ""
+    output: str = ""
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    active_seconds: float | None = None
+
+
+class VariantSummary(Contract):
+    """Aggregate effectiveness of one compared prompt across the evaluation's cases."""
+
+    variant_id: str
+    name: str
+    graded: int
+    passed: int
+    pass_rate: float | None = None
+    avg_input_tokens: float | None = None
+    avg_output_tokens: float | None = None
+    avg_active_seconds: float | None = None
+
+
+class EvalBatchView(Contract):
+    """One comparison run: its progress, per-variant aggregates and every case/variant result."""
+
+    id: str
+    eval_id: str
+    eval_name: str
+    status: str
+    created_at: str
+    completed: int
+    total: int
+    error: str | None = None
+    cases: list[EvalLabel]
+    variants: list[VariantSummary]
+    items: list[EvalItemResult]
 
 
 class SessionSummary(Contract):

@@ -106,6 +106,17 @@ When a tool requires approval, the Run pauses with an **Approve once / Reject** 
 
 **Prompt** opens the preset editor. Blocks have a role (system, user or assistant), a position (before the conversation history or just before your message), optional `{{variables}}` and activation rules. Workspace instructions, memory and Skills appear in their real position between the blocks. Edits are drafts with **Undo**, **Redo** and **Discard** until you **Save preset**; saving creates a new revision, and earlier Runs keep the version they used. **Export**/**Import** moves presets between installations.
 
+### Evaluate prompts
+
+**Evaluations** (sidebar) compares prompts on the same tasks. An evaluation has:
+
+- **Cases:** a task plus the condition that marks it passed: the final reply contains, does not contain, equals or matches a regular expression, or simply that the Run succeeds. Checks are plain text comparisons (with an **Ignore case** option), not a model judge, so the same reply always gets the same verdict.
+- **Variants:** the prompts under comparison. Each picks a preset and can override the model and the workspace access.
+
+**Run comparison** saves the evaluation and runs every case once under every variant, one after another, in the selected workspace. Each run is an ordinary Run with its own snapshot and trace, kept in a hidden session so it does not appear among your conversations. The results show each variant's pass rate, its average input and output tokens and active time, and a case × variant grid; select a cell to see its verdict, reason and final reply. Earlier comparisons stay available from the selector beside **Results**.
+
+Comparison runs are unattended. A Run that stops for approval is cancelled and counts as failed, so variants offer only **Read only** or **Workspace write** access. Runs use the selected models and may cost money; **Stop comparison** cancels the remaining runs and keeps the finished ones. Deleting an evaluation also deletes its runs. Case input variables can be set through the API (`variables` on a case) but not yet in the dialog.
+
 ### Manage conversations
 
 The sidebar's **Conversations** section lists the selected workspace's conversations, with **New conversation** to start another there, search, an **Archived** filter and flat folders. A conversation's **…** menu can rename, move to a folder, change its workspace, duplicate, fork from an earlier turn, archive or delete it. **Fork here** on a turn does the same from that point. Copies share no state with the original and never repeat model or tool calls.
@@ -203,7 +214,7 @@ MCP servers (stdio commands or Streamable HTTP URLs) are configured in **Setting
 
 As of 2026-10-07:
 
-- Stages 1–4 below are implemented. Real-model acceptance ran on Windows ([records](history/README.md)); the Linux sandbox is covered by automated tests against real bubblewrap, but a live-model Linux acceptance and a check against Anthropic's hosted API have not been run. The Messages adapter, thinking replay and reasoning effort are tested against recorded protocol fixtures.
+- Stages 1–4 below are implemented, and stage 6 in part (prompt evaluations). Real-model acceptance ran on Windows ([records](history/README.md)); the Linux sandbox is covered by automated tests against real bubblewrap, but a live-model Linux acceptance and a check against Anthropic's hosted API have not been run. The Messages adapter, thinking replay and reasoning effort are tested against recorded protocol fixtures.
 - Not implemented: full terminal emulation (PTY/ConPTY), command network access, disk quotas, stateful MCP sessions, specialized reverse-engineering integrations.
 
 | Stage | Scope | Status |
@@ -213,6 +224,6 @@ As of 2026-10-07:
 | 3 — Daily agent use | Context compaction, conversation branching, diffs, streamed command output, background processes, dependency/download policy | Done |
 | 4 — Extensible harness | CLI, JSON-RPC, Python client and embedding, hooks, trusted local tools, preset/Skill packages, Messages provider | Done |
 | 5 — Security analysis workflows | Stateful MCP, IDA/Ghidra/debugger/browser integrations, evidence artifacts, analysis Skills | Planned |
-| 6 — Evaluation | Reproducible task sets, replay/comparison, A/B testing, cost reporting | Planned |
+| 6 — Evaluation | Prompt comparisons over task sets with deterministic checks and token/time reporting (done); replay of recorded Runs, model-judged grading, cost in currency (planned) | Partial |
 
 Later stages should add capabilities with a real workload and acceptance criteria each, while keeping the single-user local path simple.

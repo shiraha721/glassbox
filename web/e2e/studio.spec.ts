@@ -762,3 +762,36 @@ test('conversations start under the workspace and context reports live request u
   await expect(usage).toContainText('90%'); // cache hit rate
   await expect(usage.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25');
 });
+
+test('an evaluation compares prompt variants on the same cases', async ({ page }) => {
+  page.on('dialog', (dialog) => void dialog.accept());
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Evaluations', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Evaluations' });
+  await dialog.getByLabel('Evaluation name').fill('Browser eval');
+  await dialog.getByLabel('Task').fill('/read README.md');
+  await dialog.getByLabel('Text', { exact: true }).fill('browser test workspace');
+  await dialog.getByRole('button', { name: 'Add case' }).click();
+  await dialog.getByLabel('Task').nth(1).fill('Summarize this project.');
+  await dialog.getByLabel('Text', { exact: true }).nth(1).fill('browser test workspace');
+  await dialog.getByLabel('Workspace access').nth(1).selectOption('read-only');
+
+  // Running saves the definition first, then runs every case under every variant.
+  await dialog.getByRole('button', { name: 'Run comparison', exact: true }).click();
+  await expect(dialog.getByTestId('batch-status')).toHaveText('succeeded', { timeout: 20_000 });
+  await expect(dialog.getByText('4 of 4 runs')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Case 1 under Variant A: pass' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Case 2 under Variant B: fail' })).toBeVisible();
+  const summary = dialog.locator('.eval-table').first();
+  await expect(summary.getByRole('row', { name: /Variant A/ })).toContainText('50%');
+
+  await dialog.getByRole('button', { name: 'Case 1 under Variant A: pass' }).click();
+  await expect(dialog.getByLabel('Result detail')).toContainText('browser test workspace');
+  await expect(
+    dialog.getByRole('button', { name: /Browser eval.*2 cases · 2 variants · succeeded/ }),
+  ).toBeVisible();
+
+  // Eval Runs live in hidden sessions, not in the conversation list.
+  await dialog.getByRole('button', { name: 'Close evaluations', exact: true }).click();
+  await expect(page.getByLabel('Conversation history')).not.toContainText('Variant A · Case 1');
+});

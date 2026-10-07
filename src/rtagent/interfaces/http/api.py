@@ -22,6 +22,11 @@ from rtagent.domain import (
     CredentialStatus,
     DraftPreviewRequest,
     ErrorEnvelope,
+    Eval,
+    EvalBatchView,
+    EvalDraft,
+    EvalSummary,
+    EvalUpdate,
     FolderCreate,
     FolderPickerRequest,
     FolderSelection,
@@ -155,6 +160,7 @@ class Bootstrap(Contract):
     sessions: list[SessionSummary]
     folders: list[FolderView]
     projects: list[ProjectView]
+    evals: list[EvalSummary]
     tools: list[ToolDefinition]
     tool_errors: dict[str, str]
     workspace_root: str
@@ -202,6 +208,7 @@ async def bootstrap(request: Request) -> Bootstrap:
         sessions=await studio.repository.list_sessions(),
         folders=await studio.repository.list_folders(),
         projects=await studio.repository.list_projects(),
+        evals=await studio.list_evals(),
         tools=list(studio.registry.catalog.values()),
         tool_errors=studio.registry.errors,
         workspace_root=str(studio.registry.workspace),
@@ -537,3 +544,60 @@ async def run_events(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/evals", response_model=list[EvalSummary])
+async def list_evals(request: Request) -> list[EvalSummary]:
+    """List saved evaluations with the status of their most recent comparison."""
+    return await request.app.state.studio.list_evals()
+
+
+@router.post("/evals", response_model=Eval, status_code=201)
+async def create_eval(body: EvalDraft, request: Request) -> Eval:
+    """Store a new evaluation definition."""
+    return await request.app.state.studio.create_eval(body)
+
+
+@router.get("/evals/{eval_id}", response_model=Eval)
+async def get_eval(eval_id: str, request: Request) -> Eval:
+    """Return one evaluation definition for editing."""
+    return await request.app.state.studio.get_eval(eval_id)
+
+
+@router.put("/evals/{eval_id}", response_model=Eval)
+async def update_eval(eval_id: str, body: EvalUpdate, request: Request) -> Eval:
+    """Replace an evaluation definition under its observed revision."""
+    return await request.app.state.studio.update_eval(eval_id, body)
+
+
+@router.delete("/evals/{eval_id}", status_code=204)
+async def delete_eval(eval_id: str, request: Request) -> Response:
+    """Delete an evaluation, its batches and the hidden Run sessions they created."""
+    await request.app.state.studio.delete_eval(eval_id)
+    return Response(status_code=204)
+
+
+@router.get("/evals/{eval_id}/batches", response_model=list[EvalBatchView])
+async def list_batches(eval_id: str, request: Request) -> list[EvalBatchView]:
+    """List an evaluation's comparison batches, newest first."""
+    return await request.app.state.studio.list_batches(eval_id)
+
+
+@router.post("/evals/{eval_id}/batches", response_model=EvalBatchView, status_code=202)
+async def start_batch(
+    eval_id: str, request: Request, project_id: str | None = None
+) -> EvalBatchView:
+    """Start a background comparison of every variant across every case."""
+    return await request.app.state.studio.start_batch(eval_id, project_id)
+
+
+@router.get("/batches/{batch_id}", response_model=EvalBatchView)
+async def get_batch(batch_id: str, request: Request) -> EvalBatchView:
+    """Return one comparison batch's progress and results."""
+    return await request.app.state.studio.batch(batch_id)
+
+
+@router.post("/batches/{batch_id}/cancel", response_model=EvalBatchView)
+async def cancel_batch(batch_id: str, request: Request) -> EvalBatchView:
+    """Stop a running comparison; completed items and their evidence are kept."""
+    return await request.app.state.studio.cancel_batch(batch_id)

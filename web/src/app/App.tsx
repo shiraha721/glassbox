@@ -5,6 +5,7 @@ import {
   Bot,
   Code2,
   Eye,
+  FlaskConical,
   FolderOpen,
   Layers,
   PanelLeft,
@@ -35,6 +36,7 @@ import { ConversationHistory } from '../features/history/ConversationHistory';
 import { Inspector } from '../features/inspection/Inspector';
 import { RunTurn } from '../features/chat/ConversationTurn';
 import { Settings } from '../features/settings/Settings';
+import { Evaluations } from '../features/evaluation/Evaluations';
 import { WorkspacePanel } from '../features/workspace/WorkspacePanel';
 import { Projects } from '../features/projects/Projects';
 import { usePresetDrafts } from '../features/prompts/usePresetDrafts';
@@ -106,6 +108,7 @@ function Workspace({ data }: { data: Bootstrap }) {
     localStorage.getItem('studio.session') ? 'trace' : 'preview',
   );
   const [settings, setSettings] = useState<SettingsPage | null>(null);
+  const [evaluations, setEvaluations] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(
     () => window.matchMedia('(min-width: 761px)').matches,
   );
@@ -363,6 +366,9 @@ function Workspace({ data }: { data: Bootstrap }) {
             onClick={() => togglePanel('workspace')}
           >
             <FolderOpen size={16} /> Workspace
+          </button>
+          <button className="nav-button" disabled={busy} onClick={() => setEvaluations(true)}>
+            <FlaskConical size={16} /> Evaluations
           </button>
           <button className="nav-button" disabled={busy} onClick={() => setSettings('providers')}>
             <SlidersHorizontal size={16} /> Settings
@@ -778,6 +784,14 @@ function Workspace({ data }: { data: Bootstrap }) {
           )}
         </main>
       </div>
+      {evaluations && (
+        <Evaluations
+          data={data}
+          projectId={projectId}
+          onClose={() => setEvaluations(false)}
+          onChanged={refresh}
+        />
+      )}
       {settings && (
         <Settings
           data={data}

@@ -21,9 +21,15 @@ export type WorkspaceView = components['schemas']['WorkspaceView'];
 export type MemoryDocument = components['schemas']['MemoryDocument'];
 export type SkillDocument = components['schemas']['SkillDocument'];
 export type ProviderProfile = components['schemas']['ProviderProfile-Output'];
-export type ModelChoice = components['schemas']['ModelChoice'];
+export type ModelChoice = components['schemas']['ModelChoice-Input'];
 export type CredentialStatus = components['schemas']['CredentialStatus'];
 export type WorkspaceSkills = components['schemas']['WorkspaceSkills'];
+export type Eval = components['schemas']['Eval'];
+export type EvalCase = components['schemas']['EvalCase-Output'];
+export type EvalVariant = components['schemas']['EvalVariant-Output'];
+export type EvalCheck = components['schemas']['EvalCheck-Output'];
+export type EvalSummary = components['schemas']['EvalSummary'];
+export type EvalBatch = components['schemas']['EvalBatchView'];
 export type WorkspaceAccess = 'read-only' | 'ask' | 'workspace-write';
 /** What the composer sends with each Run: the model and the workspace access. */
 export type RunChoice = { model: ModelChoice; access: WorkspaceAccess };

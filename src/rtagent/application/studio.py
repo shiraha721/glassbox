@@ -13,6 +13,7 @@ from rtagent.application.context import (
     estimated_tokens,
     reduce_context,
 )
+from rtagent.application.evaluation import batch_view, eval_record, eval_summary, graded_item
 from rtagent.application.runner import Runner
 from rtagent.domain import (
     AppError,
@@ -21,6 +22,13 @@ from rtagent.domain import (
     ContextView,
     CredentialStatus,
     DraftPreviewRequest,
+    Eval,
+    EvalBatchView,
+    EvalCheck,
+    EvalDraft,
+    EvalItemResult,
+    EvalSummary,
+    EvalUpdate,
     MemoryDocument,
     MemorySave,
     Message,
@@ -49,7 +57,7 @@ from rtagent.domain import (
     resolve_model,
     uid,
 )
-from rtagent.domain.lifecycle import ACTIVE_PROCESSES
+from rtagent.domain.lifecycle import ACTIVE_PROCESSES, TERMINAL
 from rtagent.domain.prompts import compile_prompt
 from rtagent.infrastructure.packages import export_skill, import_preset, import_skill
 from rtagent.infrastructure.providers.catalog import list_models
@@ -103,10 +111,11 @@ class Studio:
         self.repository, self.registry, self.runner = repository, registry, runner
         self.commands = asyncio.Lock()
         self.compaction_tasks: dict[str, asyncio.Task[None]] = {}
+        self.eval_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def close(self) -> None:
-        """Stop explicit reduction jobs before their repository resources are closed."""
-        tasks = list(self.compaction_tasks.values())
+        """Stop explicit reduction and evaluation jobs before repository resources are closed."""
+        tasks = list(self.compaction_tasks.values()) + list(self.eval_tasks.values())
         for task in tasks:
             task.cancel()
         if tasks:
@@ -198,6 +207,197 @@ class Studio:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         return compaction_view(await self.repository.compaction(identifier))
+
+    # --- Prompt evaluation ---------------------------------------------------------------
+    # An evaluation runs each case under each variant prompt as an ordinary Run in a hidden
+    # eval session, then grades the final text, so prompts can be compared on the same tasks.
+
+    async def list_evals(self) -> list[EvalSummary]:
+        """List saved evaluations with the status of their most recent comparison."""
+        return [eval_summary(row) for row in await self.repository.list_evals()]
+
+    async def get_eval(self, eval_id: str) -> Eval:
+        """Return one evaluation definition for editing."""
+        return eval_record(await self.repository.eval(eval_id))
+
+    async def create_eval(self, draft: EvalDraft) -> Eval:
+        """Store a new evaluation definition."""
+        row = await self.repository.create_eval(
+            draft.name,
+            [case.model_dump() for case in draft.cases],
+            [variant.model_dump() for variant in draft.variants],
+        )
+        return eval_record(row)
+
+    async def update_eval(self, eval_id: str, draft: EvalUpdate) -> Eval:
+        """Replace an evaluation under its observed revision."""
+        row = await self.repository.update_eval(
+            eval_id,
+            draft.expected_revision,
+            draft.name,
+            [case.model_dump() for case in draft.cases],
+            [variant.model_dump() for variant in draft.variants],
+        )
+        return eval_record(row)
+
+    async def delete_eval(self, eval_id: str) -> None:
+        """Delete an evaluation, its batches and the hidden Run sessions they created."""
+        await self.repository.eval(eval_id)
+        if eval_id in self.eval_tasks and not self.eval_tasks[eval_id].done():
+            raise AppError("eval_busy", "Stop the running comparison before deleting.", 409)
+        session_ids = {
+            item.get("run_session_id")
+            for batch in await self.repository.list_batches(eval_id)
+            for item in batch["data"]["items"]
+            if item.get("run_session_id")
+        }
+        for session_id in session_ids:
+            try:
+                await self.delete_session(session_id)
+            except AppError:
+                continue
+        await self.repository.delete_eval(eval_id)
+
+    async def start_batch(self, eval_id: str, project_id: str | None) -> EvalBatchView:
+        """Freeze the definition and start a background comparison over every case and variant."""
+        if eval_id in self.eval_tasks and not self.eval_tasks[eval_id].done():
+            raise AppError("eval_busy", "A comparison for this evaluation is already running.", 409)
+        record = eval_record(await self.repository.eval(eval_id))
+        if project_id:
+            await self.repository.project(project_id)
+        items = [
+            {"case_id": case.id, "variant_id": variant.id, "status": "pending"}
+            for variant in record.variants
+            for case in record.cases
+        ]
+        data = {
+            "eval_name": record.name,
+            "eval_revision": record.revision,
+            "project_id": project_id,
+            "cases": [{"id": case.id, "name": case.name} for case in record.cases],
+            "variants": [{"id": variant.id, "name": variant.name} for variant in record.variants],
+            "definition": {
+                "cases": [case.model_dump() for case in record.cases],
+                "variants": [variant.model_dump() for variant in record.variants],
+            },
+            "items": items,
+            "error": None,
+        }
+        batch = await self.repository.create_batch(eval_id, data)
+        task = asyncio.create_task(self._execute_batch(batch["id"], eval_id))
+        self.eval_tasks[eval_id] = task
+        return batch_view(await self.repository.batch(batch["id"]))
+
+    async def batch(self, batch_id: str) -> EvalBatchView:
+        """Return one comparison batch's progress and results."""
+        return batch_view(await self.repository.batch(batch_id))
+
+    async def list_batches(self, eval_id: str) -> list[EvalBatchView]:
+        """Return an evaluation's comparison batches, newest first."""
+        await self.repository.eval(eval_id)
+        return [batch_view(row) for row in await self.repository.list_batches(eval_id)]
+
+    async def cancel_batch(self, batch_id: str) -> EvalBatchView:
+        """Stop a running comparison; completed items and their evidence are kept."""
+        record = await self.repository.batch(batch_id)
+        task = self.eval_tasks.get(record["eval_id"])
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        return batch_view(await self.repository.batch(batch_id))
+
+    async def _execute_batch(self, batch_id: str, eval_id: str) -> None:
+        """Run each case under each variant sequentially, grading and saving after each item."""
+        record = await self.repository.batch(batch_id)
+        data = record["data"]
+        definition = data["definition"]
+        cases = {case["id"]: case for case in definition["cases"]}
+        variants = {variant["id"]: variant for variant in definition["variants"]}
+        results = {(item["case_id"], item["variant_id"]): dict(item) for item in data["items"]}
+        try:
+            for item in data["items"]:
+                key = (item["case_id"], item["variant_id"])
+                case, variant = cases[item["case_id"]], variants[item["variant_id"]]
+                results[key] = (
+                    await self._run_item(case, variant, data["project_id"])
+                ).model_dump()
+                data["items"] = list(results.values())
+                await self.repository.save_batch(batch_id, "running", data)
+            await self.repository.save_batch(batch_id, "succeeded", data)
+        except asyncio.CancelledError:
+            data["items"] = list(results.values())
+            await self.repository.save_batch(batch_id, "cancelled", data)
+            raise
+        except Exception as error:  # noqa: BLE001 - record the failure instead of losing the batch
+            data["error"] = str(error)
+            data["items"] = list(results.values())
+            await self.repository.save_batch(batch_id, "failed", data)
+
+    async def _run_item(
+        self, case: dict[str, Any], variant: dict[str, Any], project_id: str | None
+    ) -> EvalItemResult:
+        """Run one case under one variant in a fresh hidden session and grade the result.
+
+        A submission error (a missing variable, an unconfigured model, settings saved meanwhile)
+        fails this item with its reason; the remaining items still run."""
+        check = EvalCheck.model_validate(case["check"])
+        # Read settings per item: a batch can outlast a settings edit.
+        config = await self.repository.config()
+        try:
+            preset = await self.repository.preset(variant["preset_id"])
+        except AppError:
+            return EvalItemResult(
+                case_id=case["id"],
+                variant_id=variant["id"],
+                status="failed",
+                passed=False,
+                detail="The variant's preset no longer exists.",
+            )
+        session = await self.repository.new_session(
+            title=f"{variant['name']} · {case['name']}", project_id=project_id, kind="eval"
+        )
+        request = PreviewRequest(
+            session_id=session["id"],
+            expected_session_revision=0,
+            preset_id=preset.id,
+            preset_revision=preset.revision,
+            config_revision=config.revision,
+            input=case["input"],
+            variables=case.get("variables", {}),
+            skills=[],
+            model=ModelChoice.model_validate(variant["model"]) if variant.get("model") else None,
+            access=variant.get("access"),
+        )
+        try:
+            view = await self.start(request, key=uid())
+        except AppError as error:
+            return EvalItemResult(
+                case_id=case["id"],
+                variant_id=variant["id"],
+                run_session_id=session["id"],
+                status="failed",
+                passed=False,
+                detail=f"The Run could not start: {error.message}",
+            )
+        run = await self._await_run(view.id, config.run_timeout)
+        item = graded_item(case["id"], variant["id"], view.id, run, check)
+        return item.model_copy(update={"run_session_id": session["id"]})
+
+    async def _await_run(self, run_id: str, run_timeout: float) -> dict[str, Any]:
+        """Poll until the Run reaches a terminal state, cancelling if it pauses or overruns.
+
+        Eval Runs are unattended: a Run that waits for approval or exceeds its time budget is
+        cancelled so the batch can continue, and is graded as not passed."""
+
+        deadline = asyncio.get_event_loop().time() + run_timeout + 30
+        while True:
+            run = await self.repository.run(run_id)
+            if run["status"] in TERMINAL:
+                return run
+            if run["status"] == "waiting_approval" or asyncio.get_event_loop().time() > deadline:
+                await self.cancel(run_id)
+                return await self.repository.run(run_id)
+            await asyncio.sleep(0.1)
 
     async def workspace_registry(self, project_id: str | None = None) -> ToolRegistry:
         """Resolve native files/tools from the selected project, never from model arguments."""

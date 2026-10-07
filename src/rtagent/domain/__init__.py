@@ -1,5 +1,6 @@
 """Stable typed contracts; pure algorithms and ownership values live in sibling modules."""
 
+from .evaluation import final_text, grade, summarize_variant
 from .models import (
     EFFORT_LEVELS,
     SHELL_TOOL,
@@ -20,6 +21,16 @@ from .models import (
     DraftPreviewRequest,
     ErrorEnvelope,
     ErrorInfo,
+    Eval,
+    EvalBatchView,
+    EvalCase,
+    EvalCheck,
+    EvalDraft,
+    EvalItemResult,
+    EvalLabel,
+    EvalSummary,
+    EvalUpdate,
+    EvalVariant,
     FolderCreate,
     FolderPickerRequest,
     FolderSelection,
@@ -63,6 +74,7 @@ from .models import (
     ToolDefinition,
     TraceView,
     Variable,
+    VariantSummary,
     WorkspaceAccess,
     WorkspaceSkills,
     WorkspaceView,
@@ -76,6 +88,20 @@ from .models import (
 )
 
 __all__ = [
+    "Eval",
+    "EvalBatchView",
+    "EvalCase",
+    "EvalCheck",
+    "EvalDraft",
+    "EvalItemResult",
+    "EvalLabel",
+    "EvalSummary",
+    "EvalUpdate",
+    "EvalVariant",
+    "VariantSummary",
+    "final_text",
+    "grade",
+    "summarize_variant",
     "WorkspaceSkills",
     "CredentialSave",
     "CredentialStatus",

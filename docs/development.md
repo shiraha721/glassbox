@@ -91,8 +91,8 @@ npm --prefix web run generate:api
 
 | Layer | Where | What it should prove |
 | --- | --- | --- |
-| Pure logic | `tests/test_prompts.py`, parts of `test_tools.py` | Compiler ordering, conditions, variables, budgets; patch parsing and hunks; output buffering. |
-| Runtime and API | `tests/test_api.py`, `test_runtime.py`, `test_harness.py`, `test_review_regressions.py` | The real app over ASGI with the simulated provider: idempotency, approvals, cancellation, checkpoint recovery, uncertain effects, compaction, concurrency, origin checks. |
+| Pure logic | `tests/test_prompts.py`, parts of `test_tools.py` and `test_evaluation.py` | Compiler ordering, conditions, variables, budgets; patch parsing and hunks; output buffering; eval grading and aggregation. |
+| Runtime and API | `tests/test_api.py`, `test_runtime.py`, `test_harness.py`, `test_evaluation.py`, `test_review_regressions.py` | The real app over ASGI with the simulated provider: idempotency, approvals, cancellation, checkpoint recovery, uncertain effects, compaction, concurrency, origin checks. |
 | Adapters | `tests/test_providers.py`, `test_tools.py`, `test_sandbox.py`, `test_storage.py`, `test_config.py` | Captured provider requests and errors, MCP over stdio and HTTP, real bubblewrap isolation (skipped without it), migrations and revisions. |
 | UI components | `web/src/**/*.test.tsx` | Rendering decisions such as tool step pairing and preset editing. |
 | Browser | `web/e2e/studio.spec.ts` | End-to-end workflows against a real backend with temporary data. |

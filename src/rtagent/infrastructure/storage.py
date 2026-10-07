@@ -86,6 +86,27 @@ sessions = Table(
     Column("archived", Boolean, nullable=False, default=False),
     Column("title_locked", Boolean, nullable=False, default=False),
     Column("copied_from_session_id", String),
+    # "chat" conversations are listed in the sidebar; "eval" sessions host eval Runs and are
+    # hidden from the conversation list but keep full Run evidence for inspection.
+    Column("kind", String, nullable=False, server_default="chat"),
+)
+evals = Table(
+    "evals",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("name", String(collation="NOCASE"), nullable=False, unique=True),
+    Column("revision", Integer, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("data", JSON, nullable=False),
+)
+eval_batches = Table(
+    "eval_batches",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("eval_id", String, ForeignKey("evals.id", ondelete="CASCADE"), nullable=False),
+    Column("status", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("data", JSON, nullable=False),
 )
 previews = Table(
     "previews",
@@ -204,8 +225,8 @@ def call_order(identifier: str) -> tuple[int, int, int]:
 
 
 def _session_view(row: Any) -> dict[str, Any]:
-    """Exclude the internal auto-title flag from the public conversation contract."""
-    value = {key: item for key, item in dict(row).items() if key != "title_locked"}
+    """Exclude internal flags (auto-title, eval kind) from the public conversation contract."""
+    value = {key: item for key, item in dict(row).items() if key not in {"title_locked", "kind"}}
     return {**value, "message_count": len(value["messages"])}
 
 
@@ -390,9 +411,14 @@ class Repository:
         return value
 
     async def new_session(
-        self, title: str = "New investigation", project_id: str | None = None
+        self,
+        title: str = "New investigation",
+        project_id: str | None = None,
+        kind: str = "chat",
     ) -> dict[str, Any]:
-        """Create an empty conversation bound to a project or the default workspace."""
+        """Create an empty conversation bound to a project or the default workspace.
+
+        `kind="eval"` hosts an eval item's Run and is hidden from the conversation list."""
         value = {
             "id": uid(),
             "title": title[:120],
@@ -405,6 +431,7 @@ class Repository:
             "archived": False,
             "title_locked": title != "New investigation",
             "copied_from_session_id": None,
+            "kind": kind,
         }
         async with self.lock, self.engine.begin() as connection:
             if (
@@ -426,11 +453,15 @@ class Repository:
     async def list_sessions(self) -> list[dict[str, Any]]:
         """Return conversation summaries, newest first, without their message histories."""
         columns = [
-            column for column in sessions.c if column.name not in {"messages", "title_locked"}
+            column
+            for column in sessions.c
+            if column.name not in {"messages", "title_locked", "kind"}
         ]
-        query = select(
-            *columns, func.json_array_length(sessions.c.messages).label("message_count")
-        ).order_by(sessions.c.created_at.desc())
+        query = (
+            select(*columns, func.json_array_length(sessions.c.messages).label("message_count"))
+            .where(sessions.c.kind == "chat")
+            .order_by(sessions.c.created_at.desc())
+        )
         async with self.engine.connect() as connection:
             return [dict(row) for row in (await connection.execute(query)).mappings()]
 
@@ -1137,6 +1168,129 @@ class Repository:
         if not rows:
             return None
         return max(rows, key=lambda row: (row["run_created"], call_order(row["call_id"])))
+
+    async def create_eval(self, name: str, cases: Any, variants: Any) -> dict[str, Any]:
+        """Store a new evaluation definition at revision 0, rejecting a duplicate name."""
+        value = {
+            "id": uid(),
+            "name": name,
+            "revision": 0,
+            "created_at": now(),
+            "data": {"cases": cases, "variants": variants},
+        }
+        async with self.lock, self.engine.begin() as connection:
+            if (await connection.execute(select(evals.c.id).where(evals.c.name == name))).first():
+                raise AppError("duplicate_name", "An evaluation with this name exists.", 409)
+            await connection.execute(insert(evals).values(**value))
+        return value
+
+    async def update_eval(
+        self, eval_id: str, expected_revision: int, name: str, cases: Any, variants: Any
+    ) -> dict[str, Any]:
+        """Replace a definition under its observed revision, bumping it by one."""
+        async with self.lock, self.engine.begin() as connection:
+            row = (
+                (await connection.execute(select(evals).where(evals.c.id == eval_id)))
+                .mappings()
+                .first()
+            )
+            if row is None:
+                raise AppError("not_found", "The requested record does not exist.", 404)
+            if row["revision"] != expected_revision:
+                raise AppError(
+                    "revision_conflict", "Evaluation changed. Reload before saving.", 409
+                )
+            clash = (
+                await connection.execute(
+                    select(evals.c.id).where(evals.c.name == name, evals.c.id != eval_id)
+                )
+            ).first()
+            if clash:
+                raise AppError("duplicate_name", "An evaluation with this name exists.", 409)
+            value = {
+                **dict(row),
+                "name": name,
+                "revision": expected_revision + 1,
+                "data": {"cases": cases, "variants": variants},
+            }
+            await connection.execute(update(evals).where(evals.c.id == eval_id).values(**value))
+        return value
+
+    async def eval(self, eval_id: str) -> dict[str, Any]:
+        """Load one evaluation definition."""
+        return await self._one(evals, eval_id)
+
+    async def list_evals(self) -> list[dict[str, Any]]:
+        """List evaluations with their most recent batch, newest definition first."""
+        async with self.engine.connect() as connection:
+            rows = [
+                dict(row)
+                for row in (
+                    await connection.execute(select(evals).order_by(evals.c.created_at.desc()))
+                ).mappings()
+            ]
+            batches = [
+                dict(row)
+                for row in (
+                    await connection.execute(
+                        select(
+                            eval_batches.c.id,
+                            eval_batches.c.eval_id,
+                            eval_batches.c.status,
+                            eval_batches.c.created_at,
+                        ).order_by(eval_batches.c.created_at)
+                    )
+                ).mappings()
+            ]
+        latest = {batch["eval_id"]: batch for batch in batches}
+        for row in rows:
+            row["last_batch"] = latest.get(row["id"])
+        return rows
+
+    async def delete_eval(self, eval_id: str) -> None:
+        """Delete an evaluation and its batches; eval Run sessions are removed separately."""
+        async with self.lock, self.engine.begin() as connection:
+            await connection.execute(delete(evals).where(evals.c.id == eval_id))
+
+    async def create_batch(self, eval_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Record a comparison run as it begins, with the frozen eval definition inside data."""
+        value = {
+            "id": uid(),
+            "eval_id": eval_id,
+            "status": "running",
+            "created_at": now(),
+            "data": data,
+        }
+        async with self.lock, self.engine.begin() as connection:
+            await connection.execute(insert(eval_batches).values(**value))
+        return value
+
+    async def save_batch(self, batch_id: str, status: str, data: dict[str, Any]) -> None:
+        """Persist batch progress so polling reflects each completed item."""
+        async with self.lock, self.engine.begin() as connection:
+            await connection.execute(
+                update(eval_batches)
+                .where(eval_batches.c.id == batch_id)
+                .values(status=status, data=data)
+            )
+
+    async def batch(self, batch_id: str) -> dict[str, Any]:
+        """Load one comparison batch."""
+        return await self._one(eval_batches, batch_id)
+
+    async def list_batches(self, eval_id: str) -> list[dict[str, Any]]:
+        """List an evaluation's batches, newest first."""
+        async with self.engine.connect() as connection:
+            return [
+                dict(row)
+                for row in (
+                    await connection.execute(
+                        select(eval_batches)
+                        .where(eval_batches.c.eval_id == eval_id)
+                        .order_by(eval_batches.c.created_at.desc())
+                    )
+                ).mappings()
+            ]
 
     async def list_runs(self, session_id: str) -> list[dict[str, Any]]:
         """Read conversation Runs in creation order."""

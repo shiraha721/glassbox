@@ -912,6 +912,122 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/evals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Evals
+         * @description List saved evaluations with the status of their most recent comparison.
+         */
+        get: operations["list_evals_api_v1_evals_get"];
+        put?: never;
+        /**
+         * Create Eval
+         * @description Store a new evaluation definition.
+         */
+        post: operations["create_eval_api_v1_evals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evals/{eval_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval
+         * @description Return one evaluation definition for editing.
+         */
+        get: operations["get_eval_api_v1_evals__eval_id__get"];
+        /**
+         * Update Eval
+         * @description Replace an evaluation definition under its observed revision.
+         */
+        put: operations["update_eval_api_v1_evals__eval_id__put"];
+        post?: never;
+        /**
+         * Delete Eval
+         * @description Delete an evaluation, its batches and the hidden Run sessions they created.
+         */
+        delete: operations["delete_eval_api_v1_evals__eval_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evals/{eval_id}/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Batches
+         * @description List an evaluation's comparison batches, newest first.
+         */
+        get: operations["list_batches_api_v1_evals__eval_id__batches_get"];
+        put?: never;
+        /**
+         * Start Batch
+         * @description Start a background comparison of every variant across every case.
+         */
+        post: operations["start_batch_api_v1_evals__eval_id__batches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/batches/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Batch
+         * @description Return one comparison batch's progress and results.
+         */
+        get: operations["get_batch_api_v1_batches__batch_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/batches/{batch_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Batch
+         * @description Stop a running comparison; completed items and their evidence are kept.
+         */
+        post: operations["cancel_batch_api_v1_batches__batch_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1027,6 +1143,8 @@ export interface components {
             folders: components["schemas"]["FolderView"][];
             /** Projects */
             projects: components["schemas"]["ProjectView"][];
+            /** Evals */
+            evals: components["schemas"]["EvalSummary"][];
             /** Tools */
             tools: components["schemas"]["ToolDefinition"][];
             /** Tool Errors */
@@ -1076,7 +1194,7 @@ export interface components {
              * @default 2
              */
             keep_recent_turns: number;
-            model?: components["schemas"]["ModelChoice"] | null;
+            model?: components["schemas"]["ModelChoice-Input"] | null;
         };
         /**
          * CompactionView
@@ -1246,7 +1364,7 @@ export interface components {
             };
             /** Skills */
             skills?: string[];
-            model?: components["schemas"]["ModelChoice"] | null;
+            model?: components["schemas"]["ModelChoice-Input"] | null;
             /** Access */
             access?: ("read-only" | "ask" | "workspace-write") | null;
         };
@@ -1270,6 +1388,260 @@ export interface components {
             details: unknown;
             /** Request Id */
             request_id: string;
+        };
+        /**
+         * Eval
+         * @description A stored evaluation definition with its own revision, separate from Run snapshots.
+         */
+        Eval: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Revision */
+            revision: number;
+            /** Created At */
+            created_at: string;
+            /** Cases */
+            cases: components["schemas"]["EvalCase-Output"][];
+            /** Variants */
+            variants: components["schemas"]["EvalVariant-Output"][];
+        };
+        /**
+         * EvalBatchView
+         * @description One comparison run: its progress, per-variant aggregates and every case/variant result.
+         */
+        EvalBatchView: {
+            /** Id */
+            id: string;
+            /** Eval Id */
+            eval_id: string;
+            /** Eval Name */
+            eval_name: string;
+            /** Status */
+            status: string;
+            /** Created At */
+            created_at: string;
+            /** Completed */
+            completed: number;
+            /** Total */
+            total: number;
+            /** Error */
+            error: string | null;
+            /** Cases */
+            cases: components["schemas"]["EvalLabel"][];
+            /** Variants */
+            variants: components["schemas"]["VariantSummary"][];
+            /** Items */
+            items: components["schemas"]["EvalItemResult"][];
+        };
+        /**
+         * EvalCase
+         * @description One task the compared prompts each run, with the condition that marks it passed.
+         */
+        "EvalCase-Input": {
+            /** Id */
+            id?: string;
+            /** Name */
+            name: string;
+            /** Input */
+            input: string;
+            /** Variables */
+            variables?: {
+                [key: string]: unknown;
+            };
+            check?: components["schemas"]["EvalCheck-Input"];
+        };
+        /**
+         * EvalCase
+         * @description One task the compared prompts each run, with the condition that marks it passed.
+         */
+        "EvalCase-Output": {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Input */
+            input: string;
+            /** Variables */
+            variables: {
+                [key: string]: unknown;
+            };
+            check: components["schemas"]["EvalCheck-Output"];
+        };
+        /**
+         * EvalCheck
+         * @description How one eval case decides a Run passed, from its final assistant text.
+         *
+         *     `succeeds` only needs the Run to finish; the others match the text. Matching is a plain
+         *     byte check, not a tokenizer or a model judge, so results are deterministic and offline.
+         */
+        "EvalCheck-Input": {
+            /**
+             * Kind
+             * @default contains
+             * @enum {string}
+             */
+            kind: "succeeds" | "contains" | "not_contains" | "equals" | "regex";
+            /**
+             * Value
+             * @default
+             */
+            value: string;
+            /**
+             * Ignore Case
+             * @default true
+             */
+            ignore_case: boolean;
+        };
+        /**
+         * EvalCheck
+         * @description How one eval case decides a Run passed, from its final assistant text.
+         *
+         *     `succeeds` only needs the Run to finish; the others match the text. Matching is a plain
+         *     byte check, not a tokenizer or a model judge, so results are deterministic and offline.
+         */
+        "EvalCheck-Output": {
+            /**
+             * Kind
+             * @default contains
+             * @enum {string}
+             */
+            kind: "succeeds" | "contains" | "not_contains" | "equals" | "regex";
+            /**
+             * Value
+             * @default
+             */
+            value: string;
+            /**
+             * Ignore Case
+             * @default true
+             */
+            ignore_case: boolean;
+        };
+        /**
+         * EvalDraft
+         * @description The editable definition of an evaluation: the cases and the prompts to compare.
+         */
+        EvalDraft: {
+            /** Name */
+            name: string;
+            /** Cases */
+            cases: components["schemas"]["EvalCase-Input"][];
+            /** Variants */
+            variants: components["schemas"]["EvalVariant-Input"][];
+        };
+        /**
+         * EvalItemResult
+         * @description One case run under one variant: its Run, grade, output snippet and recorded usage.
+         */
+        EvalItemResult: {
+            /** Case Id */
+            case_id: string;
+            /** Variant Id */
+            variant_id: string;
+            /** Run Id */
+            run_id: string | null;
+            /** Run Session Id */
+            run_session_id: string | null;
+            /** Status */
+            status: string;
+            /** Passed */
+            passed: boolean | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /**
+             * Output
+             * @default
+             */
+            output: string;
+            /** Input Tokens */
+            input_tokens: number | null;
+            /** Output Tokens */
+            output_tokens: number | null;
+            /** Active Seconds */
+            active_seconds: number | null;
+        };
+        /**
+         * EvalLabel
+         * @description A stable id and display name for a case or variant referenced in results.
+         */
+        EvalLabel: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * EvalSummary
+         * @description Evaluation metadata plus the status of its most recent comparison, for the list.
+         */
+        EvalSummary: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Revision */
+            revision: number;
+            /** Created At */
+            created_at: string;
+            /** Case Count */
+            case_count: number;
+            /** Variant Count */
+            variant_count: number;
+            /** Last Batch Id */
+            last_batch_id: string | null;
+            /** Last Status */
+            last_status: string | null;
+            /** Last Run At */
+            last_run_at: string | null;
+        };
+        /**
+         * EvalUpdate
+         * @description A revision-checked replacement of an existing evaluation definition.
+         */
+        EvalUpdate: {
+            /** Name */
+            name: string;
+            /** Cases */
+            cases: components["schemas"]["EvalCase-Input"][];
+            /** Variants */
+            variants: components["schemas"]["EvalVariant-Input"][];
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /**
+         * EvalVariant
+         * @description One prompt under comparison: a preset, optionally with its own model and access.
+         */
+        "EvalVariant-Input": {
+            /** Id */
+            id?: string;
+            /** Name */
+            name: string;
+            /** Preset Id */
+            preset_id: string;
+            model?: components["schemas"]["ModelChoice-Input"] | null;
+            /** Access */
+            access?: ("read-only" | "ask" | "workspace-write") | null;
+        };
+        /**
+         * EvalVariant
+         * @description One prompt under comparison: a preset, optionally with its own model and access.
+         */
+        "EvalVariant-Output": {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Preset Id */
+            preset_id: string;
+            model: components["schemas"]["ModelChoice-Output"] | null;
+            /** Access */
+            access: ("read-only" | "ask" | "workspace-write") | null;
         };
         /**
          * FolderCreate
@@ -1462,13 +1834,25 @@ export interface components {
          * ModelChoice
          * @description The model selected for a Run: a configured provider (or `simulated`) and options.
          */
-        ModelChoice: {
+        "ModelChoice-Input": {
             /** Provider Id */
             provider_id: string;
             /** Model */
             model: string;
             /** Reasoning Effort */
             reasoning_effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
+        };
+        /**
+         * ModelChoice
+         * @description The model selected for a Run: a configured provider (or `simulated`) and options.
+         */
+        "ModelChoice-Output": {
+            /** Provider Id */
+            provider_id: string;
+            /** Model */
+            model: string;
+            /** Reasoning Effort */
+            reasoning_effort: ("low" | "medium" | "high" | "xhigh" | "max") | null;
         };
         /**
          * ModelList
@@ -1595,7 +1979,7 @@ export interface components {
             };
             /** Skills */
             skills?: string[];
-            model?: components["schemas"]["ModelChoice"] | null;
+            model?: components["schemas"]["ModelChoice-Input"] | null;
             /** Access */
             access?: ("read-only" | "ask" | "workspace-write") | null;
         };
@@ -2418,6 +2802,28 @@ export interface components {
             required: boolean;
             /** Default */
             default: unknown;
+        };
+        /**
+         * VariantSummary
+         * @description Aggregate effectiveness of one compared prompt across the evaluation's cases.
+         */
+        VariantSummary: {
+            /** Variant Id */
+            variant_id: string;
+            /** Name */
+            name: string;
+            /** Graded */
+            graded: number;
+            /** Passed */
+            passed: number;
+            /** Pass Rate */
+            pass_rate: number | null;
+            /** Avg Input Tokens */
+            avg_input_tokens: number | null;
+            /** Avg Output Tokens */
+            avg_output_tokens: number | null;
+            /** Avg Active Seconds */
+            avg_active_seconds: number | null;
         };
         /**
          * WorkspaceSkills
@@ -5930,6 +6336,613 @@ export interface operations {
                             [key: string]: unknown;
                         };
                     };
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_evals_api_v1_evals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalSummary"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_eval_api_v1_evals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalDraft"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Eval"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_eval_api_v1_evals__eval_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Eval"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_eval_api_v1_evals__eval_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Eval"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_eval_api_v1_evals__eval_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_batches_api_v1_evals__eval_id__batches_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalBatchView"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    start_batch_api_v1_evals__eval_id__batches_post: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+            };
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalBatchView"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_batch_api_v1_batches__batch_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalBatchView"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    cancel_batch_api_v1_batches__batch_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalBatchView"];
                 };
             };
             /** @description Forbidden */

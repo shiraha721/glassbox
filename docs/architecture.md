@@ -30,11 +30,13 @@ The central idea: **a task becomes an immutable Run snapshot, and everything the
 ```text
 src/rtagent/
   domain/            Values and pure logic: models, prompt compiler, patch parser, permission
-                     decision, lifecycle sets, hook and execution contracts. No I/O.
+                     decision, lifecycle sets, hook and execution contracts, eval grading.
+                     No I/O.
   application/       Use cases over concrete adapters:
     studio.py          Submissions, previews, approvals, recovery, projects, packages, context
     runner.py          The LangGraph model/tool loop, budgets, receipts and cancellation
-    context.py         Explicit conversation compaction
+    context.py         Explicit conversation compaction and live context usage
+    evaluation.py      Prompt evaluation views and grading of finished Runs
   infrastructure/    Everything that talks to something external:
     storage.py         SQLite schema access, transactions, events, history copies
     config.py          Process settings and .env provider seeding
@@ -54,8 +56,8 @@ src/rtagent/
 migrations/          Alembic revisions for app.db
 web/src/
   app/App.tsx        Workspace shell: selection, submission, panels, composer
-  features/          chat, composer (model and access pickers), history, projects, prompts,
-                     inspection, workspace, settings, tools
+  features/          chat, composer (model and access pickers), evaluation, history, projects,
+                     prompts, inspection, workspace, settings, tools
   shared/            Json, StatusBadge, PackageActions, Popover, useDialogFocus
   api/               Generated types, HTTP client, SSE subscription
 ```
@@ -164,7 +166,9 @@ Built-in presets are seeded on start. A stored built-in preset is upgraded only 
 | `presets` | Versioned presets with embedded blocks. |
 | `projects` | Registered workspace folders. |
 | `conversation_folders` | Flat folders for organizing conversations. |
-| `sessions` | Conversations: committed message history, revision, active Run, project, folder, archive flag, compaction pointers. |
+| `sessions` | Conversations: committed message history, revision, active Run, project, folder, archive flag, compaction pointers, and `kind` (`chat`, or `eval` for the hidden sessions that host evaluation Runs). |
+| `evals` | Evaluation definitions (cases with checks, variants with preset, model and access), versioned by revision. |
+| `eval_batches` | Comparison runs: the frozen definition, status and each case/variant result with its Run ID, verdict and usage. |
 | `previews` | Saved compiled inputs, deleted when consumed by a Run or expired. |
 | `runs` | Immutable snapshot plus the live projection (status, messages, partial output, approval, usage). |
 | `events` | Numbered events per Run for SSE replay. |
@@ -217,6 +221,14 @@ Both sandboxes take the same inputs (command, working directory, mode, timeout, 
 
 Compaction (`application/context.py`) summarizes all but the last N successful turns. It reserves the idle conversation, feeds the older messages to the configured model in UTF-8-safe chunks with no tools, and records every request like a Run's model calls. The summary activates only if the conversation's revision and the hash of the covered messages still match; it becomes a single user-role message labelled as derived, followed by the untouched recent messages. The originals remain in history, previous Runs are unchanged, and restoring full context just clears the pointer. Failed, cancelled or interrupted jobs never activate.
 
+## Prompt evaluation
+
+An evaluation compares prompts by running the same cases under each variant. It adds no execution path of its own: `Studio.start_batch` freezes the definition into an `eval_batches` row and starts a background task that, for each variant and case in turn, creates a hidden `kind="eval"` session, submits an ordinary `PreviewRequest` through `Studio.start` (so each item has a normal snapshot, receipts, trace and budgets), and polls the Run to a terminal state. Every item gets a fresh session, so no case sees another's history.
+
+`domain/evaluation.grade` judges the Run's last assistant text against the case check (`succeeds`, `contains`, `not_contains`, `equals`, `regex`); it is pure and deterministic. A Run that did not succeed never passes. Items are saved as they finish, so polling `GET /batches/{id}` shows progress; per-variant aggregates (pass rate over graded items, average input/output tokens and active seconds, leaving unreported usage out rather than counting it as zero) are computed when a batch is read.
+
+Batches are unattended: a Run that reaches `waiting_approval`, or outlives the Run time limit plus 30 seconds, is cancelled and graded as failed. An item whose Run cannot start (an unknown model, a missing variable, settings saved meanwhile) fails with that reason, and the remaining items still run; settings are read per item. Stopping a batch cancels its task and keeps finished items. Hidden sessions are excluded from `list_sessions` but keep their Runs inspectable by ID; deleting an evaluation deletes them with its batches. A batch for an evaluation already running is refused.
+
 ## Providers
 
 A **provider** (`ProviderProfile`) is one endpoint: adapter, base URL, key variable name, known model IDs and request options (temperature, max output tokens, context window). Settings hold any number of them plus a default model; `.env` values can seed the `openai` and `anthropic` providers at start-up (`Settings.apply_provider`). `catalog.list_models` reads a provider's `GET /models` (following the Messages API's pagination) to fill the model list. A default model that names a provider takes its connection from that provider; a `PUT /config` that changes the adapter under the same provider ID is rejected rather than silently rewritten.
@@ -239,7 +251,7 @@ All routes live under `/api/v1` (`interfaces/http/api.py`); `/openapi.json` is t
 
 | Area | Routes |
 | --- | --- |
-| Startup | `GET /health`, `GET /bootstrap` (settings, presets, conversation summaries, folders, projects, tool catalog) |
+| Startup | `GET /health`, `GET /bootstrap` (settings, presets, conversation summaries, folders, projects, evaluation summaries, tool catalog) |
 | Settings and tools | `PUT /config`, `POST /tools/refresh`, `PUT /presets/{id}`, preset export/import |
 | Models and keys | `POST /providers/models` (list a provider's models), `GET /credentials?name=…` (status only), `PUT/DELETE /credentials/{name}` |
 | Global Skills | `GET /skills`, `GET/DELETE /skills/{name}`, `PUT /skills` |
@@ -249,6 +261,7 @@ All routes live under `/api/v1` (`interfaces/http/api.py`); `/openapi.json` is t
 | Folders | `POST /folders`, `PATCH/DELETE /folders/{id}` |
 | Prompts | `POST /prompts/inspect` (unsaved draft), `POST /prompts/preview` (saved, 15 minutes); both accept `model` and `access` |
 | Runs | `POST /runs` (with optional `model` and `access`), `GET /runs/{id}`, `/cancel`, `/approvals/{id}`, `/resume`, `/trace`, `/export`, `/events` (SSE), `/event-log` (pages) |
+| Evaluations | `GET/POST /evals`, `GET/PUT/DELETE /evals/{id}`, `GET/POST /evals/{id}/batches` (`?project_id=`), `GET /batches/{id}`, `POST /batches/{id}/cancel` |
 
 Errors share one envelope: `{"error": {"code", "message", "details", "request_id"}}`. Validation errors list field locations without echoing submitted values; unexpected errors log their stack locations under the request ID.
 
