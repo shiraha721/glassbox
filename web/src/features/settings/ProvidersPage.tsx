@@ -7,7 +7,7 @@ import {
   type CredentialStatus,
   type ProviderProfile,
 } from '../../api/client';
-import { newProvider, templates } from './providers';
+import { adapterLabels, newProvider, templates, type Adapter } from './providers';
 import { KeyField } from './KeyField';
 
 /** Configure model endpoints and their keys. Keys are saved on the server immediately. */
@@ -43,7 +43,7 @@ export function ProvidersPage({
           ? { ...draft.provider, profile_id: SIMULATED, adapter: 'fake', model: 'simulated' }
           : draft.provider,
     });
-  const add = (adapter: 'openai' | 'anthropic') =>
+  const add = (adapter: Adapter) =>
     onChange({
       ...draft,
       providers: [
@@ -65,9 +65,7 @@ export function ProvidersPage({
           <div className="row-between">
             <h3>{profile.name}</h3>
             <div className="row">
-              <span className="badge">
-                {profile.adapter === 'anthropic' ? 'Messages API' : 'Chat Completions'}
-              </span>
+              <span className="badge">{adapterLabels[profile.adapter]}</span>
               <button
                 className="icon-button"
                 aria-label={`Remove ${profile.name}`}
@@ -120,6 +118,9 @@ export function ProvidersPage({
       <div className="row">
         <button className="button" onClick={() => add('openai')}>
           <Plus size={14} /> Add OpenAI-compatible
+        </button>
+        <button className="button" onClick={() => add('responses')}>
+          <Plus size={14} /> Add OpenAI Responses
         </button>
         <button className="button" onClick={() => add('anthropic')}>
           <Plus size={14} /> Add Anthropic

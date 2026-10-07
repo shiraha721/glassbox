@@ -41,9 +41,9 @@ Start-up applies database migrations. Runtime data lives in `STUDIO_DATA_DIR` (d
 
 The left sidebar's **Settings** holds global configuration; the controls under the message box choose the model and workspace access for each Run.
 
-1. **Settings → Providers** lists the endpoints the studio can call: OpenAI-compatible (streaming Chat Completions with tool calls) and Anthropic Messages. Add one with **Add OpenAI-compatible** or **Add Anthropic**, set its base URL, paste the API key and press **Save key**. A local endpoint without a key works too.
+1. **Settings → Providers** lists the endpoints the studio can call: OpenAI-compatible (streaming Chat Completions with tool calls), the OpenAI Responses API, and Anthropic Messages. Add one with **Add OpenAI-compatible**, **Add OpenAI Responses** or **Add Anthropic**, set its base URL, paste the API key and press **Save key**. A local endpoint without a key works too.
 2. **Settings → Models** lists each provider's models. **Refresh models** asks the provider for its model list (`GET /models`); a model ID can also be added by hand. Each provider also sets temperature, max output tokens and context window, and **Prices** takes each model's input, output and cache prices in US dollars per million tokens. The **Default model** applies to new conversations and to the CLI and API.
-3. The **model button** under the message box picks the model for the next Run, sets its **reasoning effort** (Low/Medium/High for OpenAI-compatible models; up to Extra high and Max for Anthropic), refreshes all model lists, or opens **Manage models…**. A conversation reopens with the model and access its last Run used.
+3. The **model button** under the message box picks the model for the next Run, sets its **reasoning effort** (Low/Medium/High for OpenAI models; up to Extra high and Max for Anthropic), refreshes all model lists, or opens **Manage models…**. A conversation reopens with the model and access its last Run used.
 
 Keys are stored on this computer in the data directory (`credentials.json`; on Linux readable only by your account, on Windows protected by the folder's permissions like `.env`) and are never sent back to the browser; Settings shows only where a key comes from and its last four characters. Without a saved key, the server reads the environment variable named under **Key variable name** (for example `OPENAI_API_KEY`), from the process environment or `.env`. **Remove saved key** falls back to that variable.
 
@@ -59,6 +59,8 @@ OPENAI_API_KEY=sk-...
 `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` and `ANTHROPIC_API_KEY` do the same for an `anthropic` provider. Values set in `.env` update their provider and the default model again at the next start.
 
 Each Run records the provider, model, effort and access it used, so its snapshot stays reproducible after settings change. With Anthropic models the Run keeps the model's thinking blocks between its own tool calls, as the Messages API requires; later turns receive the conversation without them. Leave temperature empty for models that reject it, such as current Claude models. Requests to Claude models ask Anthropic to cache the prompt prefix, so the steps of a Run after the first are cheaper and faster; **Context** shows the resulting cache hit rate. OpenAI-compatible providers cache long prompts on their own.
+
+The **Responses API** provider talks to OpenAI's `/v1/responses` endpoint, which current OpenAI reasoning models are built for. Responses are not stored by OpenAI (`store: false`). With a reasoning effort chosen, the Run keeps the model's encrypted reasoning between its own tool calls, like Claude's thinking blocks; later turns receive the conversation without it.
 
 If a request fails, the error states the provider's reason and HTTP status (with any credential removed). Nothing is retried automatically, and a missing model is a configuration error rather than a silent switch to simulation.
 

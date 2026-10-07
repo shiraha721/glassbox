@@ -117,10 +117,12 @@ class Preset(Contract):
 
 
 ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
-# Effort levels each request format accepts. Chat Completions takes reasoning_effort; the
-# Messages API takes output_config.effort. Unsupported levels are rejected, never rewritten.
+# Effort levels each request format accepts. Chat Completions takes reasoning_effort, the
+# Responses API reasoning.effort, and the Messages API output_config.effort. Unsupported
+# levels are rejected, never rewritten.
 EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "openai": ("low", "medium", "high"),
+    "responses": ("low", "medium", "high"),
     "anthropic": ("low", "medium", "high", "xhigh", "max"),
 }
 # The pseudo provider ID that selects the offline simulated model.
@@ -167,7 +169,7 @@ class ProviderConfig(Contract):
     settings use it as the default model; Run snapshots keep the fully resolved values."""
 
     profile_id: str | None = None
-    adapter: Literal["fake", "openai", "anthropic"] = "openai"
+    adapter: Literal["fake", "openai", "responses", "anthropic"] = "openai"
     model: str = ""
     base_url: str = "https://api.openai.com/v1"
     credential_ref: str = "OPENAI_API_KEY"
@@ -198,7 +200,8 @@ class ProviderProfile(Contract):
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")
     name: str = Field(min_length=1, max_length=60)
-    adapter: Literal["openai", "anthropic"] = "openai"
+    # Request format: Chat Completions ("openai"), the OpenAI Responses API, or Messages.
+    adapter: Literal["openai", "responses", "anthropic"] = "openai"
     base_url: str = Field(min_length=1)
     credential_ref: str = ""
     models: list[str] = Field(default_factory=list, max_length=500)

@@ -15,6 +15,7 @@ from rtagent.domain import AppError, CompiledPrompt, Message, ProviderConfig, To
 from rtagent.infrastructure.providers.attachments import DATA_URL, fill_attachments
 from rtagent.infrastructure.providers.errors import sdk_failure, truncated_output
 from rtagent.infrastructure.providers.messages import prepare_anthropic, stream_anthropic
+from rtagent.infrastructure.providers.responses import prepare_responses, stream_responses
 
 
 def langchain_messages(messages: list[Message]) -> list:
@@ -119,6 +120,8 @@ def prepare(
         }
     if config.adapter == "anthropic":
         return prepare_anthropic(config, compiled, tools)
+    if config.adapter == "responses":
+        return prepare_responses(config, compiled, tools)
     # Pinned LangChain serialization is contract-tested against the HTTP boundary.
     instance = model(config, "preview-only")
     payload = instance._get_request_payload(
@@ -207,6 +210,15 @@ def transformations(adapter: str) -> list[str]:
             "Prompt-cache breakpoints (cache_control) on the last system block and the last "
             "message block",
         ]
+    if adapter == "responses":
+        return [
+            "Messages serialized as Responses input items with unchanged roles",
+            "Assistant tool calls serialized as function_call items with unchanged call IDs; "
+            "arguments JSON-encoded",
+            "Tool results serialized as function_call_output items",
+            "Responses not stored by the provider (store: false); with an effort set, encrypted "
+            "reasoning items are requested and echoed back within the Run",
+        ]
     return []
 
 
@@ -230,6 +242,10 @@ async def generate(
         return
     if config.adapter == "anthropic":
         async for event in stream_anthropic(config, prepared, on_wire, key):
+            yield event
+        return
+    if config.adapter == "responses":
+        async for event in stream_responses(config, prepared, on_wire, key):
             yield event
         return
 

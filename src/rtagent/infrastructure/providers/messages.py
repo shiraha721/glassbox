@@ -138,7 +138,7 @@ async def sse_events(response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
     async for line in response.aiter_lines():
         size += len(line.encode())
         if size > 1024 * 1024:
-            raise AppError("provider_protocol", "Messages stream event exceeds 1 MiB.", 502)
+            raise AppError("provider_protocol", "A stream event exceeds 1 MiB.", 502)
         if not line:
             if data:
                 yield json.loads("\n".join(data))
@@ -146,7 +146,7 @@ async def sse_events(response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
         elif line.startswith("data:"):
             data.append(line[5:].lstrip())
     if data:
-        raise AppError("provider_protocol", "Messages stream ended inside an event.", 502)
+        raise AppError("provider_protocol", "The stream ended inside an event.", 502)
 
 
 async def stream_anthropic(

@@ -2576,7 +2576,7 @@ export interface components {
              * @default openai
              * @enum {string}
              */
-            adapter: "fake" | "openai" | "anthropic";
+            adapter: "fake" | "openai" | "responses" | "anthropic";
             /**
              * Model
              * @default
@@ -2620,7 +2620,7 @@ export interface components {
              * @default openai
              * @enum {string}
              */
-            adapter: "fake" | "openai" | "anthropic";
+            adapter: "fake" | "openai" | "responses" | "anthropic";
             /**
              * Model
              * @default
@@ -2663,7 +2663,7 @@ export interface components {
              * @default openai
              * @enum {string}
              */
-            adapter: "openai" | "anthropic";
+            adapter: "openai" | "responses" | "anthropic";
             /** Base Url */
             base_url: string;
             /**
@@ -2701,7 +2701,7 @@ export interface components {
              * @default openai
              * @enum {string}
              */
-            adapter: "openai" | "anthropic";
+            adapter: "openai" | "responses" | "anthropic";
             /** Base Url */
             base_url: string;
             /**

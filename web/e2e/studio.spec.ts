@@ -1093,3 +1093,28 @@ test('an image attached in the composer is sent with the task', async ({ page })
   await expect(turn.getByRole('img', { name: 'Image 1 sent with the task' })).toBeVisible();
   await expect(turn.locator('.agent-activity')).toContainText('Attached images: 1');
 });
+
+test('an OpenAI Responses provider can be added in Settings', async ({ page }) => {
+  await openWorkspace(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByRole('button', { name: 'Add OpenAI Responses', exact: true }).click();
+  const card = settings.getByRole('region', { name: 'Provider OpenAI Responses' });
+  await expect(card.getByText('Responses API', { exact: true })).toBeVisible();
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  const saved = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
+  try {
+    expect(saved.providers.find((item: { id: string }) => item.id === 'responses')).toMatchObject({
+      adapter: 'responses',
+      credential_ref: 'RESPONSES_API_KEY',
+    });
+  } finally {
+    await page.request.put('/api/v1/config', {
+      data: {
+        ...saved,
+        providers: saved.providers.filter((item: { id: string }) => item.id !== 'responses'),
+      },
+    });
+  }
+});
