@@ -108,7 +108,7 @@ When a tool requires approval, the Run pauses with an **Approve once / Reject** 
 
 ### Manage conversations
 
-The sidebar groups conversations by project, with search, an **Archived** filter and flat folders. A conversation's **…** menu can rename, move to a folder, change its workspace, duplicate, fork from an earlier turn, archive or delete it. **Fork here** on a turn does the same from that point. Copies share no state with the original and never repeat model or tool calls.
+The sidebar's **Conversations** section lists the selected workspace's conversations, with **New conversation** to start another there, search, an **Archived** filter and flat folders. A conversation's **…** menu can rename, move to a folder, change its workspace, duplicate, fork from an earlier turn, archive or delete it. **Fork here** on a turn does the same from that point. Copies share no state with the original and never repeat model or tool calls.
 
 Long conversations can be summarized: **Context** shows estimated history size and **Compact older turns** asks the model for a summary of all but the most recent turns. The original messages are kept, and **Restore full context** switches back.
 

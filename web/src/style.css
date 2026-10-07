@@ -525,8 +525,26 @@ summary::-webkit-details-marker {
 .new-conversation {
   justify-content: flex-start;
   width: 100%;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   padding: 8px 12px;
+}
+.history-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+.history-heading .sidebar-label {
+  flex-shrink: 0;
+  padding-right: 0;
+}
+.history-workspace {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sidebar-label {
   display: flex;

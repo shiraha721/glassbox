@@ -10,7 +10,6 @@ import {
   PanelLeft,
   Pencil,
   Play,
-  Plus,
   SlidersHorizontal,
   Square,
   Terminal,
@@ -321,17 +320,6 @@ function Workspace({ data }: { data: Bootstrap }) {
             <PanelLeft size={16} />
           </button>
         </div>
-        <button
-          className="button new-conversation"
-          disabled={busy}
-          onClick={() =>
-            void perform(async () => {
-              await newSession();
-            })
-          }
-        >
-          <Plus size={16} /> New conversation
-        </button>
         <Projects
           projects={data.projects}
           selected={projectId}
@@ -346,6 +334,12 @@ function Workspace({ data }: { data: Bootstrap }) {
           }}
         />
         <ConversationHistory
+          workspace={project?.name || 'Default workspace'}
+          onNew={() =>
+            void perform(async () => {
+              await newSession();
+            })
+          }
           projects={data.projects}
           sessions={projectSessions}
           folders={data.folders}

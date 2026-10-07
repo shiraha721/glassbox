@@ -48,7 +48,7 @@ export function Projects({
     <>
       <section className="projects" aria-label="Projects">
         <div className="row-between">
-          <span className="subtle">Projects</span>
+          <span className="sidebar-label">Projects</span>
           <button
             className="icon-button"
             aria-label="Add project"

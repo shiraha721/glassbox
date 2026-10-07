@@ -12,6 +12,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   Pencil,
+  Plus,
   Search,
   Trash2,
   X,
@@ -32,8 +33,10 @@ type Dialog =
   | { kind: 'rename-folder' | 'delete-folder'; folder: Folder };
 type Menu = { x: number; y: number } & ({ session: Session } | { folder: Folder });
 
-/** Organize local history with flat folders and explicit conversation actions. */
+/** List the selected workspace's conversations, start new ones, and organize them in flat
+ * folders with explicit actions. */
 export function ConversationHistory({
+  workspace,
   sessions,
   folders,
   projects,
@@ -44,7 +47,9 @@ export function ConversationHistory({
   onUpdated,
   onRemoved,
   onAction,
+  onNew,
 }: {
+  workspace: string;
   sessions: Session[];
   folders: Folder[];
   projects: Project[];
@@ -55,6 +60,7 @@ export function ConversationHistory({
   onUpdated: () => Promise<void>;
   onRemoved: (id: string) => void;
   onAction: (operation: () => Promise<void>) => Promise<void>;
+  onNew: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [archived, setArchived] = useState(false);
@@ -207,6 +213,15 @@ export function ConversationHistory({
   return (
     <>
       <div className="history-controls">
+        <div className="history-heading">
+          <span className="sidebar-label">Conversations</span>
+          <span className="history-workspace" title={workspace}>
+            {workspace}
+          </span>
+        </div>
+        <button className="button new-conversation" disabled={busy} onClick={onNew}>
+          <Plus size={16} /> New conversation
+        </button>
         <div className="history-search">
           <Search size={14} />
           <input
@@ -272,7 +287,7 @@ export function ConversationHistory({
           </section>
         ))}
         <section className="history-group">
-          <div className="sidebar-label">{folders.length ? 'Unfiled' : 'Conversations'}</div>
+          {folders.length > 0 && <div className="sidebar-label">Unfiled</div>}
           {rows(visible.filter((item) => !item.folder_id))}
         </section>
         {!visible.length && (
