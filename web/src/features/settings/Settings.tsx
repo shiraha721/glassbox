@@ -17,6 +17,7 @@ import { ProvidersPage } from './ProvidersPage';
 import { ModelsPage } from './ModelsPage';
 import { McpPage } from './McpPage';
 import { SkillsPage } from './SkillsPage';
+import { CommandRules } from './CommandRules';
 import type { SettingsPage } from './pages';
 
 const pages = [
@@ -147,6 +148,7 @@ export function Settings({
                     message box can tighten these for a run: read only removes file changes, and ask
                     before changes requires approval for edits, commands and MCP tools.
                   </p>
+                  <CommandRules draft={draft} onChange={change} />
                   <ToolCatalog
                     tools={data.tools}
                     config={draft}

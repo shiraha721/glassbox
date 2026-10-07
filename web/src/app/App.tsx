@@ -780,6 +780,16 @@ function Workspace({ data }: { data: Bootstrap }) {
                 tools={data.tools}
                 config={effectiveConfig(data.config, data.tools, choice.access)}
                 access={choice.access}
+                grants={session?.grants ?? []}
+                onRevoke={(remaining) =>
+                  void perform(async () => {
+                    await request(`/sessions/${session!.id}`, 'PATCH', {
+                      expected_revision: session!.revision,
+                      grants: remaining,
+                    });
+                    await refresh();
+                  })
+                }
                 onClose={() => setPanel(null)}
                 onSettings={() => {
                   setPanel(null);

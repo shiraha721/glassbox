@@ -48,6 +48,7 @@ from rtagent.domain import (
     SkillSave,
     StartRun,
     StudioConfig,
+    ToolCall,
     ToolDefinition,
     WorkspaceAccess,
     WorkspaceSkills,
@@ -58,6 +59,7 @@ from rtagent.domain import (
     uid,
 )
 from rtagent.domain.lifecycle import ACTIVE_PROCESSES, TERMINAL
+from rtagent.domain.policies import grant_for
 from rtagent.domain.prompts import compile_prompt
 from rtagent.infrastructure.packages import export_skill, import_preset, import_skill
 from rtagent.infrastructure.providers.catalog import list_models
@@ -440,6 +442,15 @@ class Studio:
                 )
                 for name, permission in config.tools.items()
             }
+            # Commands change files, so under "ask" a command rule can tighten but not allow.
+            update["command_rules"] = [
+                (
+                    rule.model_copy(update={"permission": "ask"})
+                    if rule.permission == "allow"
+                    else rule
+                )
+                for rule in config.command_rules
+            ]
         return config.model_copy(update=update)
 
     async def create_project(self, request: ProjectCreate) -> ProjectView:
@@ -798,14 +809,25 @@ class Studio:
             if not approval or approval["id"] != approval_id:
                 raise AppError("approval_conflict", "This approval is no longer pending.", 409)
             if approval["decision"]:
-                if approval["decision"] != decision:
+                recorded = "approve" if decision == "approve_conversation" else decision
+                if approval["decision"] != recorded:
                     raise AppError(
                         "approval_conflict", "A different decision has already been recorded.", 409
                     )
                 return await self.view(run_id)
             if run["status"] != "waiting_approval":
                 raise AppError("approval_conflict", "The Run is not awaiting this approval.", 409)
-            approval = {**approval, "decision": decision}
+            if decision == "approve_conversation":
+                # Record the standing approval first; this call is then approved like any other.
+                grant = grant_for(
+                    ToolCall(
+                        id=approval["tool_call_id"], name=approval["name"], args=approval["args"]
+                    )
+                )
+                await self.repository.add_grant(run["session_id"], grant.model_dump())
+                approval = {**approval, "decision": "approve", "grant": grant.model_dump()}
+            else:
+                approval = {**approval, "decision": decision}
             await self.repository.emit(
                 run_id, "approval.resolved", approval, approval=approval, status="queued"
             )

@@ -848,3 +848,42 @@ test('a run that ends while the tab is in the background raises a notification',
       { title: 'Run finished', body: expect.stringContaining('Summarize the workspace.') },
     ]);
 });
+
+test('approving for the conversation covers later calls until revoked', async ({ page }) => {
+  await openWorkspace(page);
+  await startTask(page, '/echo first standing approval');
+  await page.getByRole('button', { name: 'Allow echo in this conversation', exact: true }).click();
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  // The next echo runs without a prompt.
+  await startTask(page, '/echo second standing approval');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await expect(page.locator('.conversation-turn')).toHaveCount(2);
+  // Revoking from the Tools panel makes the tool ask again.
+  await page.getByRole('button', { name: 'Tools', exact: true }).click();
+  const grants = page.getByRole('region', { name: 'Allowed in this conversation' });
+  await grants.getByRole('button', { name: 'Revoke echo', exact: true }).click();
+  await expect(grants).not.toBeAttached();
+  await page.getByRole('button', { name: 'Close tools', exact: true }).click();
+  await startTask(page, '/echo third standing approval');
+  await expect(page.getByRole('button', { name: 'Approve once', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Reject', exact: true }).click();
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+
+  // Command rules are edited with the other tool permissions.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings
+    .getByRole('navigation', { name: 'Settings pages' })
+    .getByRole('button', { name: 'Tools', exact: true })
+    .click();
+  await settings.getByLabel('New command prefix').fill('git   status');
+  await settings.getByRole('button', { name: 'Add rule', exact: true }).click();
+  await settings.getByLabel('Permission for git status').selectOption('ask');
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  const saved = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
+  expect(saved.command_rules).toEqual([{ prefix: 'git status', permission: 'ask' }]);
+  await settings.getByRole('button', { name: 'Remove rule git status', exact: true }).click();
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await settings.getByLabel('Close settings').click();
+});

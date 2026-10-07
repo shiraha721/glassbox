@@ -1041,7 +1041,7 @@ export interface components {
              * Decision
              * @enum {string}
              */
-            decision: "approve" | "reject";
+            decision: "approve" | "approve_conversation" | "reject";
         };
         /**
          * Block
@@ -1179,6 +1179,23 @@ export interface components {
             };
             /** Result */
             result: unknown;
+        };
+        /**
+         * CommandRule
+         * @description A permission for shell commands that start with a prefix, ahead of the tool default.
+         *
+         *     The longest matching prefix wins. Allow and ask rules apply only to simple commands, so a
+         *     rule for `npm test` never covers `npm test; rm -rf data`; deny rules match any command
+         *     that starts with the prefix.
+         */
+        CommandRule: {
+            /** Prefix */
+            prefix: string;
+            /**
+             * Permission
+             * @enum {string}
+             */
+            permission: "allow" | "ask" | "deny";
         };
         /**
          * CompactRequest
@@ -1710,6 +1727,36 @@ export interface components {
             name: string;
             /** Revision */
             revision: number;
+            /** Created At */
+            created_at: string;
+        };
+        /**
+         * Grant
+         * @description A user's standing approval for one tool in one conversation.
+         *
+         *     For a shell tool it covers simple commands starting with `prefix`; otherwise any call of
+         *     the tool. A grant turns an approval prompt into an allow; it never overrides a deny.
+         */
+        "Grant-Input": {
+            /** Tool */
+            tool: string;
+            /** Prefix */
+            prefix?: string | null;
+            /** Created At */
+            created_at?: string;
+        };
+        /**
+         * Grant
+         * @description A user's standing approval for one tool in one conversation.
+         *
+         *     For a shell tool it covers simple commands starting with `prefix`; otherwise any call of
+         *     the tool. A grant turns an approval prompt into an allow; it never overrides a deny.
+         */
+        "Grant-Output": {
+            /** Tool */
+            tool: string;
+            /** Prefix */
+            prefix: string | null;
             /** Created At */
             created_at: string;
         };
@@ -2489,6 +2536,8 @@ export interface components {
             archived: boolean;
             /** Copied From Session Id */
             copied_from_session_id: string | null;
+            /** Grants */
+            grants: components["schemas"]["Grant-Output"][];
             /** Message Count */
             message_count: number;
         };
@@ -2507,6 +2556,8 @@ export interface components {
             folder_id?: string | null;
             /** Project Id */
             project_id?: string | null;
+            /** Grants */
+            grants?: components["schemas"]["Grant-Input"][] | null;
         };
         /**
          * SessionView
@@ -2538,6 +2589,8 @@ export interface components {
             archived: boolean;
             /** Copied From Session Id */
             copied_from_session_id: string | null;
+            /** Grants */
+            grants: components["schemas"]["Grant-Output"][];
             /** Message Count */
             message_count: number;
             /** Messages */
@@ -2678,6 +2731,8 @@ export interface components {
             toolchain_roots?: string[];
             /** Network Hosts */
             network_hosts?: string[];
+            /** Command Rules */
+            command_rules?: components["schemas"]["CommandRule"][];
             /** Mcp Servers */
             mcp_servers?: components["schemas"]["MCPServer-Input"][];
             /**
@@ -2728,6 +2783,8 @@ export interface components {
             toolchain_roots: string[];
             /** Network Hosts */
             network_hosts: string[];
+            /** Command Rules */
+            command_rules: components["schemas"]["CommandRule"][];
             /** Mcp Servers */
             mcp_servers: components["schemas"]["MCPServer-Output"][];
             /**

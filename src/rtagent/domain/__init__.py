@@ -9,6 +9,7 @@ from .models import (
     ApprovalDecision,
     Block,
     CallView,
+    CommandRule,
     CompactionView,
     CompactRequest,
     CompiledPrompt,
@@ -36,6 +37,7 @@ from .models import (
     FolderSelection,
     FolderUpdate,
     FolderView,
+    Grant,
     MCPServer,
     MemoryDocument,
     MemorySave,
@@ -90,6 +92,8 @@ from .models import (
 )
 
 __all__ = [
+    "CommandRule",
+    "Grant",
     "ModelPrice",
     "call_cost",
     "Eval",

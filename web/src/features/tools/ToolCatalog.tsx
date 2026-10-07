@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Search, Wrench, X } from 'lucide-react';
-import type { Config, Tool, WorkspaceAccess } from '../../api/client';
+import type { Config, Grant, Tool, WorkspaceAccess } from '../../api/client';
 
 const groups = {
   'Files and search': [
@@ -149,12 +149,16 @@ export function ToolsPanel({
   tools,
   config,
   access,
+  grants,
+  onRevoke,
   onClose,
   onSettings,
 }: {
   tools: Tool[];
   config: Config;
   access: WorkspaceAccess;
+  grants: Grant[];
+  onRevoke: (remaining: Grant[]) => void;
   onClose: () => void;
   onSettings: () => void;
 }) {
@@ -168,6 +172,26 @@ export function ToolsPanel({
         </button>
       </div>
       <div className="tools-content">
+        {grants.length > 0 && (
+          <section className="grant-list" aria-label="Allowed in this conversation">
+            <h3>Allowed in this conversation</h3>
+            {grants.map((grant) => {
+              const label = grant.prefix ? `${grant.tool}: ${grant.prefix} …` : grant.tool;
+              return (
+                <div className="tool-setting" key={`${grant.tool}:${grant.prefix ?? ''}`}>
+                  <code>{label}</code>
+                  <button
+                    className="text-button"
+                    aria-label={`Revoke ${label}`}
+                    onClick={() => onRevoke(grants.filter((item) => item !== grant))}
+                  >
+                    Revoke
+                  </button>
+                </div>
+              );
+            })}
+          </section>
+        )}
         <ToolCatalog tools={tools} config={config} />
       </div>
       <div className="panel-footer">

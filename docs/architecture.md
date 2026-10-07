@@ -166,7 +166,7 @@ Built-in presets are seeded on start. A stored built-in preset is upgraded only 
 | `presets` | Versioned presets with embedded blocks. |
 | `projects` | Registered workspace folders. |
 | `conversation_folders` | Flat folders for organizing conversations. |
-| `sessions` | Conversations: committed message history, revision, active Run, project, folder, archive flag, compaction pointers, and `kind` (`chat`, or `eval` for the hidden sessions that host evaluation Runs). |
+| `sessions` | Conversations: committed message history, revision, active Run, project, folder, archive flag, compaction pointers, standing approvals (`grants`), and `kind` (`chat`, or `eval` for the hidden sessions that host evaluation Runs). |
 | `evals` | Evaluation definitions (cases with checks, variants with preset, model and access), versioned by revision. |
 | `eval_batches` | Comparison runs: the frozen definition, status and each case/variant result with its Run ID, verdict and usage. |
 | `previews` | Saved compiled inputs, deleted when consumed by a Run or expired. |
@@ -191,7 +191,7 @@ Rules that keep this consistent:
 `ToolRegistry` holds the catalog: twenty native tools, discovered MCP tools (namespaced `mcp_<server>_<name>_<hash>`) and trusted local tools registered by embedding code. At submission, the tools whose effective permission (after the Run's workspace access) is not `deny`, and in read-only mode that do not write, are frozen into the snapshot with their schema hashes. At dispatch:
 
 1. The call is validated against the frozen JSON schema.
-2. The frozen permission decides: allow, ask (persist approval, interrupt) or deny (return an error result).
+2. The frozen permission decides: allow, ask (persist approval, interrupt) or deny (return an error result). For the shell tool, the frozen `command_rules` can replace the tool default (`domain/policies.command_permission`; allow and ask rules only for commands without chaining, pipes, redirects or substitution). Before asking, the runner checks the conversation's grants (`sessions.grants`, added by an `approve_conversation` decision without a revision change, revoked by a revision-checked edit); a matching grant allows the call and is recorded in the receipt as `granted_by`. Grants only turn ask into allow.
 3. An optional trusted `before_tool` guard may add a denial, never grant one.
 4. The tool runs. MCP tools re-list the server's tools first and refuse to call if the schema hash changed; local tools are checked the same way.
 

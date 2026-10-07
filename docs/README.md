@@ -92,7 +92,7 @@ Access only tightens permissions; a tool disabled in Settings stays disabled. Co
 
 While the agent works, its reply streams into the conversation. Each tool call appears as one line: the tool, what it acts on (a path, command or search), and its outcome (done, failed, exit code, needs approval). Expand a line to see the arguments and the result: command output, file contents, search matches or a colored diff. Long command output keeps its beginning and end, with an explicit marker for the omitted middle.
 
-When a tool requires approval, the Run pauses with an **Approve once / Reject** card showing the exact arguments. A rejected call returns an error to the model, which can continue another way. Approvals survive a page refresh or service restart.
+When a tool requires approval, the Run pauses with a card showing the exact arguments. **Approve once** covers only that call. **Allow … in this conversation** also lets later matching calls in the same conversation run without asking: for the shell tool it covers commands starting with the same program (for example `pytest`, as single commands only), for other tools every call. Standing approvals are listed under **Tools → Allowed in this conversation**, where **Revoke** removes them; copies of a conversation start without them. **Reject** returns an error to the model, which can continue another way. Approvals survive a page refresh or service restart.
 
 **Stop run** cancels the Run and waits for its processes to be cleaned up. It cannot undo files that were already written.
 
@@ -166,7 +166,7 @@ A project Skill cannot reuse the name of a bundled or global Skill; the conflict
 
 ### Tool permissions
 
-**Tools** lists every tool with its argument schema and its status for the workspace access currently selected: Allowed, Approval required, Disabled, or Blocked by read-only. **Settings → Tools** sets each tool's default permission. New MCP tools start disabled; starting background processes, sending them input and downloading files start at "ask".
+**Tools** lists every tool with its argument schema and its status for the workspace access currently selected: Allowed, Approval required, Disabled, or Blocked by read-only. **Settings → Tools** sets each tool's default permission, and **Command rules** give shell commands that start with a prefix their own permission (allow, ask or deny; the longest prefix wins). Allow and ask rules apply only to a single command without `;`, `|`, `&&`, redirects or `$( )`, so a rule for `npm test` never covers `npm test; rm -rf data`; deny rules match any command that starts with the prefix. Under **Ask before changes**, allow rules ask instead. Rules and standing approvals only decide whether to ask; commands still run in the sandbox. New MCP tools start disabled; starting background processes, sending them input and downloading files start at "ask".
 
 The native tools are: `list_files`, `search_files`, `search_text`, `read_text`, `read_instructions`, `write_text`, `edit_text`, `apply_patch`, `update_plan`, `bash` (Linux) or `powershell` (Windows), `start_process`, `poll_process`, `send_process_input`, `stop_process`, `fetch_url`, `read_memory`, `save_memory`, `load_skill`, `save_skill` and `echo`.
 

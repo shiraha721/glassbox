@@ -89,6 +89,8 @@ sessions = Table(
     # "chat" conversations are listed in the sidebar; "eval" sessions host eval Runs and are
     # hidden from the conversation list but keep full Run evidence for inspection.
     Column("kind", String, nullable=False, server_default="chat"),
+    # Standing approvals the user granted in this conversation (Grant contracts).
+    Column("grants", JSON, nullable=False, server_default="[]"),
 )
 evals = Table(
     "evals",
@@ -432,6 +434,7 @@ class Repository:
             "title_locked": title != "New investigation",
             "copied_from_session_id": None,
             "kind": kind,
+            "grants": [],
         }
         async with self.lock, self.engine.begin() as connection:
             if (
@@ -721,6 +724,23 @@ class Repository:
             )
             await connection.execute(delete(folders).where(folders.c.id == folder_id))
 
+    async def add_grant(self, session_id: str, grant: dict[str, Any]) -> None:
+        """Record a standing approval without a revision change, as it can arrive mid-Run."""
+        async with self.lock, self.engine.begin() as connection:
+            current = (
+                await connection.execute(
+                    select(sessions.c.grants).where(sessions.c.id == session_id)
+                )
+            ).scalar_one()
+            if any(
+                item["tool"] == grant["tool"] and item.get("prefix") == grant.get("prefix")
+                for item in current
+            ):
+                return
+            await connection.execute(
+                update(sessions).where(sessions.c.id == session_id).values(grants=[*current, grant])
+            )
+
     async def update_session(self, session_id: str, request: SessionUpdate) -> dict[str, Any]:
         """Apply a versioned metadata edit without touching messages or Run snapshots."""
         async with self.lock, self.engine.begin() as connection:
@@ -780,6 +800,8 @@ class Repository:
                 ):
                     raise AppError("not_found", "Folder does not exist.", 404)
                 changes["folder_id"] = request.folder_id
+            if request.grants is not None:
+                changes["grants"] = [grant.model_dump() for grant in request.grants]
             if changes:
                 changes["revision"] = current["revision"] + 1
                 await connection.execute(
@@ -863,6 +885,8 @@ class Repository:
                 "archived": False,
                 "title_locked": True,
                 "copied_from_session_id": session_id,
+                # Standing approvals are a decision about one conversation; copies ask again.
+                "grants": [],
             }
             await connection.execute(insert(sessions).values(**copied))
             if source["compaction_id"]:

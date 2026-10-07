@@ -303,6 +303,36 @@ class ToolDefinition(Contract):
     writes_workspace: bool = False
 
 
+class CommandRule(Contract):
+    """A permission for shell commands that start with a prefix, ahead of the tool default.
+
+    The longest matching prefix wins. Allow and ask rules apply only to simple commands, so a
+    rule for `npm test` never covers `npm test; rm -rf data`; deny rules match any command
+    that starts with the prefix."""
+
+    prefix: str = Field(min_length=1, max_length=200)
+    permission: Literal["allow", "ask", "deny"]
+
+    @field_validator("prefix")
+    @classmethod
+    def trimmed(cls, value: str) -> str:
+        """Compare prefixes as typed words, without surrounding whitespace."""
+        if not value.strip():
+            raise ValueError("Enter the command prefix.")
+        return " ".join(value.split())
+
+
+class Grant(Contract):
+    """A user's standing approval for one tool in one conversation.
+
+    For a shell tool it covers simple commands starting with `prefix`; otherwise any call of
+    the tool. A grant turns an approval prompt into an allow; it never overrides a deny."""
+
+    tool: str = Field(min_length=1, max_length=200)
+    prefix: str | None = Field(default=None, max_length=200)
+    created_at: str = Field(default_factory=lambda: now())
+
+
 class StudioConfig(Contract):
     """Version provider, tool permissions, connections, and execution limits together."""
 
@@ -339,6 +369,8 @@ class StudioConfig(Contract):
     sandbox_mode: Literal["workspace-write", "read-only"] = "workspace-write"
     toolchain_roots: list[str] = Field(default_factory=list, max_length=3)
     network_hosts: list[str] = Field(default_factory=list, max_length=20)
+    # Shell command prefixes with their own permission; see CommandRule.
+    command_rules: list[CommandRule] = Field(default_factory=list, max_length=100)
     mcp_servers: list[MCPServer] = Field(default_factory=list, max_length=10)
     max_steps: int = Field(default=20, ge=1, le=100)
     max_tool_calls: int = Field(default=40, ge=1, le=200)
@@ -652,7 +684,9 @@ class StartRun(Contract):
 class ApprovalDecision(Contract):
     """A human decision for one pending tool invocation."""
 
-    decision: Literal["approve", "reject"]
+    # "approve_conversation" also records a Grant so later matching calls in the conversation
+    # run without asking.
+    decision: Literal["approve", "approve_conversation", "reject"]
 
 
 class RecoveryDecision(Contract):
@@ -761,6 +795,8 @@ class SessionUpdate(Contract):
     archived: bool | None = None
     folder_id: str | None = None
     project_id: str | None = None
+    # A replacement grant list; sending fewer grants revokes the missing ones.
+    grants: list[Grant] | None = None
 
     @field_validator("title")
     @classmethod
@@ -1018,6 +1054,7 @@ class SessionSummary(Contract):
     project_id: str | None = None
     archived: bool = False
     copied_from_session_id: str | None = None
+    grants: list[Grant] = Field(default_factory=list)
     message_count: int
 
 

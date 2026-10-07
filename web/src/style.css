@@ -2802,3 +2802,20 @@ summary::-webkit-details-marker {
   width: 100%;
   min-width: 64px;
 }
+
+.rule-prefix {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grant-list {
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.grant-list h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}

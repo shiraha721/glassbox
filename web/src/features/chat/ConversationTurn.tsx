@@ -43,6 +43,17 @@ const markdownComponents: Components = {
 };
 
 /** Render every persisted turn: the task, the agent's text and paired tool steps, and controls. */
+/** Name what "approve for this conversation" will cover: one shell program, or the tool. */
+function grantLabel(approval: Record<string, unknown>) {
+  const name = String(approval.name);
+  const args = (approval.args || {}) as Record<string, unknown>;
+  if ((name === 'bash' || name === 'powershell') && typeof args.command === 'string') {
+    const program = args.command.trim().split(/\s+/)[0];
+    if (program) return `Allow ${program} commands in this conversation`;
+  }
+  return `Allow ${name} in this conversation`;
+}
+
 export function RunTurn({
   run,
   index,
@@ -61,7 +72,7 @@ export function RunTurn({
   canFork: boolean;
   onInspect: () => void;
   onFork: () => void;
-  onApprove: (decision: 'approve' | 'reject') => void;
+  onApprove: (decision: 'approve' | 'approve_conversation' | 'reject') => void;
   onResume: (resolutions: NonNullable<ResumeRequest['resolutions']>) => void;
 }) {
   const results = new Map(
@@ -224,11 +235,21 @@ export function RunTurn({
                   <Check size={14} />
                   Approve once
                 </button>
+                <button
+                  className="button"
+                  disabled={busy}
+                  onClick={() => onApprove('approve_conversation')}
+                >
+                  {grantLabel(run.approval)}
+                </button>
                 <button className="button" disabled={busy} onClick={() => onApprove('reject')}>
                   Reject
                 </button>
               </div>
-              <p className="subtle">This decision applies only to the arguments shown above.</p>
+              <p className="subtle">
+                Approve once covers only the arguments above. The conversation choice also runs
+                later matching calls in this conversation without asking; revoke it in Tools.
+              </p>
             </div>
           )}
           {run.status === 'interrupted' && <Recovery run={run} busy={busy} onResume={onResume} />}

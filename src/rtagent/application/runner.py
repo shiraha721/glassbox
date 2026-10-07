@@ -15,6 +15,7 @@ from langsmith import tracing_context
 
 from rtagent.domain import (
     AppError,
+    Grant,
     Message,
     Preset,
     StudioConfig,
@@ -27,7 +28,7 @@ from rtagent.domain import (
 from rtagent.domain.execution import ToolExecution, current_execution
 from rtagent.domain.hooks import Hooks
 from rtagent.domain.lifecycle import TERMINAL
-from rtagent.domain.policies import decide
+from rtagent.domain.policies import decide, granted
 from rtagent.domain.prompts import compile_prompt
 from rtagent.infrastructure.providers.chat import generate, prepare, transformations
 from rtagent.infrastructure.storage import Repository
@@ -381,6 +382,16 @@ class Runner:
             try:
                 decision = decide(call, definition, config)
                 data["decision"] = decision
+                if decision == "ask":
+                    # A standing approval the user gave in this conversation answers the prompt;
+                    # the receipt names it so the authorization stays inspectable.
+                    session = await self.repository.session(run["session_id"])
+                    grant = granted(
+                        call, [Grant.model_validate(item) for item in session.get("grants", [])]
+                    )
+                    if grant:
+                        decision = "allow"
+                        data.update(decision=decision, granted_by=grant.model_dump())
                 if decision == "ask":
                     approval = run["approval"]
                     if not approval or approval["id"] != call_id:
