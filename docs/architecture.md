@@ -42,10 +42,12 @@ src/rtagent/
     config.py          Process settings and .env provider seeding
     credentials.py     API keys saved from Settings (server-side only)
     tools.py           Tool catalog, schemas, dispatch, MCP sessions
+    web.py             Web search services and reading public pages as text
+    shell_hooks.py     User-configured hook commands with bounded time and output
     providers/         OpenAI-compatible (chat.py), Anthropic Messages (messages.py),
                        model lists (catalog.py), errors
-    workspace/         File tools and their undo journal, Skills and memory (files.py),
-                       downloads, trusted runtimes
+    workspace/         File tools and their undo journal, Skills, memory and commands
+                       (files.py), downloads, Git status and diffs (git.py), trusted runtimes
     sandbox/           linux.py, windows.py, command output/stdin (command_io.py),
                        background processes (processes.py), Windows workspace copies (files.py)
     desktop/           Native folder picker
@@ -191,7 +193,7 @@ Rules that keep this consistent:
 
 ## Tools and permissions
 
-`ToolRegistry` holds the catalog: twenty native tools, discovered MCP tools (namespaced `mcp_<server>_<name>_<hash>`) and trusted local tools registered by embedding code. At submission, the tools whose effective permission (after the Run's workspace access) is not `deny`, and in read-only mode that do not write, are frozen into the snapshot with their schema hashes. At dispatch:
+`ToolRegistry` holds the catalog: twenty-two native tools, discovered MCP tools (namespaced `mcp_<server>_<name>_<hash>`) and trusted local tools registered by embedding code. At submission, the tools whose effective permission (after the Run's workspace access) is not `deny`, and in read-only mode that do not write, are frozen into the snapshot with their schema hashes. At dispatch:
 
 1. The call is validated against the frozen JSON schema.
 2. The frozen permission decides: allow, ask (persist approval, interrupt) or deny (return an error result). For the shell tool, the frozen `command_rules` can replace the tool default (`domain/policies.command_permission`; allow and ask rules only for commands without chaining, pipes, redirects or substitution). Before asking, the runner checks the conversation's grants (`sessions.grants`, added by an `approve_conversation` decision without a revision change, revoked by a revision-checked edit); a matching grant allows the call and is recorded in the receipt as `granted_by`. Grants only turn ask into allow.
@@ -201,6 +203,8 @@ Rules that keep this consistent:
 **Undo file changes.** While a file tool runs inside a recorded call, `Workspace` journals each change to a workspace file: before replacing or deleting it, it copies the old bytes to `<data dir>/file-history/<sha256>` (content-addressed, so a copy is stored once), and it appends `{path, before, after}` (byte hashes, `null` for absent) to `ToolExecution.changes`. The runner saves that list in the call receipt as `file_changes`, also when the call fails part way. `domain/changes.net_changes` folds a Run's receipts into each path's state before the Run and the state it left; Run views list those paths as `changed_files`. `POST /runs/{id}/files/revert` (Studio `revert_files`, under the command lock, only for an ended Run in an idle conversation) restores a file only if its current bytes still hash to what the Run left, writing the saved copy atomically or removing a file the Run created; any other file is skipped and reported. The result is recorded as a `files.reverted` event. Commands, processes, MCP tools and Skills saved to the global folder are not journaled.
 
 **Shell hooks.** `infrastructure/shell_hooks.run_hook` runs one user-configured command with the system shell in the Run's workspace, with event JSON on stdin, a minimal environment (`HOOK_ENVIRONMENT`: paths, user, locale, display session; never the service's other variables) plus `RTAGENT_HOOK_EVENT`, a timeout, and 16 KiB of kept output per stream. On POSIX it starts a new session, so a timeout, or output still held open a second after the hook exits, kills its whole process group. Outcomes are recorded in the call receipt (`hooks`: exit code, seconds, error, bounded stderr). `after_tool` hooks run only for dispatched calls, after the receipt is saved. `run_end` hooks run in a Runner task started by the terminal event (`run.completed`, `run.failed`, `run.cancelled`, each emitted once) and record `hook.ran` or `hook.failed` events. Hooks come from the Run's snapshot, never from current settings.
+
+**Web tools.** `web_search` and `read_url` (`infrastructure/web.py`) run in the service with an HTTP client that ignores proxy variables. `web_search` calls the service in `StudioConfig.search` (Brave or Tavily with a key resolved by `CredentialStore`, or a SearXNG URL) and returns at most ten titles, URLs and tag-free snippets; it is left out of the offered tools while no service is set. `read_url` accepts HTTPS URLs without credentials or ports, resolves the host, requires every address to be public, and connects to that address with the original host name for TLS (as `fetch_url` does); it handles each redirect itself (at most three), applying the same checks to every hop. Bodies are read up to 2 MiB after decompression; text and JSON pass through, HTML is reduced to text by a stdlib parser that drops scripts, styles and other non-text elements; the result is cut at 48,000 characters.
 
 MCP discovery runs when the user saves a server and automatically, once per server configuration, the first time prompts are prepared after a restart. Each MCP call opens a fresh session; servers run outside the sandbox under their own configuration.
 

@@ -2787,6 +2787,56 @@ export interface components {
             detail: string;
         };
         /**
+         * SearchSettings
+         * @description The web search service the `web_search` tool queries, from this computer.
+         *
+         *     Brave and Tavily use their public APIs with a key named by `credential_ref` (resolved on
+         *     the server like provider keys); SearXNG uses the instance at `base_url`.
+         */
+        "SearchSettings-Input": {
+            /**
+             * Provider
+             * @default none
+             * @enum {string}
+             */
+            provider: "none" | "brave" | "tavily" | "searxng";
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Credential Ref
+             * @default
+             */
+            credential_ref: string;
+        };
+        /**
+         * SearchSettings
+         * @description The web search service the `web_search` tool queries, from this computer.
+         *
+         *     Brave and Tavily use their public APIs with a key named by `credential_ref` (resolved on
+         *     the server like provider keys); SearXNG uses the instance at `base_url`.
+         */
+        "SearchSettings-Output": {
+            /**
+             * Provider
+             * @default none
+             * @enum {string}
+             */
+            provider: "none" | "brave" | "tavily" | "searxng";
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Credential Ref
+             * @default
+             */
+            credential_ref: string;
+        };
+        /**
          * SessionCopy
          * @description Copy saved evidence, optionally stopping at a completed turn for a fork.
          */
@@ -3104,6 +3154,7 @@ export interface components {
             auto_compact?: components["schemas"]["AutoCompact-Input"];
             /** Hooks */
             hooks?: components["schemas"]["ShellHook-Input"][];
+            search?: components["schemas"]["SearchSettings-Input"];
             /**
              * Max Steps
              * @default 20
@@ -3159,6 +3210,7 @@ export interface components {
             auto_compact: components["schemas"]["AutoCompact-Output"];
             /** Hooks */
             hooks: components["schemas"]["ShellHook-Output"][];
+            search: components["schemas"]["SearchSettings-Output"];
             /**
              * Max Steps
              * @default 20

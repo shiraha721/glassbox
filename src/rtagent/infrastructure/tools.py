@@ -29,6 +29,7 @@ from rtagent.infrastructure.credentials import CredentialStore
 from rtagent.infrastructure.sandbox.linux import BashSandbox
 from rtagent.infrastructure.sandbox.processes import ProcessManager, process_view
 from rtagent.infrastructure.storage import Repository
+from rtagent.infrastructure.web import read_url, web_search
 from rtagent.infrastructure.workspace.downloads import fetch_url
 from rtagent.infrastructure.workspace.files import MEMORY_PATH, Workspace
 
@@ -182,6 +183,21 @@ def native_tools() -> list[ToolDefinition]:
                 "sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
             },
             ["url", "path"],
+        ),
+        tool(
+            "web_search",
+            "Search the web with the search service configured in Settings; returns titles, URLs and snippets. The query leaves this computer: never include secrets, credentials or private code. Read a result with read_url.",
+            {
+                "query": {"type": "string", "minLength": 1, "maxLength": 400},
+                "count": {"type": "integer", "minimum": 1, "maximum": 10},
+            },
+            ["query"],
+        ),
+        tool(
+            "read_url",
+            "Read a public HTTPS page as plain text (HTML converted, at most 48,000 characters). Follows up to 3 redirects, each to a public address; no credentials, ports, private or local addresses. Nothing is saved; use fetch_url to download a file. The URL leaves this computer: never put secrets in it.",
+            {"url": {"type": "string", "maxLength": 2048}},
+            ["url"],
         ),
         tool(
             "read_memory",
@@ -437,6 +453,9 @@ class ToolRegistry:
         """Intersect discovered tools with the locally configured permission map."""
         result = []
         for name, permission in config.tools.items():
+            # Offering search without a configured service would only produce errors.
+            if name == "web_search" and config.search.provider == "none":
+                continue
             if permission == "deny" or (
                 config.sandbox_mode == "read-only"
                 and (
@@ -491,6 +510,12 @@ class ToolRegistry:
             return json.dumps(
                 await fetch_url(self.files, config.network_hosts, **args), ensure_ascii=False
             )
+        if name == "web_search":
+            return json.dumps(
+                await web_search(config.search, self.credentials, **args), ensure_ascii=False
+            )
+        if name == "read_url":
+            return json.dumps(await read_url(**args), ensure_ascii=False)
         if name in {"start_process", "poll_process", "send_process_input", "stop_process"}:
             owner = current_execution.get()
             if owner is None or self.processes is None:

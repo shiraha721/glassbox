@@ -1040,3 +1040,29 @@ test('the Changes panel shows Git changes and prepares a review task', async ({ 
     rmSync(path.join(root, '.git'), { recursive: true, force: true });
   }
 });
+
+test('a web search service is chosen in Settings with a write-only key', async ({ page }) => {
+  await openWorkspace(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings
+    .getByRole('navigation', { name: 'Settings pages' })
+    .getByRole('button', { name: 'Tools', exact: true })
+    .click();
+  const search = settings.getByRole('region', { name: 'Web search' });
+  await search.getByLabel('Search service').selectOption('brave');
+  await expect(search.getByLabel('Key variable name')).toHaveValue('BRAVE_API_KEY');
+  await expect(search.getByLabel('API key')).toHaveAttribute('type', 'password');
+  await search.getByLabel('Search service').selectOption('searxng');
+  await search.getByLabel('Instance URL').fill('https://search.example');
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  const saved = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
+  try {
+    expect(saved.search).toMatchObject({ provider: 'searxng', base_url: 'https://search.example' });
+  } finally {
+    await page.request.put('/api/v1/config', {
+      data: { ...saved, search: { provider: 'none', base_url: '', credential_ref: '' } },
+    });
+  }
+});

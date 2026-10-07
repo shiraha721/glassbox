@@ -20,6 +20,7 @@ import { ModelsPage } from './ModelsPage';
 import { McpPage } from './McpPage';
 import { SkillsPage } from './SkillsPage';
 import { CommandRules } from './CommandRules';
+import { SearchSettings } from './SearchSettings';
 import { ContextPage } from './ContextPage';
 import { HooksPage } from './HooksPage';
 import type { SettingsPage } from './pages';
@@ -155,6 +156,7 @@ export function Settings({
                     before changes requires approval for edits, commands and MCP tools.
                   </p>
                   <CommandRules draft={draft} onChange={change} />
+                  <SearchSettings draft={draft} onChange={change} />
                   <ToolCatalog
                     tools={data.tools}
                     config={draft}

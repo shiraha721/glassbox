@@ -333,6 +333,26 @@ class Grant(Contract):
     created_at: str = Field(default_factory=lambda: now())
 
 
+class SearchSettings(Contract):
+    """The web search service the `web_search` tool queries, from this computer.
+
+    Brave and Tavily use their public APIs with a key named by `credential_ref` (resolved on
+    the server like provider keys); SearXNG uses the instance at `base_url`."""
+
+    provider: Literal["none", "brave", "tavily", "searxng"] = "none"
+    base_url: str = Field(default="", max_length=500)
+    credential_ref: str = Field(default="", max_length=200)
+
+    @model_validator(mode="after")
+    def complete(self) -> "SearchSettings":
+        """Reject a service that could never answer."""
+        if self.provider == "searxng" and not self.base_url.startswith(("https://", "http://")):
+            raise ValueError("Enter the SearXNG instance URL, starting with https:// or http://.")
+        if self.provider in {"brave", "tavily"} and not self.credential_ref.strip():
+            raise ValueError("Name the key that holds the search service's API key.")
+        return self
+
+
 class ShellHook(Contract):
     """A command the user configured to run on this computer at a point in a Run.
 
@@ -386,6 +406,8 @@ class StudioConfig(Contract):
             "send_process_input": "ask",
             "stop_process": "allow",
             "fetch_url": "ask",
+            "web_search": "ask",
+            "read_url": "ask",
             SHELL_TOOL: "allow",
             "read_memory": "allow",
             "save_memory": "allow",
@@ -402,6 +424,7 @@ class StudioConfig(Contract):
     mcp_servers: list[MCPServer] = Field(default_factory=list, max_length=10)
     auto_compact: AutoCompact = Field(default_factory=AutoCompact)
     hooks: list[ShellHook] = Field(default_factory=list, max_length=20)
+    search: SearchSettings = Field(default_factory=SearchSettings)
     max_steps: int = Field(default=20, ge=1, le=100)
     max_tool_calls: int = Field(default=40, ge=1, le=200)
     tool_timeout: float = Field(default=60, ge=0.1, le=300)

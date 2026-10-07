@@ -180,9 +180,9 @@ A project Skill cannot reuse the name of a bundled or global Skill; the conflict
 
 ### Tool permissions
 
-**Tools** lists every tool with its argument schema and its status for the workspace access currently selected: Allowed, Approval required, Disabled, or Blocked by read-only. **Settings → Tools** sets each tool's default permission, and **Command rules** give shell commands that start with a prefix their own permission (allow, ask or deny; the longest prefix wins). Allow and ask rules apply only to a single command without `;`, `|`, `&&`, redirects or `$( )`, so a rule for `npm test` never covers `npm test; rm -rf data`; deny rules match any command that starts with the prefix. Under **Ask before changes**, allow rules ask instead. Rules and standing approvals only decide whether to ask; commands still run in the sandbox. New MCP tools start disabled; starting background processes, sending them input and downloading files start at "ask".
+**Tools** lists every tool with its argument schema and its status for the workspace access currently selected: Allowed, Approval required, Disabled, or Blocked by read-only. **Settings → Tools** sets each tool's default permission, and **Command rules** give shell commands that start with a prefix their own permission (allow, ask or deny; the longest prefix wins). Allow and ask rules apply only to a single command without `;`, `|`, `&&`, redirects or `$( )`, so a rule for `npm test` never covers `npm test; rm -rf data`; deny rules match any command that starts with the prefix. Under **Ask before changes**, allow rules ask instead. Rules and standing approvals only decide whether to ask; commands still run in the sandbox. New MCP tools start disabled; starting background processes, sending them input, downloading files, searching the web and reading web pages start at "ask".
 
-The native tools are: `list_files`, `search_files`, `search_text`, `read_text`, `read_instructions`, `write_text`, `edit_text`, `apply_patch`, `update_plan`, `bash` (Linux) or `powershell` (Windows), `start_process`, `poll_process`, `send_process_input`, `stop_process`, `fetch_url`, `read_memory`, `save_memory`, `load_skill`, `save_skill` and `echo`.
+The native tools are: `list_files`, `search_files`, `search_text`, `read_text`, `read_instructions`, `write_text`, `edit_text`, `apply_patch`, `update_plan`, `bash` (Linux) or `powershell` (Windows), `start_process`, `poll_process`, `send_process_input`, `stop_process`, `fetch_url`, `web_search`, `read_url`, `read_memory`, `save_memory`, `load_skill`, `save_skill` and `echo`.
 
 **Workspace access** under the message box tightens these per Run (see [Run a task](#run-a-task)). **Read only** mounts the workspace read-only for commands and removes every file-changing tool from what the model is offered.
 
@@ -209,7 +209,10 @@ Commands also have a deadline, bounded output and no access to server credential
 
 On Linux, dependency folders such as `.venv` and `node_modules` stay visible so a project's tests can run offline. A virtual environment's interpreter usually links outside the project; add that interpreter's folder (the parent of `home` in `.venv/pyvenv.cfg`) under **Settings → Sandbox → Trusted runtime directories** and it is mounted read-only at the same path. On Windows, trusted runtimes are copied into the sandbox (up to 20,000 files and 256 MiB). At most three can be registered.
 
-### Downloads and MCP
+### Web, downloads and MCP
+
+`web_search` asks the search service chosen in **Settings → Tools → Web search**: the Brave Search API or Tavily (with an API key saved there, or set as an environment variable, like provider keys) or a SearXNG instance you run (its URL). It returns titles, URLs and snippets, and is offered to the model only once a service is set. `read_url` reads a public HTTPS page as text: HTML is converted to plain text and cut at 48,000 characters, up to 3 redirects are followed, each to a public address, and nothing is saved. Both run in the studio, not in the sandbox, and send what the model wrote (a query or a URL) off this computer, which is why they ask first by default. Settings saved before these tools existed show them as disabled; set their permission in **Settings → Tools** to use them.
+
 
 `fetch_url` downloads a public HTTPS file (up to 16 MiB, optionally checked against a SHA-256) from hosts you list in **Settings → Sandbox → Allowed HTTPS download hosts**. It refuses redirects, proxies, credentials in URLs and private or local addresses, and writes only new files. It does not give commands network access.
 
