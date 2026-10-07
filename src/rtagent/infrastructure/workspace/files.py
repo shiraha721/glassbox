@@ -1,5 +1,6 @@
 """Workspace files, explicit project memory, and small on-demand Markdown skills."""
 
+import hashlib
 import json
 import os
 import re
@@ -14,6 +15,7 @@ from typing import Any
 import yaml
 
 from rtagent.domain import AppError, Message, digest
+from rtagent.domain.execution import current_execution
 from rtagent.domain.patches import apply_hunks, parse_patch
 
 FILE_LIMIT = 65_536
@@ -55,6 +57,79 @@ class Workspace:
         # User-level skills shared by every project, kept with the studio's own data.
         self.global_skills = data_dir.resolve() / "skills" if data_dir else None
         self.lock = threading.RLock()
+        # Content-addressed copies of files a Run replaced, so its changes can be undone.
+        self.history_dir = self.data_dir / "file-history"
+
+    def _tracked(self, target: Path) -> bool:
+        """Journal changes made inside a recorded tool call to files of this workspace."""
+        return (
+            current_execution.get() is not None
+            and target.is_relative_to(self.root)
+            and not target.is_relative_to(self.data_dir)
+        )
+
+    def _backup(self, target: Path) -> str | None:
+        """Keep the bytes a tool is about to replace; return their hash, or None if absent."""
+        if not self._tracked(target) or not target.exists():
+            return None
+        content = target.read_bytes()
+        name = hashlib.sha256(content).hexdigest()
+        stored = self.history_dir / name
+        if not stored.exists():
+            self.history_dir.mkdir(parents=True, exist_ok=True)
+            self._write_bytes(stored, content)
+        return name
+
+    def record_change(self, target: Path, before: str | None, after: bytes | None) -> None:
+        """Add a completed change to the current tool call's receipt."""
+        execution = current_execution.get()
+        if execution is None or not self._tracked(target):
+            return
+        execution.changes.append(
+            {
+                "path": target.relative_to(self.root).as_posix(),
+                "before": before,
+                "after": None if after is None else hashlib.sha256(after).hexdigest(),
+            }
+        )
+
+    @staticmethod
+    def _write_bytes(target: Path, content: bytes) -> None:
+        """Replace a file atomically with exact bytes."""
+        with NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+        try:
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def file_state(self, relative: str) -> str | None:
+        """Hash a workspace file's bytes, or None when it does not exist."""
+        target = self.path(relative)
+        return hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
+
+    def restore(self, relative: str, before: str | None, expected: str | None) -> bool:
+        """Put back a file's recorded earlier state if it is still in the `expected` state.
+
+        Returns False, changing nothing, when the file has changed since; an absent `before`
+        removes a file the Run created."""
+        with self.lock:
+            target = self.path(relative)
+            if self.file_state(relative) != expected:
+                return False
+            if before is None:
+                target.unlink(missing_ok=True)
+                return True
+            try:
+                content = (self.history_dir / before).read_bytes()
+            except OSError as exc:
+                raise AppError(
+                    "backup_missing", f"The saved copy of {relative} is missing.", 409
+                ) from exc
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._write_bytes(target, content)
+            return True
 
     def path(self, relative: str) -> Path:
         """Reject traversal, links, runtime data, and credential paths before I/O."""
@@ -322,7 +397,9 @@ class Workspace:
                             raise AppError(
                                 "file_conflict", "A file changed after patch preflight.", 409
                             )
+                        before = self._backup(target)
                         target.unlink()
+                        self.record_change(target, before, None)
                     else:
                         self._replace(
                             operation.path,
@@ -369,16 +446,10 @@ class Workspace:
                     409,
                 )
             target.parent.mkdir(parents=True, exist_ok=True)
+            before = self._backup(target)
             # Replace atomically so readers never observe a partially written memory or skill.
-            with NamedTemporaryFile(
-                mode="w", encoding="utf-8", newline="\n", dir=target.parent, delete=False
-            ) as handle:
-                temporary = Path(handle.name)
-                handle.write(content)
-            try:
-                os.replace(temporary, target)
-            finally:
-                temporary.unlink(missing_ok=True)
+            self._write_bytes(target, content.encode())
+            self.record_change(target, before, content.encode())
 
     def edit(self, path: str, old_text: str, new_text: str) -> dict[str, str]:
         """Replace exactly one literal occurrence; ambiguous edits require a narrower match.

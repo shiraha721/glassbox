@@ -930,3 +930,21 @@ test('automatic compaction summarizes older turns once enabled and can be undone
     });
   }
 });
+
+test('a run that wrote a file can undo it from its turn', async ({ page }) => {
+  await openWorkspace(page);
+  await startTask(
+    page,
+    '/tool write_text ' + JSON.stringify({ path: 'undo-e2e.txt', content: 'draft from a run' }),
+  );
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  const files = page.locator('.run-files');
+  await files.getByText('Changed 1 file', { exact: true }).click();
+  await expect(files.getByRole('list', { name: 'Changed files' })).toContainText('undo-e2e.txt');
+  await files.getByRole('button', { name: 'Undo file changes', exact: true }).click();
+  await expect(files.getByRole('status')).toHaveText('Restored 1 file.');
+  await expect(files.getByText('restored', { exact: true })).toBeVisible();
+  await expect(
+    files.getByRole('button', { name: 'Undo file changes', exact: true }),
+  ).toBeDisabled();
+});

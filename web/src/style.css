@@ -1282,6 +1282,31 @@ summary::-webkit-details-marker {
   color: var(--progress);
   font-weight: 500;
 }
+.run-files {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 13px;
+}
+.run-files > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.run-files ul {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.run-files li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
 .approval-card {
   margin-top: 12px;
   padding: 16px;
@@ -1565,6 +1590,7 @@ summary::-webkit-details-marker {
 .evidence > summary,
 .block > summary,
 .context-file > summary,
+.run-files > summary,
 .tool-schema > summary,
 .advanced > summary {
   display: flex;
@@ -1575,6 +1601,7 @@ summary::-webkit-details-marker {
 .trace-call > summary::before,
 .evidence > summary::before,
 .block > summary::before,
+.run-files > summary::before,
 .tool-schema > summary::before,
 .advanced > summary::before {
   content: '›';
@@ -1586,6 +1613,7 @@ summary::-webkit-details-marker {
 .trace-call[open] > summary::before,
 .evidence[open] > summary::before,
 .block[open] > summary::before,
+.run-files[open] > summary::before,
 .tool-schema[open] > summary::before,
 .advanced[open] > summary::before {
   transform: rotate(90deg);

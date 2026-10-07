@@ -29,6 +29,8 @@ from rtagent.domain import (
     EvalItemResult,
     EvalSummary,
     EvalUpdate,
+    FileChange,
+    FileChanges,
     MemoryDocument,
     MemorySave,
     Message,
@@ -55,6 +57,7 @@ from rtagent.domain import (
     WorkspaceView,
     digest,
     latest_plan,
+    net_changes,
     resolve_model,
     uid,
 )
@@ -951,6 +954,69 @@ class Studio:
         async with self.commands:
             await self.runner.cancel(run_id)
             return await self.view(run_id)
+
+    async def file_changes(self, run_id: str) -> FileChanges:
+        """List the files a Run changed with its file tools and where each stands now."""
+        run = await self.repository.run(run_id)
+        files = self.registry.for_workspace(Path(run["snapshot"]["workspace_root"])).files
+        changes = net_changes(await self.repository.file_changes(run_id))
+
+        def states() -> list[FileChange]:
+            result = []
+            for path, (before, after) in changes.items():
+                try:
+                    current: str | None = files.file_state(path)
+                except AppError:
+                    current = "unreadable"
+                result.append(
+                    FileChange(
+                        path=path,
+                        created=before is None,
+                        deleted=after is None,
+                        state=(
+                            "as_left"
+                            if current == after
+                            else "reverted" if current == before else "changed"
+                        ),
+                    )
+                )
+            return result
+
+        return FileChanges(run_id=run_id, files=await asyncio.to_thread(states))
+
+    async def revert_files(self, run_id: str) -> FileChanges:
+        """Put files a finished Run changed back to how they were before it.
+
+        Only files still exactly as the Run left them are restored; a file changed since (by
+        a later Run, a command or the user) is skipped and reported, never overwritten."""
+        async with self.commands:
+            run = await self.repository.run(run_id)
+            if run["status"] not in TERMINAL:
+                raise AppError("run_active", "Undo file changes after the Run ends.", 409)
+            session = await self.repository.session(run["session_id"])
+            if session["active_run_id"]:
+                raise AppError(
+                    "session_busy", "Finish or cancel the current Run before undoing changes.", 409
+                )
+            files = self.registry.for_workspace(Path(run["snapshot"]["workspace_root"])).files
+            current = await self.file_changes(run_id)
+            changes = net_changes(await self.repository.file_changes(run_id))
+            restored, skipped = [], []
+            for item in current.files:
+                if item.state == "changed":
+                    skipped.append(item.path)
+                elif item.state == "as_left":
+                    before, after = changes[item.path]
+                    try:
+                        done = await asyncio.to_thread(files.restore, item.path, before, after)
+                    except AppError:
+                        done = False
+                    (restored if done else skipped).append(item.path)
+            await self.repository.emit(
+                run_id, "files.reverted", {"restored": restored, "skipped": skipped}
+            )
+            view = await self.file_changes(run_id)
+            return view.model_copy(update={"restored": restored, "skipped": skipped})
 
     async def save_config(self, value: StudioConfig) -> StudioConfig:
         """Apply optimistic version checks and invalidate stale MCP discovery."""

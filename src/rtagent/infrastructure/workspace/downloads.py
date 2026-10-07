@@ -44,6 +44,7 @@ def save_download(workspace: Workspace, relative: str, body: bytes) -> None:
             if created:
                 target.unlink(missing_ok=True)
             raise
+        workspace.record_change(target, None, body)
 
 
 async def fetch_url(

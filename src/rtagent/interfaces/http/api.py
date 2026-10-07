@@ -27,6 +27,7 @@ from rtagent.domain import (
     EvalDraft,
     EvalSummary,
     EvalUpdate,
+    FileChanges,
     FolderCreate,
     FolderPickerRequest,
     FolderSelection,
@@ -453,6 +454,18 @@ async def get_run(run_id: str, request: Request) -> RunView:
 async def cancel_run(run_id: str, request: Request) -> RunView:
     """Cancel the local task and preserve any uncertain external effects."""
     return await request.app.state.studio.cancel(run_id)
+
+
+@router.get("/runs/{run_id}/files", response_model=FileChanges)
+async def run_file_changes(run_id: str, request: Request) -> FileChanges:
+    """List files the Run changed with file tools and whether each can still be undone."""
+    return await request.app.state.studio.file_changes(run_id)
+
+
+@router.post("/runs/{run_id}/files/revert", response_model=FileChanges)
+async def revert_run_files(run_id: str, request: Request) -> FileChanges:
+    """Restore files still as the Run left them; files changed since are skipped."""
+    return await request.app.state.studio.revert_files(run_id)
 
 
 @router.post("/runs/{run_id}/approvals/{approval_id}", response_model=RunView)

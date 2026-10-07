@@ -1,5 +1,6 @@
 """Stable typed contracts; pure algorithms and ownership values live in sibling modules."""
 
+from .changes import net_changes
 from .evaluation import final_text, grade, summarize_variant
 from .models import (
     EFFORT_LEVELS,
@@ -33,6 +34,8 @@ from .models import (
     EvalSummary,
     EvalUpdate,
     EvalVariant,
+    FileChange,
+    FileChanges,
     FolderCreate,
     FolderPickerRequest,
     FolderSelection,
@@ -110,6 +113,7 @@ __all__ = [
     "EvalVariant",
     "VariantSummary",
     "final_text",
+    "net_changes",
     "grade",
     "summarize_variant",
     "WorkspaceSkills",
@@ -130,6 +134,8 @@ __all__ = [
     "AppError",
     "Contract",
     "ErrorInfo",
+    "FileChange",
+    "FileChanges",
     "ErrorEnvelope",
     "Variable",
     "Block",

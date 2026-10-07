@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RunTurn } from './ConversationTurn';
 import type { Run } from '../../api/client';
@@ -30,6 +31,7 @@ const base: Run = {
   unknown_calls: [],
   plan: null,
   active_tool: null,
+  changed_files: [],
 };
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ id, name, args });
 const assistant = (calls: ReturnType<typeof call>[], content = '') => ({
@@ -51,17 +53,19 @@ const result = (id: string, content: unknown) => ({
 
 function renderTurn(run: Run) {
   return render(
-    <RunTurn
-      run={run}
-      index={0}
-      busy={false}
-      selected={false}
-      canFork={false}
-      onInspect={() => undefined}
-      onFork={() => undefined}
-      onApprove={() => undefined}
-      onResume={() => undefined}
-    />,
+    <QueryClientProvider client={new QueryClient()}>
+      <RunTurn
+        run={run}
+        index={0}
+        busy={false}
+        selected={false}
+        canFork={false}
+        onInspect={() => undefined}
+        onFork={() => undefined}
+        onApprove={() => undefined}
+        onResume={() => undefined}
+      />
+    </QueryClientProvider>,
   );
 }
 
@@ -145,5 +149,20 @@ describe('tool steps', () => {
     expect(container.querySelector('.tool-step-target')?.textContent).toBe('a.py');
     expect(container.querySelector('.diff-add')?.textContent).toContain('+x = 2');
     expect(container.querySelector('.diff-remove')?.textContent).toContain('-x = 1');
+  });
+
+  it('lists the files a finished run changed, with undo', () => {
+    renderTurn({ ...base, changed_files: ['README.md', 'notes.txt'] });
+    expect(screen.getByText('Changed 2 files')).toBeTruthy();
+    expect(screen.getByRole('list', { name: 'Changed files' }).textContent).toContain('notes.txt');
+    // Disabled until the current state of each file is known.
+    expect(
+      (screen.getByRole('button', { name: 'Undo file changes' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it('offers no undo while the run is still active', () => {
+    renderTurn({ ...base, status: 'running', changed_files: ['README.md'] });
+    expect(screen.queryByText('Changed 1 file')).toBeNull();
   });
 });

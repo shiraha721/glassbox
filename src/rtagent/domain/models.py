@@ -1106,6 +1106,30 @@ class RunView(Contract):
     unknown_calls: list[dict[str, Any]] = Field(default_factory=list)
     plan: TaskPlan | None = None
     active_tool: dict[str, Any] | None = None
+    # Workspace paths with a net change by this Run's file tools (undo with /files/revert).
+    changed_files: list[str] = Field(default_factory=list)
+
+
+class FileChange(Contract):
+    """One workspace file a Run changed with its file tools, and where that file stands now.
+
+    `as_left`: still as the Run left it, so it can be undone. `reverted`: back to its state
+    before the Run. `changed`: edited since, by a later Run, a command or the user."""
+
+    path: str
+    created: bool
+    deleted: bool
+    state: Literal["as_left", "reverted", "changed"]
+
+
+class FileChanges(Contract):
+    """The files a Run changed with file tools; shell command changes are not tracked."""
+
+    run_id: str
+    files: list[FileChange]
+    # Set by an undo: the paths it restored and those it left alone because they changed.
+    restored: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
 
 
 class ProcessInput(Contract):

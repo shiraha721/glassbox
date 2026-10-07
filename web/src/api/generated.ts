@@ -812,6 +812,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run File Changes
+         * @description List files the Run changed with file tools and whether each can still be undone.
+         */
+        get: operations["run_file_changes_api_v1_runs__run_id__files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/files/revert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revert Run Files
+         * @description Restore files still as the Run left them; files changed since are skipped.
+         */
+        post: operations["revert_run_files_api_v1_runs__run_id__files_revert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/approvals/{approval_id}": {
         parameters: {
             query?: never;
@@ -1727,6 +1767,40 @@ export interface components {
             access: ("read-only" | "ask" | "workspace-write") | null;
         };
         /**
+         * FileChange
+         * @description One workspace file a Run changed with its file tools, and where that file stands now.
+         *
+         *     `as_left`: still as the Run left it, so it can be undone. `reverted`: back to its state
+         *     before the Run. `changed`: edited since, by a later Run, a command or the user.
+         */
+        FileChange: {
+            /** Path */
+            path: string;
+            /** Created */
+            created: boolean;
+            /** Deleted */
+            deleted: boolean;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "as_left" | "reverted" | "changed";
+        };
+        /**
+         * FileChanges
+         * @description The files a Run changed with file tools; shell command changes are not tracked.
+         */
+        FileChanges: {
+            /** Run Id */
+            run_id: string;
+            /** Files */
+            files: components["schemas"]["FileChange"][];
+            /** Restored */
+            restored: string[];
+            /** Skipped */
+            skipped: string[];
+        };
+        /**
          * FolderCreate
          * @description Name a conversation folder without introducing nested paths.
          */
@@ -2517,6 +2591,8 @@ export interface components {
             active_tool: {
                 [key: string]: unknown;
             } | null;
+            /** Changed Files */
+            changed_files: string[];
         };
         /**
          * SandboxStatus
@@ -6138,6 +6214,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    run_file_changes_api_v1_runs__run_id__files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileChanges"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    revert_run_files_api_v1_runs__run_id__files_revert_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileChanges"];
                 };
             };
             /** @description Forbidden */

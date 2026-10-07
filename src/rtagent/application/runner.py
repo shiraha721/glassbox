@@ -474,13 +474,15 @@ class Runner:
                             {"call_id": call_id, "stream": frame["stream"]},
                         )
 
-                    token = current_execution.set(
-                        ToolExecution(run_id, run["session_id"], on_output)
-                    )
+                    execution = ToolExecution(run_id, run["session_id"], on_output)
+                    token = current_execution.set(execution)
                     try:
                         content = await registry.execute(definition, call.args, config)
                     finally:
                         current_execution.reset(token)
+                        # Kept even when the call fails, e.g. a patch that stopped part way.
+                        if execution.changes:
+                            data["file_changes"] = execution.changes
             except GraphInterrupt:
                 raise
             except AppError as exc:

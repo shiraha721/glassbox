@@ -1,6 +1,7 @@
 """SQLite persistence with short transactions and one local writer."""
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from rtagent.domain import (
     SessionUpdate,
     StudioConfig,
     digest,
+    net_changes,
     now,
     uid,
 )
@@ -1141,9 +1143,39 @@ class Repository:
                 .mappings()
                 .all()
             )
+            changes = await self._file_changes(connection, [value["id"] for value in values])
         for value in values:
             value["open_calls"] = [dict(call) for call in pending if call["run_id"] == value["id"]]
+            value["changed_files"] = list(net_changes(changes.get(value["id"], [])))
         return values
+
+    async def file_changes(self, run_id: str) -> list[dict[str, Any]]:
+        """A Run's recorded file tool changes in execution order."""
+        async with self.engine.connect() as connection:
+            return (await self._file_changes(connection, [run_id])).get(run_id, [])
+
+    @staticmethod
+    async def _file_changes(
+        connection: AsyncConnection, run_ids: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Read only the file change lists of the given Runs' tool receipts."""
+        rows = (
+            await connection.execute(
+                select(
+                    calls.c.id,
+                    calls.c.run_id,
+                    func.json_extract(calls.c.data, "$.file_changes").label("changes"),
+                ).where(
+                    calls.c.run_id.in_(run_ids),
+                    calls.c.kind == "tool",
+                    func.json_extract(calls.c.data, "$.file_changes").is_not(None),
+                )
+            )
+        ).all()
+        result: dict[str, list[dict[str, Any]]] = {}
+        for row in sorted(rows, key=lambda item: call_order(item.id)):
+            result.setdefault(row.run_id, []).extend(json.loads(row.changes))
+        return result
 
     async def calls_with_status(self, run_id: str, statuses: list[str]) -> list[dict[str, Any]]:
         """Read the few receipts in the given states, such as executing or uncertain calls."""

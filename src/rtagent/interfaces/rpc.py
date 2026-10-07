@@ -19,6 +19,8 @@ METHODS = {
     "run.cancel": ("POST", "/runs/{run_id}/cancel"),
     "run.approve": ("POST", "/runs/{run_id}/approvals/{approval_id}"),
     "run.resume": ("POST", "/runs/{run_id}/resume"),
+    "run.files": ("GET", "/runs/{run_id}/files"),
+    "run.revert_files": ("POST", "/runs/{run_id}/files/revert"),
     "session.create": ("POST", "/sessions"),
     "session.get": ("GET", "/sessions/{session_id}"),
     "session.copy": ("POST", "/sessions/{session_id}/copy"),

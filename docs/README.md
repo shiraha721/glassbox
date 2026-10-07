@@ -176,6 +176,8 @@ The native tools are: `list_files`, `search_files`, `search_text`, `read_text`, 
 
 File tools take relative paths, reject `..`, links and absolute paths, and never touch credentials (`.env`, `.env.*` except `.env.example`), Git metadata, databases (`.db`, `.sqlite`), the studio's data directory, or dependency folders (`.venv`, `node_modules`, `__pycache__`). Replacing a file requires the hash from the last read, so a concurrent change is detected instead of overwritten. `apply_patch` validates every file before changing any; each file is replaced atomically, but a multi-file patch is not a transaction, and a failure reports which files were already changed.
 
+A turn whose file tools changed files lists them under **Changed N files**. **Undo file changes** puts each file back as it was before that run, including removing files it created and restoring files it deleted, but only while the file is still as the run left it: a file changed since, by a later run, a command or you, is left alone and named. Changes made by shell commands and background processes are not tracked and cannot be undone this way; use Git for those.
+
 ### Commands
 
 | | Linux | Windows |

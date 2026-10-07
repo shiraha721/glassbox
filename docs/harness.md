@@ -80,6 +80,7 @@ Each UTF-8 input line is an ID-bearing JSON-RPC 2.0 request; each output line is
 | `run.wait`, `events.list` | `run_id` plus optional `timeout` (seconds, up to 3600) or `after`; Run or finite event page. |
 | `run.approve` | `run_id`, `approval_id`, `body: {decision: approve or reject}`. |
 | `run.resume` | `run_id`, `body: {resolutions: ...}` using the shared recovery contract. |
+| `run.files`, `run.revert_files` | `run_id`; the files the Run changed with file tools and their state, or the result of undoing them. |
 | `session.create`, `session.get` | Creation `body` (optional title/project), or `session_id`. |
 | `session.copy`, `session.update`, `session.delete` | `session_id` plus the corresponding typed `body` for copy/update; delete has no body. |
 | `context.get`, `context.compact`, `context.restore` | `session_id`; compact/restore include the typed revision-checked `body`. |

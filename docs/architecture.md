@@ -30,8 +30,8 @@ The central idea: **a task becomes an immutable Run snapshot, and everything the
 ```text
 src/rtagent/
   domain/            Values and pure logic: models, prompt compiler, patch parser, permission
-                     decision, lifecycle sets, hook and execution contracts, eval grading.
-                     No I/O.
+                     decision, lifecycle sets, hook and execution contracts, eval grading,
+                     net file changes for undo. No I/O.
   application/       Use cases over concrete adapters:
     studio.py          Submissions, previews, approvals, recovery, projects, packages, context
     runner.py          The LangGraph model/tool loop, budgets, receipts and cancellation
@@ -44,7 +44,8 @@ src/rtagent/
     tools.py           Tool catalog, schemas, dispatch, MCP sessions
     providers/         OpenAI-compatible (chat.py), Anthropic Messages (messages.py),
                        model lists (catalog.py), errors
-    workspace/         File tools, Skills and memory (files.py), downloads, trusted runtimes
+    workspace/         File tools and their undo journal, Skills and memory (files.py),
+                       downloads, trusted runtimes
     sandbox/           linux.py, windows.py, command output/stdin (command_io.py),
                        background processes (processes.py), Windows workspace copies (files.py)
     desktop/           Native folder picker
@@ -172,11 +173,11 @@ Built-in presets are seeded on start. A stored built-in preset is upgraded only 
 | `previews` | Saved compiled inputs, deleted when consumed by a Run or expired. |
 | `runs` | Immutable snapshot plus the live projection (status, messages, partial output, approval, usage). |
 | `events` | Numbered events per Run for SSE replay. |
-| `calls` | Model and tool receipts: intent, prepared and wire bodies, decision, result, attempts. |
+| `calls` | Model and tool receipts: intent, prepared and wire bodies, decision, result, attempts, and for file tools the `file_changes` they made. |
 | `compactions` | Summary jobs with source hash, provider calls and result. |
 | `processes` | Background command records with bounded output. |
 
-Outside the database, the data directory holds `credentials.json` (keys saved from Settings) and `skills/` (global Skills). Both are hidden from file tools and commands like the rest of the data directory.
+Outside the database, the data directory holds `credentials.json` (keys saved from Settings), `skills/` (global Skills) and `file-history/` (earlier versions of files that Runs changed, for undo). All are hidden from file tools and commands like the rest of the data directory.
 
 Rules that keep this consistent:
 
@@ -194,6 +195,8 @@ Rules that keep this consistent:
 2. The frozen permission decides: allow, ask (persist approval, interrupt) or deny (return an error result). For the shell tool, the frozen `command_rules` can replace the tool default (`domain/policies.command_permission`; allow and ask rules only for commands without chaining, pipes, redirects or substitution). Before asking, the runner checks the conversation's grants (`sessions.grants`, added by an `approve_conversation` decision without a revision change, revoked by a revision-checked edit); a matching grant allows the call and is recorded in the receipt as `granted_by`. Grants only turn ask into allow.
 3. An optional trusted `before_tool` guard may add a denial, never grant one.
 4. The tool runs. MCP tools re-list the server's tools first and refuse to call if the schema hash changed; local tools are checked the same way.
+
+**Undo file changes.** While a file tool runs inside a recorded call, `Workspace` journals each change to a workspace file: before replacing or deleting it, it copies the old bytes to `<data dir>/file-history/<sha256>` (content-addressed, so a copy is stored once), and it appends `{path, before, after}` (byte hashes, `null` for absent) to `ToolExecution.changes`. The runner saves that list in the call receipt as `file_changes`, also when the call fails part way. `domain/changes.net_changes` folds a Run's receipts into each path's state before the Run and the state it left; Run views list those paths as `changed_files`. `POST /runs/{id}/files/revert` (Studio `revert_files`, under the command lock, only for an ended Run in an idle conversation) restores a file only if its current bytes still hash to what the Run left, writing the saved copy atomically or removing a file the Run created; any other file is skipped and reported. The result is recorded as a `files.reverted` event. Commands, processes, MCP tools and Skills saved to the global folder are not journaled.
 
 MCP discovery runs when the user saves a server and automatically, once per server configuration, the first time prompts are prepared after a restart. Each MCP call opens a fresh session; servers run outside the sandbox under their own configuration.
 
@@ -262,7 +265,7 @@ All routes live under `/api/v1` (`interfaces/http/api.py`); `/openapi.json` is t
 | Conversations | `POST /sessions`, `GET/PATCH/DELETE /sessions/{id}`, `/copy`, `/runs`, `/context`, `/compact`, `/compactions/{id}`, `/processes` |
 | Folders | `POST /folders`, `PATCH/DELETE /folders/{id}` |
 | Prompts | `POST /prompts/inspect` (unsaved draft), `POST /prompts/preview` (saved, 15 minutes); both accept `model` and `access` |
-| Runs | `POST /runs` (with optional `model` and `access`), `GET /runs/{id}`, `/cancel`, `/approvals/{id}`, `/resume`, `/trace`, `/export`, `/events` (SSE), `/event-log` (pages) |
+| Runs | `POST /runs` (with optional `model` and `access`), `GET /runs/{id}`, `/cancel`, `/approvals/{id}`, `/resume`, `/trace`, `/export`, `/events` (SSE), `/event-log` (pages), `GET /files` and `POST /files/revert` (undo file changes) |
 | Evaluations | `GET/POST /evals`, `GET/PUT/DELETE /evals/{id}`, `GET/POST /evals/{id}/batches` (`?project_id=`), `GET /batches/{id}`, `POST /batches/{id}/cancel` |
 
 Errors share one envelope: `{"error": {"code", "message", "details", "request_id"}}`. Validation errors list field locations without echoing submitted values; unexpected errors log their stack locations under the request ID.

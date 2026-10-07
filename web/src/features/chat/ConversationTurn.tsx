@@ -24,6 +24,7 @@ import {
 import Markdown, { type Components } from 'react-markdown';
 import { Json } from '../../shared/Json';
 import { TaskPlan } from './TaskPlan';
+import { RunFiles } from './RunFiles';
 import { StatusBadge } from '../../shared/StatusBadge';
 import { modelLabel } from '../composer/choices';
 import { terminal, type Run, type ResumeRequest } from '../../api/client';
@@ -253,6 +254,9 @@ export function RunTurn({
             </div>
           )}
           {run.status === 'interrupted' && <Recovery run={run} busy={busy} onResume={onResume} />}
+          {terminal(run.status) && run.changed_files.length > 0 && (
+            <RunFiles run={run} busy={busy} />
+          )}
         </div>
       </div>
     </section>
