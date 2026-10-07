@@ -150,6 +150,12 @@ export function ContextPanel({
                 <small>~{context.effective_estimated_tokens.toLocaleString()} tokens</small>
               </div>
             </div>
+            <p className="subtle" data-testid="conversation-cost">
+              Spent in this conversation: ${context.spent.toFixed(4)}
+              {context.unpriced_runs > 0 &&
+                ` · ${context.unpriced_runs} run${context.unpriced_runs === 1 ? '' : 's'} without a price or reported usage`}
+              .
+            </p>
             <p className="subtle">
               History estimates use bytes, not a tokenizer. Prompt inspection includes instructions
               and tools. Model context:{' '}

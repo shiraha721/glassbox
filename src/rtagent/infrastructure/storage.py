@@ -1132,6 +1132,7 @@ class Repository:
             func.coalesce(func.json_extract(data, "$.attempts"), 1).label("attempts"),
             func.json_extract(data, "$.usage.input_tokens").label("input_tokens"),
             func.json_extract(data, "$.usage.output_tokens").label("output_tokens"),
+            func.json_extract(data, "$.cost").label("cost"),
             func.coalesce(func.json_array_length(data, "$.attempt_history"), 0).label("retries"),
         ).where(calls.c.run_id == run_id, calls.c.kind == kind)
         async with self.engine.connect() as connection:

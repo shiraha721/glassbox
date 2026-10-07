@@ -127,6 +127,11 @@ class Studio:
         effective = await self.repository.effective_history(session)
         config = await self.repository.config()
         usage = await self.repository.latest_model_usage(session_id)
+        costs = [
+            run["usage"].get("cost")
+            for run in await self.repository.list_runs(session_id)
+            if run["status"] in TERMINAL
+        ]
         return ContextView(
             session_id=session_id,
             raw_messages=len(session["messages"]),
@@ -136,6 +141,8 @@ class Studio:
             context_window=config.provider.context_window,
             reserved_output_tokens=config.provider.max_output_tokens,
             live_usage=context_usage(usage, config.provider.model),
+            spent=round(sum(cost for cost in costs if cost is not None), 6),
+            unpriced_runs=sum(1 for cost in costs if cost is None),
             active_compaction_id=session.get("compaction_id"),
             compacting_id=session.get("compacting_id"),
             compactions=[

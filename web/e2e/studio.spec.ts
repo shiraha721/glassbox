@@ -429,8 +429,18 @@ test('providers and models feed the model picker, and keys are write-only', asyn
   await pages.getByRole('button', { name: 'Models', exact: true }).click();
   await settings.getByLabel('Add model to OpenAI-compatible').fill('local-contract-model');
   await settings.getByRole('button', { name: 'Add', exact: true }).click();
+  await settings.getByText('Prices · US$ per million tokens').click();
+  await settings.getByLabel('Input price for local-contract-model').fill('2.5');
+  await settings.getByLabel('Output price for local-contract-model').fill('10');
   await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
   await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  const saved = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
+  expect(saved.providers[0].prices['local-contract-model']).toEqual({
+    input: 2.5,
+    output: 10,
+    cache_read: null,
+    cache_write: null,
+  });
   await settings.getByLabel('Close settings').click();
   // The picker lists the saved model; the live preview compiles with the chosen model.
   await page.getByRole('button', { name: 'Model', exact: true }).click();
@@ -738,6 +748,9 @@ test('conversations start under the workspace and context reports live request u
   await page.getByRole('button', { name: 'Context', exact: true }).click();
   // The simulated provider reports no tokens; the panel says so rather than inventing numbers.
   await expect(page.getByLabel('Conversation context')).toContainText('reported no token usage');
+  await expect(page.getByTestId('conversation-cost')).toHaveText(
+    'Spent in this conversation: $0.0000 · 1 run without a price or reported usage.',
+  );
 
   // A provider that does report usage fills the window bar, cache-hit rate and output metrics.
   await page.route('**/api/v1/sessions/*/context', async (route) => {

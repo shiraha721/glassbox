@@ -1309,6 +1309,16 @@ export interface components {
             /** Reserved Output Tokens */
             reserved_output_tokens: number;
             live_usage: components["schemas"]["ContextUsage"] | null;
+            /**
+             * Spent
+             * @default 0
+             */
+            spent: number;
+            /**
+             * Unpriced Runs
+             * @default 0
+             */
+            unpriced_runs: number;
             /** Active Compaction Id */
             active_compaction_id: string | null;
             /** Compacting Id */
@@ -1564,6 +1574,8 @@ export interface components {
             output_tokens: number | null;
             /** Active Seconds */
             active_seconds: number | null;
+            /** Cost */
+            cost: number | null;
         };
         /**
          * EvalLabel
@@ -1863,6 +1875,40 @@ export interface components {
             models: string[];
         };
         /**
+         * ModelPrice
+         * @description What one model costs, in US dollars per million tokens, as entered by the user.
+         *
+         *     A cost is known only when both input and output prices are set. Unset cache prices fall
+         *     back to the input price, which can only overstate a cost.
+         */
+        "ModelPrice-Input": {
+            /** Input */
+            input?: number | null;
+            /** Output */
+            output?: number | null;
+            /** Cache Read */
+            cache_read?: number | null;
+            /** Cache Write */
+            cache_write?: number | null;
+        };
+        /**
+         * ModelPrice
+         * @description What one model costs, in US dollars per million tokens, as entered by the user.
+         *
+         *     A cost is known only when both input and output prices are set. Unset cache prices fall
+         *     back to the input price, which can only overstate a cost.
+         */
+        "ModelPrice-Output": {
+            /** Input */
+            input: number | null;
+            /** Output */
+            output: number | null;
+            /** Cache Read */
+            cache_read: number | null;
+            /** Cache Write */
+            cache_write: number | null;
+        };
+        /**
          * PlanItem
          * @description One model-authored task step, separate from verified execution outcomes.
          */
@@ -2139,6 +2185,7 @@ export interface components {
             max_output_tokens: number;
             /** Context Window */
             context_window?: number | null;
+            price?: components["schemas"]["ModelPrice-Input"] | null;
         };
         /**
          * ProviderConfig
@@ -2182,6 +2229,7 @@ export interface components {
             max_output_tokens: number;
             /** Context Window */
             context_window: number | null;
+            price: components["schemas"]["ModelPrice-Output"] | null;
         };
         /**
          * ProviderProfile
@@ -2216,6 +2264,10 @@ export interface components {
             max_output_tokens: number;
             /** Context Window */
             context_window?: number | null;
+            /** Prices */
+            prices?: {
+                [key: string]: components["schemas"]["ModelPrice-Input"];
+            };
         };
         /**
          * ProviderProfile
@@ -2250,6 +2302,10 @@ export interface components {
             max_output_tokens: number;
             /** Context Window */
             context_window: number | null;
+            /** Prices */
+            prices: {
+                [key: string]: components["schemas"]["ModelPrice-Output"];
+            };
         };
         /**
          * RecoveryDecision
@@ -2824,6 +2880,8 @@ export interface components {
             avg_output_tokens: number | null;
             /** Avg Active Seconds */
             avg_active_seconds: number | null;
+            /** Avg Cost */
+            avg_cost: number | null;
         };
         /**
          * WorkspaceSkills

@@ -20,6 +20,7 @@ from rtagent.domain import (
     StudioConfig,
     ToolCall,
     ToolDefinition,
+    call_cost,
     digest,
     now,
 )
@@ -304,6 +305,9 @@ class Runner:
                 elif event["kind"] == "result":
                     response = event["message"].model_dump()
                     data["usage"] = event["usage"]
+                    data["cost"] = call_cost(
+                        event["usage"], config.provider.price, config.provider.adapter
+                    )
                     data["response_metadata"] = event.get("metadata", {})
             if response is None:
                 raise AppError("provider_protocol", "No complete response was received.")
@@ -312,11 +316,11 @@ class Runner:
         messages = state["messages"] + [response]
         summaries = await self.repository.call_summaries(run_id, "model")
         usage = dict(run["usage"])
-        for key in ("input_tokens", "output_tokens"):
+        for key in ("input_tokens", "output_tokens", "cost"):
             values = [call[key] for call in summaries]
             # Retried calls may have consumed unreported tokens, so their total is unknown.
             usage[key] = (
-                sum(values)
+                round(sum(values), 6)
                 if values
                 and all(value is not None for value in values)
                 and not any(call["retries"] for call in summaries)

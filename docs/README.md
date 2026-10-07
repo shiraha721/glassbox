@@ -42,7 +42,7 @@ Start-up applies database migrations. Runtime data lives in `STUDIO_DATA_DIR` (d
 The left sidebar's **Settings** holds global configuration; the controls under the message box choose the model and workspace access for each Run.
 
 1. **Settings → Providers** lists the endpoints the studio can call: OpenAI-compatible (streaming Chat Completions with tool calls) and Anthropic Messages. Add one with **Add OpenAI-compatible** or **Add Anthropic**, set its base URL, paste the API key and press **Save key**. A local endpoint without a key works too.
-2. **Settings → Models** lists each provider's models. **Refresh models** asks the provider for its model list (`GET /models`); a model ID can also be added by hand. Each provider also sets temperature, max output tokens and context window. The **Default model** applies to new conversations and to the CLI and API.
+2. **Settings → Models** lists each provider's models. **Refresh models** asks the provider for its model list (`GET /models`); a model ID can also be added by hand. Each provider also sets temperature, max output tokens and context window, and **Prices** takes each model's input, output and cache prices in US dollars per million tokens. The **Default model** applies to new conversations and to the CLI and API.
 3. The **model button** under the message box picks the model for the next Run, sets its **reasoning effort** (Low/Medium/High for OpenAI-compatible models; up to Extra high and Max for Anthropic), refreshes all model lists, or opens **Manage models…**. A conversation reopens with the model and access its last Run used.
 
 Keys are stored on this computer in the data directory (`credentials.json`; on Linux readable only by your account, on Windows protected by the folder's permissions like `.env`) and are never sent back to the browser; Settings shows only where a key comes from and its last four characters. Without a saved key, the server reads the environment variable named under **Key variable name** (for example `OPENAI_API_KEY`), from the process environment or `.env`. **Remove saved key** falls back to that variable.
@@ -95,6 +95,8 @@ While the agent works, its reply streams into the conversation. Each tool call a
 When a tool requires approval, the Run pauses with an **Approve once / Reject** card showing the exact arguments. A rejected call returns an error to the model, which can continue another way. Approvals survive a page refresh or service restart.
 
 **Stop run** cancels the Run and waits for its processes to be cleaned up. It cannot undo files that were already written.
+
+With prices set, each Run's cost appears in **Inspector → Run trace**, **Context** shows what the conversation has spent so far, and evaluations report the average cost per case. A Run keeps the prices it started with; Runs without a price or reported usage are counted, not priced at zero. Compaction requests are not included.
 
 **Notifications** in the sidebar asks the browser for permission and then notifies you when the open conversation's Run needs approval, finishes, fails or is interrupted while the tab is in the background. The setting is kept in this browser only.
 

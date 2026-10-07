@@ -25,5 +25,6 @@ export function newProvider(adapter: 'openai' | 'anthropic', existing: string[])
     models: [],
     temperature: null,
     context_window: null,
+    prices: {},
   };
 }

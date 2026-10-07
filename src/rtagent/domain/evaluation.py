@@ -50,9 +50,9 @@ def summarize_variant(variant_id: str, name: str, items: list[EvalItemResult]) -
     graded = [item for item in mine if item.passed is not None]
     passed = sum(1 for item in graded if item.passed)
 
-    def average(values: list[int | float | None]) -> float | None:
+    def average(values: list[int | float | None], digits: int = 1) -> float | None:
         present = [value for value in values if value is not None]
-        return round(sum(present) / len(present), 1) if present else None
+        return round(sum(present) / len(present), digits) if present else None
 
     return VariantSummary(
         variant_id=variant_id,
@@ -63,4 +63,5 @@ def summarize_variant(variant_id: str, name: str, items: list[EvalItemResult]) -
         avg_input_tokens=average([item.input_tokens for item in graded]),
         avg_output_tokens=average([item.output_tokens for item in graded]),
         avg_active_seconds=average([item.active_seconds for item in graded]),
+        avg_cost=average([item.cost for item in graded], 6),
     )

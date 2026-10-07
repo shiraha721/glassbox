@@ -14,6 +14,73 @@ function optionalNumber(value: string): number | null {
   return value.trim() ? Number(value) : null;
 }
 
+type Price = NonNullable<ProviderProfile['prices']>[string];
+const priceFields = [
+  ['input', 'Input'],
+  ['output', 'Output'],
+  ['cache_read', 'Cache read'],
+  ['cache_write', 'Cache write'],
+] as const;
+
+/** Per-model prices in US dollars per million tokens; an all-empty row removes the price. */
+function PriceTable({
+  profile,
+  onChange,
+}: {
+  profile: ProviderProfile;
+  onChange: (patch: Partial<ProviderProfile>) => void;
+}) {
+  const prices = profile.prices ?? {};
+  const set = (model: string, field: keyof Price, value: string) => {
+    const next: Price = { ...prices[model], [field]: optionalNumber(value) };
+    const rest = Object.fromEntries(Object.entries(prices).filter(([key]) => key !== model));
+    const empty = priceFields.every(([key]) => next[key] === null || next[key] === undefined);
+    onChange({ prices: empty ? rest : { ...rest, [model]: next } });
+  };
+  return (
+    <details className="price-table">
+      <summary>Prices · US$ per million tokens</summary>
+      {profile.models.length ? (
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              {priceFields.map(([, label]) => (
+                <th key={label}>{label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {profile.models.map((model) => (
+              <tr key={model}>
+                <th scope="row">{model}</th>
+                {priceFields.map(([field, label]) => (
+                  <td key={field}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      aria-label={`${label} price for ${model}`}
+                      value={prices[model]?.[field] ?? ''}
+                      onChange={(event) => set(model, field, event.target.value)}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="subtle">Add models first.</p>
+      )}
+      <p className="subtle">
+        Runs are priced when both input and output prices are set. Empty cache prices count as the
+        input price. A Run keeps the prices it started with.
+      </p>
+    </details>
+  );
+}
+
 /** One provider's known models, discovery and request options. */
 function ProviderModels({
   profile,
@@ -90,6 +157,7 @@ function ProviderModels({
           <Plus size={14} /> Add
         </button>
       </div>
+      <PriceTable profile={profile} onChange={onChange} />
       <div className="form-grid thirds">
         <label>
           Temperature

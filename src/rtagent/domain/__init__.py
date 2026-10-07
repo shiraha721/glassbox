@@ -41,6 +41,7 @@ from .models import (
     MemorySave,
     Message,
     ModelChoice,
+    ModelPrice,
     PlanItem,
     Preset,
     PresetPackage,
@@ -78,6 +79,7 @@ from .models import (
     WorkspaceAccess,
     WorkspaceSkills,
     WorkspaceView,
+    call_cost,
     credential_reference,
     digest,
     endpoint_url,
@@ -88,6 +90,8 @@ from .models import (
 )
 
 __all__ = [
+    "ModelPrice",
+    "call_cost",
     "Eval",
     "EvalBatchView",
     "EvalCase",

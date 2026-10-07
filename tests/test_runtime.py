@@ -235,3 +235,30 @@ async def test_attempt_limits_stop_the_loop(studio_client, monkeypatch, limits, 
     run, *_ = await start(client)
     stopped = await wait_state(client, run["id"], {"failed"})
     assert stopped["stop_reason"] == reason
+
+
+async def test_runs_are_priced_from_the_frozen_model_price(studio_client, monkeypatch):
+    """A Run's cost uses the price frozen in its snapshot; the context view sums the conversation."""
+    client, _app = studio_client
+    config = (await client.get("/api/v1/bootstrap")).json()["config"]
+    config["providers"][0]["prices"] = {"gpt-x": {"input": 2, "output": 8, "cache_read": 0.5}}
+    config["provider"] = {**config["provider"], "profile_id": "openai", "adapter": "openai"}
+    config["provider"]["model"] = "gpt-x"
+    assert (await client.put("/api/v1/config", json=config)).status_code == 200
+
+    async def priced_model(_config, _compiled, _tools, _prepared, on_wire, _key=""):
+        await on_wire(None)
+        yield {
+            "kind": "result",
+            "message": Message(role="assistant", content="Done."),
+            # Chat Completions counts the 800 cached tokens inside the 1000 input tokens.
+            "usage": {"input_tokens": 1000, "output_tokens": 500, "cache_read_input_tokens": 800},
+        }
+
+    monkeypatch.setattr("rtagent.application.runner.generate", priced_model)
+    run, _body, session_id, _preview = await start(client)
+    completed = await wait_state(client, run["id"], {"succeeded"})
+    # 200 uncached x $2 + 800 cached x $0.5 + 500 output x $8, per million tokens.
+    assert completed["usage"]["cost"] == 0.0048
+    context = (await client.get(f"/api/v1/sessions/{session_id}/context")).json()
+    assert (context["spent"], context["unpriced_runs"]) == (0.0048, 0)

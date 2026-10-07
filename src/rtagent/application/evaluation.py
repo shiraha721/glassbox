@@ -91,4 +91,5 @@ def graded_item(
         input_tokens=usage.get("input_tokens"),
         output_tokens=usage.get("output_tokens"),
         active_seconds=usage.get("active_seconds"),
+        cost=usage.get("cost"),
     )

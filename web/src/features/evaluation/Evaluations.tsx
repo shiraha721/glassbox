@@ -75,6 +75,10 @@ function percent(rate: number | null | undefined) {
   return rate === null || rate === undefined ? '—' : `${Math.round(rate * 100)}%`;
 }
 
+function dollars(value: number | null | undefined) {
+  return value === null || value === undefined ? '—' : `$${value.toFixed(4)}`;
+}
+
 function amount(value: number | null | undefined, unit = '') {
   return value === null || value === undefined ? '—' : `${value.toLocaleString()}${unit}`;
 }
@@ -538,6 +542,7 @@ export function Evaluations({
                       <th>Avg input tokens</th>
                       <th>Avg output tokens</th>
                       <th>Avg time</th>
+                      <th>Avg cost</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -556,6 +561,7 @@ export function Evaluations({
                         <td>{amount(item.avg_input_tokens)}</td>
                         <td>{amount(item.avg_output_tokens)}</td>
                         <td>{amount(item.avg_active_seconds, 's')}</td>
+                        <td>{dollars(item.avg_cost)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -612,7 +618,8 @@ export function Evaluations({
                     </p>
                     <p className="subtle">
                       {amount(opened.input_tokens)} input · {amount(opened.output_tokens)} output ·{' '}
-                      {amount(opened.active_seconds, 's')} · Run {opened.run_id?.slice(0, 8) ?? '—'}
+                      {amount(opened.active_seconds, 's')} · {dollars(opened.cost)} · Run{' '}
+                      {opened.run_id?.slice(0, 8) ?? '—'}
                     </p>
                     <pre className="context-summary">{opened.output || 'No final reply.'}</pre>
                   </div>

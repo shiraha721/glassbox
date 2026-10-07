@@ -129,6 +129,37 @@ SIMULATED = "simulated"
 SHELL_TOOL = "powershell" if os.name == "nt" else "bash"
 
 
+class ModelPrice(Contract):
+    """What one model costs, in US dollars per million tokens, as entered by the user.
+
+    A cost is known only when both input and output prices are set. Unset cache prices fall
+    back to the input price, which can only overstate a cost."""
+
+    input: float | None = Field(default=None, ge=0, le=10_000)
+    output: float | None = Field(default=None, ge=0, le=10_000)
+    cache_read: float | None = Field(default=None, ge=0, le=10_000)
+    cache_write: float | None = Field(default=None, ge=0, le=10_000)
+
+
+def call_cost(usage: dict[str, Any], price: "ModelPrice | None", adapter: str) -> float | None:
+    """Price one model call from its reported usage, or None when usage or price is unknown.
+
+    The Messages API reports `input_tokens` without the cached part; Chat Completions counts
+    cached tokens inside `input_tokens`, so they are subtracted before pricing the rest."""
+    if price is None or price.input is None or price.output is None:
+        return None
+    inputs, output = usage.get("input_tokens"), usage.get("output_tokens")
+    if inputs is None or output is None:
+        return None
+    read = usage.get("cache_read_input_tokens") or 0
+    write = usage.get("cache_creation_input_tokens") or 0
+    uncached = inputs if adapter == "anthropic" else max(0, inputs - read - write)
+    read_price = price.input if price.cache_read is None else price.cache_read
+    write_price = price.input if price.cache_write is None else price.cache_write
+    total = uncached * price.input + read * read_price + write * write_price + output * price.output
+    return round(total / 1_000_000, 6)
+
+
 class ProviderConfig(Contract):
     """The resolved model endpoint and options a Run uses; credentials are referenced by name.
 
@@ -146,6 +177,8 @@ class ProviderConfig(Contract):
     # Tool calls that write files need room; 2048 truncated ordinary edits mid-argument.
     max_output_tokens: int = Field(default=8192, ge=1, le=128_000)
     context_window: int | None = Field(default=None, ge=256)
+    # Frozen with the Run so its cost stays reproducible after prices are edited.
+    price: ModelPrice | None = None
 
     @field_validator("credential_ref")
     @classmethod
@@ -172,6 +205,8 @@ class ProviderProfile(Contract):
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_output_tokens: int = Field(default=8192, ge=1, le=128_000)
     context_window: int | None = Field(default=None, ge=256)
+    # Per-model prices keyed by model ID; a model without an entry has an unknown cost.
+    prices: dict[str, ModelPrice] = Field(default_factory=dict)
 
     @field_validator("credential_ref")
     @classmethod
@@ -369,6 +404,7 @@ def resolve_model(config: StudioConfig, choice: ModelChoice | None = None) -> Pr
         temperature=profile.temperature,
         max_output_tokens=profile.max_output_tokens,
         context_window=profile.context_window,
+        price=profile.prices.get(model),
     )
 
 
@@ -801,6 +837,9 @@ class ContextView(Contract):
     context_window: int | None
     reserved_output_tokens: int
     live_usage: ContextUsage | None
+    # Sum of priced Runs in US dollars; Runs without a price or usage are counted separately.
+    spent: float = 0
+    unpriced_runs: int = 0
     active_compaction_id: str | None
     compacting_id: str | None
     compactions: list[CompactionView]
@@ -932,6 +971,7 @@ class EvalItemResult(Contract):
     input_tokens: int | None = None
     output_tokens: int | None = None
     active_seconds: float | None = None
+    cost: float | None = None
 
 
 class VariantSummary(Contract):
@@ -945,6 +985,7 @@ class VariantSummary(Contract):
     avg_input_tokens: float | None = None
     avg_output_tokens: float | None = None
     avg_active_seconds: float | None = None
+    avg_cost: float | None = None
 
 
 class EvalBatchView(Contract):

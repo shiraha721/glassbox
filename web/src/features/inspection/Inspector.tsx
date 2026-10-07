@@ -200,6 +200,12 @@ export function Inspector({
                 </div>
                 <div>
                   <strong>
+                    {typeof run.usage.cost === 'number' ? `$${run.usage.cost.toFixed(4)}` : '—'}
+                  </strong>
+                  <span>cost</span>
+                </div>
+                <div>
+                  <strong>
                     {typeof run.usage.active_seconds === 'number'
                       ? run.usage.active_seconds.toFixed(1) + 's'
                       : '—'}
