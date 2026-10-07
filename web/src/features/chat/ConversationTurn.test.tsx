@@ -32,6 +32,7 @@ const base: Run = {
   plan: null,
   active_tool: null,
   changed_files: [],
+  command: null,
 };
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ id, name, args });
 const assistant = (calls: ReturnType<typeof call>[], content = '') => ({
@@ -164,5 +165,16 @@ describe('tool steps', () => {
   it('offers no undo while the run is still active', () => {
     renderTurn({ ...base, status: 'running', changed_files: ['README.md'] });
     expect(screen.queryByText('Changed 1 file')).toBeNull();
+  });
+
+  it('shows a command as typed, with the text it was sent as', () => {
+    renderTurn({
+      ...base,
+      input: 'Review a.py carefully.',
+      command: { name: 'review', arguments: 'a.py', scope: 'project', hash: 'h' },
+    });
+    expect(screen.getByText('/review a.py')).toBeTruthy();
+    expect(screen.getByText('Sent as')).toBeTruthy();
+    expect(screen.getByText('Review a.py carefully.')).toBeTruthy();
   });
 });

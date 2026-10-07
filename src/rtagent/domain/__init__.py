@@ -11,7 +11,9 @@ from .models import (
     AutoCompact,
     Block,
     CallView,
+    CommandInfo,
     CommandRule,
+    CommandUse,
     CompactionView,
     CompactRequest,
     CompiledPrompt,
@@ -97,7 +99,9 @@ from .models import (
 
 __all__ = [
     "AutoCompact",
+    "CommandInfo",
     "CommandRule",
+    "CommandUse",
     "Grant",
     "ModelPrice",
     "call_cost",

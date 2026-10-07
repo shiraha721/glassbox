@@ -1053,14 +1053,19 @@ class Repository:
             await connection.execute(insert(runs).values(**value))
             # The Run now owns the snapshot; runs.preview_id keeps the preview single-use.
             await connection.execute(delete(previews).where(previews.c.id == preview_id))
+            # A command's title is what the user typed, not its expanded template.
+            command = snapshot.get("command")
+            typed = (
+                f"/{command['name']} {command['arguments']}".strip()
+                if command
+                else snapshot["input"]
+            )
             await connection.execute(
                 update(sessions)
                 .where(sessions.c.id == session["id"])
                 .values(
                     active_run_id=value["id"],
-                    title=(
-                        snapshot["input"][:80] if not session["title_locked"] else session["title"]
-                    ),
+                    title=typed[:80] if not session["title_locked"] else session["title"],
                     title_locked=True,
                 )
             )
@@ -1122,6 +1127,7 @@ class Repository:
                 "reasoning_effort"
             ),
             func.json_extract(snapshot, "$.access").label("access"),
+            func.json_extract(snapshot, "$.command").label("command"),
         ).order_by(runs.c.created_at, runs.c.id)
         if run_id is not None:
             query = query.where(runs.c.id == run_id)
@@ -1147,6 +1153,7 @@ class Repository:
         for value in values:
             value["open_calls"] = [dict(call) for call in pending if call["run_id"] == value["id"]]
             value["changed_files"] = list(net_changes(changes.get(value["id"], [])))
+            value["command"] = json.loads(value["command"]) if value["command"] else None
         return values
 
     async def file_changes(self, run_id: str) -> list[dict[str, Any]]:

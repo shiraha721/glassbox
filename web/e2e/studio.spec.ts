@@ -948,3 +948,32 @@ test('a run that wrote a file can undo it from its turn', async ({ page }) => {
     files.getByRole('button', { name: 'Undo file changes', exact: true }),
   ).toBeDisabled();
 });
+
+test('a custom slash command is suggested, expanded and shown as typed', async ({ page }) => {
+  const boot = await (await page.request.get('/api/v1/bootstrap')).json();
+  const folder = path.join(boot.workspace_root, '.agents', 'commands');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(
+    path.join(folder, 'e2e-review.md'),
+    '---\ndescription: Review one file\nargument-hint: <path>\n---\nReview $1 and list risks.\n',
+  );
+  await openWorkspace(page);
+  const task = page.getByLabel('Task', { exact: true });
+  await task.fill('/e2e');
+  const suggestions = page.getByRole('list', { name: 'Commands' });
+  await expect(suggestions).toContainText('Review one file');
+  await task.press('Tab');
+  await expect(task).toHaveValue('/e2e-review ');
+  await task.pressSequentially('README.md');
+  await expect(suggestions).not.toBeAttached();
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  const turn = page.locator('.conversation-turn').last();
+  await expect(turn.locator('.command-invocation')).toHaveText('/e2e-review README.md');
+  await turn.getByText('Sent as', { exact: true }).click();
+  await expect(turn.locator('.command-expansion')).toContainText(
+    'Review README.md and list risks.',
+  );
+  // The simulated model reports the task it received: the expansion, not the typed command.
+  await expect(turn.locator('.agent-activity')).toContainText('Task: Review README.md and');
+});

@@ -15,6 +15,7 @@ from typing import Any
 import yaml
 
 from rtagent.domain import AppError, Message, digest
+from rtagent.domain.commands import COMMAND_NAME, expand_template, parse_invocation
 from rtagent.domain.execution import current_execution
 from rtagent.domain.patches import apply_hunks, parse_patch
 
@@ -22,6 +23,7 @@ FILE_LIMIT = 65_536
 TEXT_FILE_LIMIT = 2 * 1024 * 1024
 MEMORY_PATH = ".rtagent/MEMORY.md"
 SKILL_ROOT = ".agents/skills"
+COMMAND_ROOT = ".agents/commands"
 SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 # Git metadata is private because remote URLs and config can embed credentials.
 PRIVATE_NAMES = {".env", ".git", "access-token"}
@@ -56,6 +58,7 @@ class Workspace:
         self.bundled_skills = Path(__file__).resolve().parents[2] / "skills"
         # User-level skills shared by every project, kept with the studio's own data.
         self.global_skills = data_dir.resolve() / "skills" if data_dir else None
+        self.global_commands = data_dir.resolve() / "commands" if data_dir else None
         self.lock = threading.RLock()
         # Content-addressed copies of files a Run replaced, so its changes can be undone.
         self.history_dir = self.data_dir / "file-history"
@@ -564,6 +567,75 @@ class Workspace:
                 if len(found) + len(errors) > 100:
                     raise AppError("skill_limit", "The workspace supports at most 100 skills.")
         return list(found.values()), errors
+
+    def _command(self, path: Path, name: str, scope: str) -> dict[str, Any]:
+        """Read one command template and its optional description/argument-hint frontmatter."""
+        text = self.read_path(path)
+        normalized = text.replace("\r\n", "\n")
+        frontmatter = re.fullmatch(r"---\n(.*?)\n?---(?:\n([\s\S]*))?", normalized, re.DOTALL)
+        metadata: Any = {}
+        if frontmatter:
+            try:
+                metadata = yaml.safe_load(frontmatter[1]) or {}
+            except yaml.YAMLError as exc:
+                raise AppError("invalid_command", f"Invalid YAML in command {name}.") from exc
+        if not isinstance(metadata, dict):
+            raise AppError("invalid_command", f"Command {name} frontmatter must be a mapping.")
+        template = (frontmatter[2] or "") if frontmatter else normalized
+        if not template.strip():
+            raise AppError("invalid_command", f"Command {name} has an empty template.")
+        return {
+            "name": name,
+            "description": str(metadata.get("description") or "")[:1000],
+            "argument_hint": str(metadata.get("argument-hint") or "")[:200],
+            "scope": scope,
+            "template": template,
+            "hash": digest(text),
+        }
+
+    def commands(self) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Discover custom slash commands; a project command replaces a global one of its name."""
+        found: dict[str, dict[str, Any]] = {}
+        errors: dict[str, str] = {}
+        project = self.root / COMMAND_ROOT
+        sources = [(self.global_commands, "global"), (project, "project")]
+        for root, scope in sources:
+            if root is None or not root.is_dir():
+                continue
+            for file in sorted(root.glob("*.md"))[:100]:
+                name = file.stem
+                if not COMMAND_NAME.fullmatch(name):
+                    errors[file.name] = "Use lowercase letters, digits and single hyphens."
+                    continue
+                try:
+                    path = self.path(f"{COMMAND_ROOT}/{file.name}") if scope == "project" else file
+                    found[name] = self._command(path, name, scope)
+                    errors.pop(name, None)
+                except AppError as exc:
+                    errors[name] = exc.message
+        return sorted(found.values(), key=lambda item: item["name"]), errors
+
+    def expand_command(self, text: str) -> tuple[str, dict[str, Any] | None]:
+        """Replace `/name arguments` with the named template; other input is returned as is.
+
+        Input naming no saved command is left alone, so a literal leading slash still works."""
+        invocation = parse_invocation(text)
+        if invocation is None:
+            return text, None
+        name, arguments = invocation
+        commands, errors = self.commands()
+        command = next((item for item in commands if item["name"] == name), None)
+        if command is None:
+            if name in errors:
+                raise AppError("invalid_command", errors[name])
+            return text, None
+        use = {
+            "name": name,
+            "arguments": arguments,
+            "scope": command["scope"],
+            "hash": command["hash"],
+        }
+        return expand_template(command["template"], arguments), use
 
     def load_skill(self, name: str) -> dict[str, Any]:
         """Resolve an explicitly selected skill and retain its origin and fingerprint."""

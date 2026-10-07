@@ -31,7 +31,7 @@ The central idea: **a task becomes an immutable Run snapshot, and everything the
 src/rtagent/
   domain/            Values and pure logic: models, prompt compiler, patch parser, permission
                      decision, lifecycle sets, hook and execution contracts, eval grading,
-                     net file changes for undo. No I/O.
+                     net file changes for undo, slash command expansion. No I/O.
   application/       Use cases over concrete adapters:
     studio.py          Submissions, previews, approvals, recovery, projects, packages, context
     runner.py          The LangGraph model/tool loop, budgets, receipts and cancellation
@@ -141,6 +141,8 @@ A conversation has at most one active Run. Up to four Runs from different conver
 If the process stops or a call times out while a model or tool call is executing, its outcome is unknown: the request may have reached the provider, the command may have changed files. Such receipts become `outcome_unknown` and the Run becomes `interrupted`. Resuming requires an explicit decision for every uncertain call: retry it, or (for tools) record a verified result. Nothing is retried automatically, and earlier attempts stay in the receipt's `attempt_history`. Stop and shutdown wait for local cleanup but cannot undo completed effects.
 
 ## Prompt compilation
+
+Before compiling, `Studio._prepare` expands a custom slash command: input of the form `/name arguments` whose name matches a template in `.agents/commands/` (project) or `<data dir>/commands/` (global; a project file of the same name wins) becomes the template with `$ARGUMENTS` and `$1`…`$9` filled (`domain/commands.py`). The expansion is the task everywhere after that (inspection, preview, the snapshot's `input`, history); the snapshot also records `command` (`name`, `arguments`, `scope` and the template's hash), which Run views return and the conversation title uses. Input that names no saved command is unchanged.
 
 `domain/prompts.compile_prompt` is pure: identical inputs give identical messages, sources and hash. Message order:
 
@@ -260,7 +262,7 @@ All routes live under `/api/v1` (`interfaces/http/api.py`); `/openapi.json` is t
 | Settings and tools | `PUT /config`, `POST /tools/refresh`, `PUT /presets/{id}`, preset export/import |
 | Models and keys | `POST /providers/models` (list a provider's models), `GET /credentials?name=…` (status only), `PUT/DELETE /credentials/{name}` |
 | Global Skills | `GET /skills`, `GET/DELETE /skills/{name}`, `PUT /skills` |
-| Workspace | `GET /workspace`, `PUT /workspace/memory`, Skill get/save/export/import, all with optional `project_id` |
+| Workspace | `GET /workspace`, `PUT /workspace/memory`, Skill get/save/export/import, `GET /workspace/commands`, all with optional `project_id` |
 | Projects | `POST /projects`, `POST /desktop/folder-picker` |
 | Conversations | `POST /sessions`, `GET/PATCH/DELETE /sessions/{id}`, `/copy`, `/runs`, `/context`, `/compact`, `/compactions/{id}`, `/processes` |
 | Folders | `POST /folders`, `PATCH/DELETE /folders/{id}` |

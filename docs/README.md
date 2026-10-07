@@ -80,6 +80,18 @@ Type a task in the message box and press **Run** or **Ctrl+Enter** (**Cmd+Enter*
 
 Presets change how the agent works, not what it is allowed to do. Mention `$skill-name` in a task to load a Skill (see below).
 
+**Custom commands** are prompts you reuse. Save a Markdown file as `.agents/commands/<name>.md` in the workspace (or in `commands/` in the studio's data directory, for every project) and type `/name arguments` as the task. Typing `/` lists the available commands; **Tab** completes the first match. In the template, `$ARGUMENTS` stands for everything after the name and `$1` to `$9` for single words; arguments given to a template without placeholders are added at the end. Optional frontmatter sets what the list shows:
+
+```markdown
+---
+description: Review one file for bugs
+argument-hint: <path>
+---
+Review $1 for correctness and security. Report each finding with its line.
+```
+
+The turn shows the command as you typed it, with the text actually sent under **Sent as**; editing the file later does not change past Runs. A project command replaces a global one with the same name. Input that names no saved command is sent unchanged.
+
 Beside the preset are the model button (see [Configure a model](#configure-a-model)) and **Workspace access**, which sets what the Run may change:
 
 | Access | Effect |
@@ -94,7 +106,7 @@ While the agent works, its reply streams into the conversation. Each tool call a
 
 When a tool requires approval, the Run pauses with a card showing the exact arguments. **Approve once** covers only that call. **Allow … in this conversation** also lets later matching calls in the same conversation run without asking: for the shell tool it covers commands starting with the same program (for example `pytest`, as single commands only), for other tools every call. Standing approvals are listed under **Tools → Allowed in this conversation**, where **Revoke** removes them; copies of a conversation start without them. **Reject** returns an error to the model, which can continue another way. Approvals survive a page refresh or service restart.
 
-**Stop run** cancels the Run and waits for its processes to be cleaned up. It cannot undo files that were already written.
+**Stop run** cancels the Run and waits for its processes to be cleaned up. It does not undo files that were already written; use **Undo file changes** on the turn (see [File tools](#file-tools)).
 
 With prices set, each Run's cost appears in **Inspector → Run trace**, **Context** shows what the conversation has spent so far, and evaluations report the average cost per case. A Run keeps the prices it started with; Runs without a price or reported usage are counted, not priced at zero. Compaction requests are not included.
 

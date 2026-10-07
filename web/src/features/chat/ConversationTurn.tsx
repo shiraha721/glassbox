@@ -160,7 +160,22 @@ export function RunTurn({
         </span>
         <div className="message-body">
           <span className="message-caption">You</span>
-          <p>{run.input}</p>
+          {run.command ? (
+            <>
+              <p>
+                <code className="command-invocation">
+                  /{run.command.name}
+                  {run.command.arguments ? ` ${run.command.arguments}` : ''}
+                </code>
+              </p>
+              <details className="command-expansion">
+                <summary>Sent as</summary>
+                <p>{run.input}</p>
+              </details>
+            </>
+          ) : (
+            <p>{run.input}</p>
+          )}
         </div>
       </div>
       <div className="agent-activity">

@@ -396,6 +396,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspace/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Commands
+         * @description List custom slash commands from the workspace and the global commands folder.
+         */
+        get: operations["commands_api_v1_workspace_commands_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspace/skills/{name}": {
         parameters: {
             query?: never;
@@ -1269,6 +1289,29 @@ export interface components {
             result: unknown;
         };
         /**
+         * CommandInfo
+         * @description A custom slash command: a Markdown prompt template in the workspace or global folder.
+         */
+        CommandInfo: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Argument Hint
+             * @default
+             */
+            argument_hint: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "project" | "global";
+        };
+        /**
          * CommandRule
          * @description A permission for shell commands that start with a prefix, ahead of the tool default.
          *
@@ -1284,6 +1327,26 @@ export interface components {
              * @enum {string}
              */
             permission: "allow" | "ask" | "deny";
+        };
+        /**
+         * CommandUse
+         * @description What the user typed to invoke a command; the expanded text becomes the Run input.
+         */
+        CommandUse: {
+            /** Name */
+            name: string;
+            /**
+             * Arguments
+             * @default
+             */
+            arguments: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "project" | "global";
+            /** Hash */
+            hash: string;
         };
         /**
          * CompactRequest
@@ -2172,6 +2235,7 @@ export interface components {
             tools: components["schemas"]["ToolDefinition"][];
             /** Transformations */
             transformations: string[];
+            command: components["schemas"]["CommandUse"] | null;
             /** Id */
             id: string;
             /** Expires At */
@@ -2317,6 +2381,7 @@ export interface components {
             tools: components["schemas"]["ToolDefinition"][];
             /** Transformations */
             transformations: string[];
+            command: components["schemas"]["CommandUse"] | null;
         };
         /**
          * ProviderConfig
@@ -2591,6 +2656,7 @@ export interface components {
             active_tool: {
                 [key: string]: unknown;
             } | null;
+            command: components["schemas"]["CommandUse"] | null;
             /** Changed Files */
             changed_files: string[];
         };
@@ -4564,6 +4630,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryDocument"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    commands_api_v1_workspace_commands_get: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommandInfo"][];
                 };
             };
             /** @description Forbidden */

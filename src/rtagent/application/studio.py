@@ -17,6 +17,8 @@ from rtagent.application.evaluation import batch_view, eval_record, eval_summary
 from rtagent.application.runner import Runner
 from rtagent.domain import (
     AppError,
+    CommandInfo,
+    CommandUse,
     CompactionView,
     CompactRequest,
     ContextView,
@@ -479,6 +481,15 @@ class Studio:
         )
         return self.registry.for_workspace(root)
 
+    async def list_commands(self, project_id: str | None = None) -> list[CommandInfo]:
+        """List the custom slash commands available in the selected workspace."""
+        registry = await self.workspace_registry(project_id)
+        found, _errors = await asyncio.to_thread(registry.files.commands)
+        return [
+            CommandInfo.model_validate({key: item[key] for key in CommandInfo.model_fields})
+            for item in found
+        ]
+
     @staticmethod
     def _effective_config(
         config: StudioConfig,
@@ -674,8 +685,12 @@ class Studio:
         variables: dict[str, Any],
         skills: list[str],
         registry: ToolRegistry,
-    ) -> tuple[PromptInspection, list[Message]]:
-        """Share compilation and file capture between live inspection and immutable execution."""
+    ) -> tuple[PromptInspection, list[Message], str]:
+        """Share compilation and file capture between live inspection and immutable execution.
+
+        Returns the inspection, the captured workspace context and the task text, which is the
+        expanded template when the input invokes a custom slash command."""
+        user_input, command = await asyncio.to_thread(registry.files.expand_command, user_input)
         tools = registry.selected(config)
         encoded_tools = [tool.model_dump() for tool in tools]
         # Shell variables also start with $. Only catalogued names are implicit skill mentions;
@@ -703,8 +718,10 @@ class Studio:
                 prepared_request=prepared,
                 tools=tools,
                 transformations=transformations(config.provider.adapter),
+                command=CommandUse.model_validate(command) if command else None,
             ),
             workspace_context,
+            user_input,
         )
 
     async def inspect(self, request: DraftPreviewRequest) -> PromptInspection:
@@ -721,7 +738,7 @@ class Studio:
             history = await self.repository.effective_history(session)
             project_id = session["project_id"]
         registry = await self.workspace_registry(project_id)
-        inspection, _ = await self._prepare(
+        inspection, _, _ = await self._prepare(
             request.preset,
             self._effective_config(config, registry, request.model, request.access),
             history,
@@ -754,7 +771,7 @@ class Studio:
         registry = await self.workspace_registry(session["project_id"])
         history = await self.repository.effective_history(session)
         config = self._effective_config(config, registry, request.model, request.access)
-        inspection, workspace_context = await self._prepare(
+        inspection, workspace_context, task = await self._prepare(
             preset,
             config,
             history,
@@ -774,7 +791,8 @@ class Studio:
             "config": config.model_dump(),
             "history": history,
             "context_compaction_id": session.get("compaction_id"),
-            "input": request.input,
+            "input": task,
+            "command": inspection.command.model_dump() if inspection.command else None,
             "variables": request.variables,
             "tools": [tool.model_dump() for tool in inspection.tools],
             "session_id": session["id"],

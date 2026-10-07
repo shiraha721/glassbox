@@ -13,6 +13,7 @@ from rtagent.domain import (
     EFFORT_LEVELS,
     AppError,
     ApprovalDecision,
+    CommandInfo,
     CompactionView,
     CompactRequest,
     ContextRestore,
@@ -291,6 +292,12 @@ async def save_memory(
 ) -> MemoryDocument:
     """Save explicitly edited project notes."""
     return await request.app.state.studio.save_memory(body, project_id)
+
+
+@router.get("/workspace/commands", response_model=list[CommandInfo])
+async def commands(request: Request, project_id: str | None = None) -> list[CommandInfo]:
+    """List custom slash commands from the workspace and the global commands folder."""
+    return await request.app.state.studio.list_commands(project_id)
 
 
 @router.get("/workspace/skills/{name}", response_model=SkillDocument)

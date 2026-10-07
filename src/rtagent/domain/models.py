@@ -669,6 +669,25 @@ class WorkspaceView(Contract):
     skill_errors: dict[str, str]
 
 
+class CommandInfo(Contract):
+    """A custom slash command: a Markdown prompt template in the workspace or global folder."""
+
+    name: str
+    description: str = ""
+    argument_hint: str = ""
+    scope: Literal["project", "global"]
+
+
+class CommandUse(Contract):
+    """What the user typed to invoke a command; the expanded text becomes the Run input."""
+
+    name: str
+    arguments: str = ""
+    scope: Literal["project", "global"]
+    # Hash of the template file as read, so later edits are distinguishable.
+    hash: str
+
+
 class PromptInspection(Contract):
     """The compiled draft and prepared payload, with no persisted execution identity."""
 
@@ -677,6 +696,8 @@ class PromptInspection(Contract):
     prepared_request: dict[str, Any]
     tools: list[ToolDefinition]
     transformations: list[str] = Field(default_factory=list)
+    # Set when the input invoked a custom slash command; the compiled task is its expansion.
+    command: CommandUse | None = None
 
 
 class Preview(PromptInspection):
@@ -1106,6 +1127,7 @@ class RunView(Contract):
     unknown_calls: list[dict[str, Any]] = Field(default_factory=list)
     plan: TaskPlan | None = None
     active_tool: dict[str, Any] | None = None
+    command: CommandUse | None = None
     # Workspace paths with a net change by this Run's file tools (undo with /files/revert).
     changed_files: list[str] = Field(default_factory=list)
 

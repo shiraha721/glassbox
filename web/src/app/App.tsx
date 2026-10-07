@@ -53,6 +53,8 @@ import { AccessPicker } from '../features/composer/AccessPicker';
 import { useRunChoice } from '../features/composer/useRunChoice';
 import { effectiveConfig } from '../features/composer/choices';
 import type { SettingsPage } from '../features/settings/pages';
+import { matchingCommands, useCommands } from '../features/composer/commands';
+import { CommandSuggestions } from '../features/composer/CommandSuggestions';
 
 type Panel = 'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes';
 
@@ -294,6 +296,8 @@ function Workspace({ data }: { data: Bootstrap }) {
     await refresh();
   };
   const canRun = !busy && !!input.trim() && !active && !session?.compacting_id;
+  const commands = useCommands(projectId, input.startsWith('/'));
+  const commandMatches = matchingCommands(input, commands);
   const togglePanel = (name: Panel) => setPanel(panel === name ? null : name);
   const panelButton = (name: Panel, label: string, icon: React.ReactNode, disabled = false) => (
     <button
@@ -578,10 +582,21 @@ function Workspace({ data }: { data: Bootstrap }) {
                     rows={2}
                     disabled={!!active || busy}
                     onKeyDown={(event) => {
+                      if (event.key === 'Tab' && commandMatches.length) {
+                        event.preventDefault();
+                        setInput(`/${commandMatches[0].name} `);
+                      }
                       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && canRun) {
                         event.preventDefault();
                         void perform(start);
                       }
+                    }}
+                  />
+                  <CommandSuggestions
+                    matches={commandMatches}
+                    onPick={(command) => {
+                      setInput(`/${command.name} `);
+                      document.getElementById('task-input')?.focus();
                     }}
                   />
                   {skills.length > 0 && (
