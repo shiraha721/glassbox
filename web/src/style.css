@@ -921,6 +921,61 @@ summary::-webkit-details-marker {
   margin-bottom: 0;
   border-bottom: 0;
 }
+.compaction-marker {
+  margin: -8px 0 28px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.compaction-marker:last-child {
+  margin-bottom: 0;
+}
+.compaction-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.compaction-line > svg {
+  flex: none;
+  color: var(--accent);
+}
+.compaction-line .text-button {
+  margin-left: auto;
+}
+.compaction-marker p {
+  margin: 6px 0 0;
+}
+.compaction-marker details {
+  margin-top: 6px;
+}
+.compaction-marker summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+.compaction-marker .context-summary {
+  margin: 6px 0 0;
+  background: var(--surface);
+  white-space: pre-wrap;
+}
+.compaction-marker[data-state='inactive'],
+.compaction-marker[data-state='failed'] {
+  border-style: solid;
+  background: transparent;
+  color: var(--muted);
+}
+.compaction-marker[data-state='inactive'] .compaction-line > svg,
+.compaction-marker[data-state='failed'] .compaction-line > svg {
+  color: var(--muted);
+}
+.compaction-marker[data-state='failed'] .compaction-line > svg {
+  color: var(--warning);
+}
+.compaction-marker[data-state='running'] .compaction-line > svg {
+  animation: pulse 1.2s ease-in-out infinite;
+}
 .turn-heading {
   display: flex;
   align-items: center;

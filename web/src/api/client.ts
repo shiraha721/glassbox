@@ -6,6 +6,7 @@ export type Config = components['schemas']['StudioConfig-Output'];
 export type PromptInspection = components['schemas']['PromptInspection'];
 export type SkillInfo = components['schemas']['SkillInfo'];
 export type Run = components['schemas']['RunView'];
+export type ContextView = components['schemas']['ContextView'];
 export type RunRequest = components['schemas']['PreviewRequest'];
 export type Session = components['schemas']['SessionSummary'];
 export type Folder = components['schemas']['FolderView'];

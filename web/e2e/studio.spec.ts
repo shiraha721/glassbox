@@ -69,8 +69,16 @@ test('daily work compacts history, reuses preset packages and controls a native 
   await context.getByRole('button', { name: 'Compact older turns' }).click();
   await expect(context.getByText('Active summary', { exact: true })).toBeVisible();
   await expect(page.locator('.conversation-turn')).toHaveCount(3);
+  // The conversation marks where the summarized history ends: after the second turn.
+  const marker = page.getByRole('region', { name: 'Context compaction' });
+  await expect(marker).toHaveAttribute('data-state', 'active');
+  await expect(marker).toContainText('Manually summarized 4 earlier messages');
+  await expect(
+    page.locator('.conversation-turn').nth(1).locator('+ .compaction-marker'),
+  ).toBeAttached();
   await context.getByRole('button', { name: 'Restore full context' }).click();
   await expect(context.getByText('Active summary', { exact: true })).not.toBeAttached();
+  await expect(marker).toHaveAttribute('data-state', 'inactive');
   await context.getByRole('button', { name: 'Close context' }).click();
   await page.getByRole('button', { name: 'Prompt', exact: true }).click();
   const boot = await (await page.request.get('/api/v1/bootstrap')).json();
@@ -951,8 +959,15 @@ test('automatic compaction summarizes older turns once enabled and can be undone
     );
     await expect(context.getByText('Active summary', { exact: true })).toBeVisible();
     await expect(context.locator('.context-file summary')).toContainText('Automatic · succeeded');
-    // Both turns stay in the conversation; only the history sent to new runs changed.
+    // Both turns stay in the conversation; only the history sent to new runs changed, and
+    // the conversation shows where.
     await expect(page.locator('.conversation-turn')).toHaveCount(2);
+    const marker = page.getByRole('region', { name: 'Context compaction' });
+    await expect(marker).toHaveAttribute('data-state', 'active');
+    await expect(marker).toContainText('Automatically summarized');
+    await expect(
+      page.locator('.conversation-turn').first().locator('+ .compaction-marker'),
+    ).toBeAttached();
     await context.getByRole('button', { name: 'Restore full context' }).click();
     await expect(context.getByText('Active summary', { exact: true })).not.toBeAttached();
     await expect(context.getByRole('alert')).not.toBeAttached();

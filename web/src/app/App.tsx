@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveRestore,
@@ -29,6 +29,7 @@ import {
   workspacePath,
   type Attachment,
   type Bootstrap,
+  type ContextView,
   type Preset,
   type WorkspaceView,
   type Run,
@@ -40,6 +41,8 @@ import { Composer } from '../features/prompts/Composer';
 import { ConversationHistory } from '../features/history/ConversationHistory';
 import { Inspector } from '../features/inspection/Inspector';
 import { RunTurn } from '../features/chat/ConversationTurn';
+import { CompactionMarker } from '../features/chat/CompactionMarker';
+import { compactionsAfter } from '../features/chat/compactions';
 import { Settings } from '../features/settings/Settings';
 import { Evaluations } from '../features/evaluation/Evaluations';
 import { WorkspacePanel } from '../features/workspace/WorkspacePanel';
@@ -144,6 +147,20 @@ function Workspace({ data }: { data: Bootstrap }) {
       query.state.data?.some((run) => !terminal(run.status)) ? 3000 : false,
   });
   const runs = runQuery.data || emptyRuns;
+  // Compactions appear in the conversation where the history they summarize ends.
+  const contextQuery = useQuery({
+    queryKey: ['context', session?.id],
+    enabled: !!session && runs.length > 0,
+    queryFn: () => request<ContextView>(`/sessions/${session!.id}/context`),
+    refetchInterval: (query) => (query.state.data?.compacting_id ? 1000 : false),
+  });
+  const markers = compactionsAfter(runs, contextQuery.data?.compactions ?? []);
+  const compactionState = `${session?.compacting_id ?? ''}:${session?.compaction_id ?? ''}`;
+  const sessionKey = session?.id;
+  useEffect(() => {
+    // A summary that starts, finishes or is restored changes the session first.
+    if (sessionKey) void cache.invalidateQueries({ queryKey: ['context', sessionKey] });
+  }, [compactionState, sessionKey, cache]);
   const [choice, setChoice] = useRunChoice(data, session?.id || '', runs, runQuery.isSuccess);
   // An unset model sends no choice, so the server explains what to configure.
   const runChoice = {
@@ -503,50 +520,59 @@ function Workspace({ data }: { data: Bootstrap }) {
               )}
               {runs.length ? (
                 runs.map((turn, index) => (
-                  <RunTurn
-                    key={turn.id}
-                    run={turn}
-                    index={index}
-                    busy={busy}
-                    selected={turn.id === run?.id && panel === 'inspector'}
-                    canFork={!session?.active_run_id && turn.status === 'succeeded'}
-                    onInspect={() => {
-                      setSelectedRun(turn.id);
-                      setTab('trace');
-                      setPanel('inspector');
-                    }}
-                    onFork={() =>
-                      void perform(async () => {
-                        const forked = await request<Session>(
-                          `/sessions/${session!.id}/copy`,
-                          'POST',
-                          {
-                            expected_revision: session!.revision,
-                            operation: 'fork',
-                            through_run_id: turn.id,
-                          },
-                        );
-                        await refresh();
-                        chooseSession(forked.id);
-                      })
-                    }
-                    onApprove={(decision) =>
-                      void perform(async () => {
-                        await request(
-                          `/runs/${turn.id}/approvals/${String(turn.approval!.id)}`,
-                          'POST',
-                          { decision },
-                        );
-                        await refresh();
-                      })
-                    }
-                    onResume={(resolutions) =>
-                      void perform(async () => {
-                        await request(`/runs/${turn.id}/resume`, 'POST', { resolutions });
-                        await refresh();
-                      })
-                    }
-                  />
+                  <Fragment key={turn.id}>
+                    <RunTurn
+                      run={turn}
+                      index={index}
+                      busy={busy}
+                      selected={turn.id === run?.id && panel === 'inspector'}
+                      canFork={!session?.active_run_id && turn.status === 'succeeded'}
+                      onInspect={() => {
+                        setSelectedRun(turn.id);
+                        setTab('trace');
+                        setPanel('inspector');
+                      }}
+                      onFork={() =>
+                        void perform(async () => {
+                          const forked = await request<Session>(
+                            `/sessions/${session!.id}/copy`,
+                            'POST',
+                            {
+                              expected_revision: session!.revision,
+                              operation: 'fork',
+                              through_run_id: turn.id,
+                            },
+                          );
+                          await refresh();
+                          chooseSession(forked.id);
+                        })
+                      }
+                      onApprove={(decision) =>
+                        void perform(async () => {
+                          await request(
+                            `/runs/${turn.id}/approvals/${String(turn.approval!.id)}`,
+                            'POST',
+                            { decision },
+                          );
+                          await refresh();
+                        })
+                      }
+                      onResume={(resolutions) =>
+                        void perform(async () => {
+                          await request(`/runs/${turn.id}/resume`, 'POST', { resolutions });
+                          await refresh();
+                        })
+                      }
+                    />
+                    {markers.get(turn.id)?.map((item) => (
+                      <CompactionMarker
+                        key={item.id}
+                        item={item}
+                        active={item.id === contextQuery.data?.active_compaction_id}
+                        onOpen={() => setPanel('context')}
+                      />
+                    ))}
+                  </Fragment>
                 ))
               ) : (
                 <div className="conversation-empty">
