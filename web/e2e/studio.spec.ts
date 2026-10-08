@@ -815,37 +815,59 @@ test('conversations start under the workspace and context reports live request u
   await expect(window.locator('.request-readout')).toContainText('Request 1: 30,000 prompt');
 });
 
-test('an evaluation compares prompt variants on the same cases', async ({ page }) => {
+test('an evaluation compares setups on the same tasks', async ({ page }) => {
   page.on('dialog', (dialog) => void dialog.accept());
   await page.goto('/');
   await page.getByRole('button', { name: 'Evaluations', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Evaluations' });
   await dialog.getByLabel('Evaluation name').fill('Browser eval');
-  await dialog.getByLabel('Task').fill('/read README.md');
-  await dialog.getByLabel('Text', { exact: true }).fill('browser test workspace');
-  await dialog.getByRole('button', { name: 'Add case' }).click();
-  await dialog.getByLabel('Task').nth(1).fill('Summarize this project.');
-  await dialog.getByLabel('Text', { exact: true }).nth(1).fill('browser test workspace');
-  await dialog.getByLabel('Workspace access').nth(1).selectOption('read-only');
+  const task = (name: string) => dialog.getByRole('group', { name, exact: true });
+  await task('Task 1').getByRole('textbox', { name: 'Task', exact: true }).fill('/read README.md');
+  await task('Task 1').getByLabel('Expected text').fill('browser test workspace');
+  await dialog.getByRole('button', { name: 'Add task' }).click();
+  await task('Task 2')
+    .getByRole('textbox', { name: 'Task', exact: true })
+    .fill('Summarize this project.');
+  await task('Task 2').getByLabel('Expected text').fill('browser test workspace');
 
-  // Running saves the definition first, then runs every case under every variant.
-  await dialog.getByRole('button', { name: 'Run comparison', exact: true }).click();
+  // A new evaluation starts with two different setups, named after what they run.
+  await dialog.getByRole('tab', { name: /Setups to compare/ }).click();
+  const first = dialog.getByRole('group', { name: 'Setup 1' });
+  const second = dialog.getByRole('group', { name: 'Setup 2' });
+  await second.getByLabel('Workspace access').selectOption('read-only');
+  const firstName = await first.getByLabel('Setup name').inputValue();
+  const secondName = await second.getByLabel('Setup name').inputValue();
+  expect(secondName).toMatch(/ · read only$/);
+  await expect(dialog.locator('.eval-step .notice')).not.toBeAttached();
+  await expect(dialog.locator('.eval-footer')).toContainText('2 tasks × 2 setups = 4 runs');
+
+  // Running saves the definition first, then shows the results as they come in.
+  await dialog.getByRole('button', { name: 'Run 4 runs', exact: true }).click();
+  await expect(dialog.getByRole('tab', { name: /Results/ })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await expect(dialog.getByTestId('batch-status')).toHaveText('succeeded', { timeout: 20_000 });
   await expect(dialog.getByText('4 of 4 runs')).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Case 1 under Variant A: pass' })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Case 2 under Variant B: fail' })).toBeVisible();
-  const summary = dialog.locator('.eval-table').first();
-  await expect(summary.getByRole('row', { name: /Variant A/ })).toContainText('50%');
+  const passed = dialog.getByRole('button', { name: `Task 1 under ${firstName}: Pass` });
+  await expect(passed).toBeVisible();
+  await expect(
+    dialog.getByRole('button', { name: `Task 2 under ${secondName}: Fail` }),
+  ).toBeVisible();
+  const ranking = dialog.getByRole('list', { name: 'Setups by pass rate' });
+  await expect(
+    ranking.getByRole('listitem').filter({ has: page.getByText(firstName, { exact: true }) }),
+  ).toContainText('50%');
 
-  await dialog.getByRole('button', { name: 'Case 1 under Variant A: pass' }).click();
+  await passed.click();
   await expect(dialog.getByLabel('Result detail')).toContainText('browser test workspace');
   await expect(
-    dialog.getByRole('button', { name: /Browser eval.*2 cases · 2 variants · succeeded/ }),
+    dialog.getByRole('button', { name: /Browser eval.*2 tasks · 2 setups · succeeded/ }),
   ).toBeVisible();
 
-  // Eval Runs live in hidden sessions, not in the conversation list.
+  // Evaluation Runs live in hidden sessions, not in the conversation list.
   await dialog.getByRole('button', { name: 'Close evaluations', exact: true }).click();
-  await expect(page.getByLabel('Conversation history')).not.toContainText('Variant A · Case 1');
+  await expect(page.getByLabel('Conversation history')).not.toContainText(`${firstName} · Task 1`);
 });
 
 test('a run that ends while the tab is in the background raises a notification', async ({

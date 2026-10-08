@@ -134,14 +134,15 @@ With prices set, each Run's cost appears in **Inspector → Run trace**, **Conte
 
 ### Evaluate prompts
 
-**Evaluations** (sidebar) compares prompts on the same tasks. An evaluation has:
+**Evaluations** (sidebar) runs the same tasks under different setups and shows which one gets more of them right. The dialog has three steps:
 
-- **Cases:** a task plus the condition that marks it passed: the final reply contains, does not contain, equals or matches a regular expression, or simply that the Run succeeds. Checks are plain text comparisons (with an **Ignore case** option), not a model judge, so the same reply always gets the same verdict.
-- **Variants:** the prompts under comparison. Each picks a preset and can override the model and the workspace access.
+1. **Tasks:** what the agent is asked, and how its final reply is checked: the reply contains, does not contain, is exactly, or matches a pattern (regular expression), with an **Ignore case** option; or it only has to exist (the run finishes). Checks are plain text rules, not a model judge, so the same reply always gets the same verdict.
+2. **Setups to compare:** each setup is a prompt preset, optionally with its own model and workspace access. A new evaluation starts with two setups on different presets. A setup is named after what it runs (for example *Coding · gpt-5 · read only*) until you rename it, and two identical setups are pointed out, since their results could differ only by chance.
+3. **Results:** a ranking of the setups by how many tasks they passed (with average tokens, time and cost per task) and a grid of every task under every setup. Select a result for the reason it passed or failed, the final reply and a link to its recorded trace.
 
-**Run comparison** saves the evaluation and runs every case once under every variant, one after another, in the selected workspace. Each run is an ordinary Run with its own snapshot and trace, kept in a hidden session so it does not appear among your conversations. The results show each variant's pass rate, its average input and output tokens and active time, and a case × variant grid; select a cell to see its verdict, reason and final reply. Earlier comparisons stay available from the selector beside **Results**.
+The footer says how many runs the evaluation makes (tasks × setups); **Run N runs** saves the evaluation and starts them one after another in the selected workspace, switching to Results to follow them. Each is an ordinary Run with its own snapshot and trace, kept in a hidden conversation so it does not appear among yours. Earlier comparisons stay available from the selector in Results.
 
-Comparison runs are unattended. A Run that stops for approval is cancelled and counts as failed, so variants offer only **Read only** or **Workspace write** access. Runs use the selected models and may cost money; **Stop comparison** cancels the remaining runs and keeps the finished ones. Deleting an evaluation also deletes its runs. Case input variables can be set through the API (`variables` on a case) but not yet in the dialog.
+Comparison runs are unattended. A Run that stops for approval is cancelled and counts as failed, so setups offer only **Read only** or **Workspace write** access. Runs use the selected models and may cost money; **Stop** cancels the remaining runs and keeps the finished ones. Deleting an evaluation also deletes its runs. Task input variables can be set through the API (`variables` on a case) but not yet in the dialog.
 
 ### Manage conversations
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FlaskConical, Play, Plus, Square, Trash2, X } from 'lucide-react';
+import { AlertTriangle, FlaskConical, Play, Plus, Square, Trash2, X } from 'lucide-react';
 import {
   errorMessage,
   request,
@@ -14,77 +14,28 @@ import {
 } from '../../api/client';
 import { StatusBadge } from '../../shared/StatusBadge';
 import { useDialogFocus } from '../../shared/useDialogFocus';
+import { EvalResults } from './EvalResults';
+import {
+  blank,
+  checkKinds,
+  fromEval,
+  identicalSetups,
+  isRenamed,
+  namedSetup,
+  newCase,
+  newSetup,
+  problems,
+  uniqueName,
+  type Draft,
+} from './draft';
 
-type Draft = {
-  id: string | null;
-  revision: number;
-  name: string;
-  cases: EvalCase[];
-  variants: EvalVariant[];
-};
+type Tab = 'tasks' | 'setups' | 'results';
 
-const checkKinds: { value: EvalCheck['kind']; label: string }[] = [
-  { value: 'contains', label: 'Output contains' },
-  { value: 'not_contains', label: 'Output does not contain' },
-  { value: 'equals', label: 'Output equals' },
-  { value: 'regex', label: 'Output matches regex' },
-  { value: 'succeeds', label: 'Run succeeds' },
-];
-
-function newCase(index: number): EvalCase {
-  return {
-    id: crypto.randomUUID(),
-    name: `Case ${index}`,
-    input: '',
-    variables: {},
-    check: { kind: 'contains', value: '', ignore_case: true },
-  };
-}
-
-function newVariant(index: number, presetId: string): EvalVariant {
-  return {
-    id: crypto.randomUUID(),
-    name: `Variant ${String.fromCharCode(64 + index)}`,
-    preset_id: presetId,
-    model: null,
-    access: null,
-  };
-}
-
-function blank(presetId: string): Draft {
-  return {
-    id: null,
-    revision: 0,
-    name: '',
-    cases: [newCase(1)],
-    variants: [newVariant(1, presetId), newVariant(2, presetId)],
-  };
-}
-
-function fromEval(value: Eval): Draft {
-  return {
-    id: value.id,
-    revision: value.revision,
-    name: value.name,
-    cases: value.cases,
-    variants: value.variants,
-  };
-}
-
-function percent(rate: number | null | undefined) {
-  return rate === null || rate === undefined ? '—' : `${Math.round(rate * 100)}%`;
-}
-
-function dollars(value: number | null | undefined) {
-  return value === null || value === undefined ? '—' : `$${value.toFixed(4)}`;
-}
-
-function amount(value: number | null | undefined, unit = '') {
-  return value === null || value === undefined ? '—' : `${value.toLocaleString()}${unit}`;
-}
-
-/** Compare prompts on the same tasks: each case runs under each variant as an ordinary Run,
- * is graded from its final text, and every variant gets a pass rate and average cost. */
+/** Compare ways of running the agent on the same tasks.
+ *
+ * Tasks are what to ask and how to check the final reply; setups are the presets, models or
+ * access to compare. Each task runs once under each setup as an ordinary Run in a hidden
+ * conversation, and Results ranks the setups by how many tasks they passed. */
 export function Evaluations({
   data,
   projectId,
@@ -96,16 +47,19 @@ export function Evaluations({
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
-  const defaultPreset = data.presets[0]?.id ?? '';
-  const [draft, setDraft] = useState<Draft>(() => blank(defaultPreset));
-  const [baseline, setBaseline] = useState(() => JSON.stringify(blank(defaultPreset)));
+  const [draft, setDraft] = useState<Draft>(() => blank(data));
+  const [baseline, setBaseline] = useState(() => JSON.stringify(draft));
+  const [tab, setTab] = useState<Tab>('tasks');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [batchId, setBatchId] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  // Setups the user named themselves; the others follow their preset, model and access.
+  const [renamed, setRenamed] = useState<Set<string>>(() => new Set());
   const dialogRef = useRef<HTMLElement>(null);
   const dirty = JSON.stringify(draft) !== baseline;
   const project = data.projects.find((item) => item.id === projectId);
+  const workspace = project?.name || 'the default workspace';
 
   const close = () => {
     if (busy) return;
@@ -141,19 +95,21 @@ export function Evaluations({
       setBusy(false);
     }
   };
-  const load = (value: Draft) => {
+  const load = (value: Draft, view: Tab = 'tasks') => {
     setDraft(value);
     setBaseline(JSON.stringify(value));
+    setRenamed(new Set(value.variants.filter((item) => isRenamed(item, data)).map((v) => v.id)));
     setBatchId(null);
     setOpen(null);
+    setTab(view);
   };
   const select = (id: string | null) => {
     if (dirty && !window.confirm('Discard unsaved evaluation changes?')) return;
-    if (!id) {
-      load(blank(defaultPreset));
-      return;
-    }
-    void perform(async () => load(fromEval(await request<Eval>(`/evals/${id}`))));
+    if (!id) return load(blank(data));
+    const ran = !!data.evals.find((item) => item.id === id)?.last_batch_id;
+    void perform(async () =>
+      load(fromEval(await request<Eval>(`/evals/${id}`)), ran ? 'results' : 'tasks'),
+    );
   };
   const save = async (): Promise<string> => {
     const body = { name: draft.name, cases: draft.cases, variants: draft.variants };
@@ -163,15 +119,22 @@ export function Evaluations({
           expected_revision: draft.revision,
         })
       : await request<Eval>('/evals', 'POST', body);
-    load(fromEval(saved));
+    load(fromEval(saved), tab);
     await onChanged();
     return saved.id;
   };
   const run = async () => {
+    const missing = problems(draft);
+    if (missing.length) {
+      setTab('tasks');
+      throw new Error(missing[0]);
+    }
     const id = dirty || !draft.id ? await save() : draft.id;
     const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
     const started = await request<EvalBatch>(`/evals/${id}/batches${query}`, 'POST');
     setBatchId(started.id);
+    setOpen(null);
+    setTab('results');
     await batches.refetch();
   };
 
@@ -184,11 +147,16 @@ export function Evaluations({
     const current = draft.cases[index].check ?? { kind: 'contains', value: '', ignore_case: true };
     updateCase(index, { check: { ...current, ...change } });
   };
-  const updateVariant = (index: number, change: Partial<EvalVariant>) =>
-    setDraft({
-      ...draft,
-      variants: draft.variants.map((item, i) => (i === index ? { ...item, ...change } : item)),
+  const updateSetup = (index: number, change: Partial<EvalVariant>) => {
+    const variants = draft.variants.map((item, i) => {
+      if (i !== index) return item;
+      const next = { ...item, ...change };
+      return renamed.has(item.id) || 'name' in change
+        ? next
+        : namedSetup(next, draft.variants, data);
     });
+    setDraft({ ...draft, variants });
+  };
 
   const models = [
     { value: JSON.stringify([SIMULATED, 'simulated']), label: 'Simulated model' },
@@ -199,12 +167,8 @@ export function Evaluations({
       })),
     ),
   ];
-  const result = (caseId: string, variantId: string) =>
-    batch?.items.find((item) => item.case_id === caseId && item.variant_id === variantId);
-  const best = Math.max(...(batch?.variants.map((item) => item.pass_rate ?? -1) ?? [-1]));
-  const opened = open
-    ? batch?.items.find((item) => `${item.case_id}:${item.variant_id}` === open)
-    : undefined;
+  const duplicates = identicalSetups(draft.variants);
+  const runs = draft.cases.length * draft.variants.length;
 
   return (
     <div
@@ -248,386 +212,355 @@ export function Evaluations({
               >
                 <span>{item.name}</span>
                 <small>
-                  {item.case_count} cases · {item.variant_count} variants
+                  {item.case_count} task{item.case_count === 1 ? '' : 's'} · {item.variant_count}{' '}
+                  setup{item.variant_count === 1 ? '' : 's'}
                   {item.last_status ? ` · ${item.last_status}` : ''}
                 </small>
               </button>
             ))}
           </nav>
-          <div className="settings-content">
-            <h3 className="settings-page-title">{draft.id ? draft.name : 'New evaluation'}</h3>
-            <p className="page-intro">
-              Each case runs once under each variant as an ordinary Run in{' '}
-              <strong>{project?.name || 'the default workspace'}</strong>, then is graded from its
-              final reply. Runs are unattended: one that waits for approval is stopped and counts as
-              failed. Results use your configured models and may cost money.
-            </p>
-            {error && (
-              <p className="error-text" role="alert">
-                {error}
-              </p>
-            )}
-            <fieldset disabled={busy || running}>
-              <label>
-                Evaluation name
-                <input
-                  value={draft.name}
-                  maxLength={80}
-                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                />
-              </label>
-              <h4 className="eval-section-title">Cases</h4>
-              {draft.cases.map((item, index) => (
-                <div className="settings-card eval-card" key={item.id}>
-                  <div className="row">
-                    <label>
-                      Case name
-                      <input
-                        value={item.name}
-                        maxLength={120}
-                        onChange={(event) => updateCase(index, { name: event.target.value })}
-                      />
-                    </label>
-                    <button
-                      className="icon-button"
-                      aria-label={`Remove case ${item.name}`}
-                      disabled={draft.cases.length === 1}
-                      onClick={() =>
-                        setDraft({ ...draft, cases: draft.cases.filter((_, i) => i !== index) })
-                      }
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                  <label>
-                    Task
-                    <textarea
-                      rows={2}
-                      value={item.input}
-                      onChange={(event) => updateCase(index, { input: event.target.value })}
-                    />
-                  </label>
-                  <div className="row">
-                    <label>
-                      Passes when
-                      <select
-                        value={item.check?.kind ?? 'contains'}
-                        onChange={(event) =>
-                          updateCheck(index, { kind: event.target.value as EvalCheck['kind'] })
-                        }
-                      >
-                        {checkKinds.map((kind) => (
-                          <option key={kind.value} value={kind.value}>
-                            {kind.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {item.check?.kind !== 'succeeds' && (
-                      <label>
-                        {item.check?.kind === 'regex' ? 'Pattern' : 'Text'}
-                        <input
-                          value={item.check?.value ?? ''}
-                          onChange={(event) => updateCheck(index, { value: event.target.value })}
-                        />
-                      </label>
-                    )}
-                  </div>
-                  {item.check?.kind !== 'succeeds' && (
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={item.check?.ignore_case ?? true}
-                        onChange={(event) =>
-                          updateCheck(index, { ignore_case: event.target.checked })
-                        }
-                      />
-                      Ignore case
-                    </label>
-                  )}
-                </div>
-              ))}
-              <button
-                className="text-button"
-                onClick={() =>
-                  setDraft({ ...draft, cases: [...draft.cases, newCase(draft.cases.length + 1)] })
-                }
-              >
-                <Plus size={14} /> Add case
-              </button>
-              <h4 className="eval-section-title">Variants</h4>
-              {draft.variants.map((item, index) => (
-                <div className="settings-card eval-card" key={item.id}>
-                  <div className="row">
-                    <label>
-                      Variant name
-                      <input
-                        value={item.name}
-                        maxLength={120}
-                        onChange={(event) => updateVariant(index, { name: event.target.value })}
-                      />
-                    </label>
-                    <button
-                      className="icon-button"
-                      aria-label={`Remove variant ${item.name}`}
-                      disabled={draft.variants.length === 1}
-                      onClick={() =>
-                        setDraft({
-                          ...draft,
-                          variants: draft.variants.filter((_, i) => i !== index),
-                        })
-                      }
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                  <div className="row">
-                    <label>
-                      Prompt preset
-                      <select
-                        value={item.preset_id}
-                        onChange={(event) =>
-                          updateVariant(index, { preset_id: event.target.value })
-                        }
-                      >
-                        {data.presets.map((preset) => (
-                          <option key={preset.id} value={preset.id}>
-                            {preset.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Model
-                      <select
-                        value={
-                          item.model
-                            ? JSON.stringify([item.model.provider_id, item.model.model])
-                            : ''
-                        }
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          if (!value) return updateVariant(index, { model: null });
-                          const [provider_id, model] = JSON.parse(value) as [string, string];
-                          updateVariant(index, {
-                            model: { provider_id, model, reasoning_effort: null },
-                          });
-                        }}
-                      >
-                        <option value="">Default model</option>
-                        {models.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Workspace access
-                      <select
-                        value={item.access ?? ''}
-                        onChange={(event) =>
-                          updateVariant(index, {
-                            access: (event.target.value || null) as EvalVariant['access'],
-                          })
-                        }
-                      >
-                        <option value="">Default</option>
-                        <option value="read-only">Read only</option>
-                        <option value="workspace-write">Workspace write</option>
-                      </select>
-                    </label>
-                  </div>
-                </div>
-              ))}
-              <button
-                className="text-button"
-                disabled={draft.variants.length >= 10}
-                onClick={() =>
-                  setDraft({
-                    ...draft,
-                    variants: [
-                      ...draft.variants,
-                      newVariant(draft.variants.length + 1, defaultPreset),
-                    ],
-                  })
-                }
-              >
-                <Plus size={14} /> Add variant
-              </button>
-            </fieldset>
-            <div className="dialog-actions eval-actions">
+          <div className="settings-content eval-content">
+            <div className="eval-title">
+              <input
+                aria-label="Evaluation name"
+                value={draft.name}
+                maxLength={80}
+                disabled={busy || running}
+                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              />
               {draft.id && (
                 <button
-                  className="button danger"
+                  className="icon-button"
+                  aria-label="Delete evaluation"
+                  title="Delete this evaluation and its results"
                   disabled={busy || running}
                   onClick={() => {
                     if (!window.confirm(`Delete ${draft.name} and its results?`)) return;
                     void perform(async () => {
                       await request(`/evals/${draft.id}`, 'DELETE');
-                      load(blank(defaultPreset));
+                      load(blank(data));
                       await onChanged();
                     });
                   }}
                 >
-                  <Trash2 size={14} /> Delete
-                </button>
-              )}
-              <button
-                className="button"
-                disabled={busy || running || (!dirty && !!draft.id)}
-                onClick={() => void perform(async () => void (await save()))}
-              >
-                Save
-              </button>
-              {running ? (
-                <button
-                  className="button danger"
-                  disabled={busy}
-                  onClick={() =>
-                    void perform(async () => {
-                      await request(`/batches/${batch!.id}/cancel`, 'POST');
-                      await batches.refetch();
-                    })
-                  }
-                >
-                  <Square size={13} /> Stop comparison
-                </button>
-              ) : (
-                <button
-                  className="button primary"
-                  disabled={busy}
-                  onClick={() => void perform(run)}
-                >
-                  <Play size={13} /> Run comparison
+                  <Trash2 size={15} />
                 </button>
               )}
             </div>
-            {batch && (
-              <section className="eval-results" aria-label="Comparison results">
-                <div className="row">
-                  <h4 className="eval-section-title">Results</h4>
-                  <StatusBadge status={batch.status} testId="batch-status" />
-                  <span className="subtle">
-                    {batch.completed} of {batch.total} runs ·{' '}
-                    {new Date(batch.created_at).toLocaleString()}
-                  </span>
-                  {(batches.data?.length ?? 0) > 1 && (
-                    <select
-                      aria-label="Comparison"
-                      value={batch.id}
-                      onChange={(event) => {
-                        setBatchId(event.target.value);
-                        setOpen(null);
-                      }}
-                    >
-                      {batches.data!.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {new Date(item.created_at).toLocaleString()} · {item.status}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                {batch.error && (
-                  <p className="error-text" role="alert">
-                    {batch.error}
-                  </p>
-                )}
-                <table className="eval-table">
-                  <thead>
-                    <tr>
-                      <th>Variant</th>
-                      <th>Pass rate</th>
-                      <th>Avg input tokens</th>
-                      <th>Avg output tokens</th>
-                      <th>Avg time</th>
-                      <th>Avg cost</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {batch.variants.map((item) => (
-                      <tr
-                        key={item.variant_id}
-                        data-best={(item.pass_rate === best && best >= 0) || undefined}
-                      >
-                        <th scope="row">{item.name}</th>
-                        <td>
-                          {percent(item.pass_rate)}{' '}
-                          <span className="subtle">
-                            ({item.passed}/{item.graded})
-                          </span>
-                        </td>
-                        <td>{amount(item.avg_input_tokens)}</td>
-                        <td>{amount(item.avg_output_tokens)}</td>
-                        <td>{amount(item.avg_active_seconds, 's')}</td>
-                        <td>{dollars(item.avg_cost)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <table className="eval-table eval-matrix">
-                  <thead>
-                    <tr>
-                      <th>Case</th>
-                      {batch.variants.map((item) => (
-                        <th key={item.variant_id}>{item.name}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {batch.cases.map((label) => (
-                      <tr key={label.id}>
-                        <th scope="row">{label.name}</th>
-                        {batch.variants.map((variant) => {
-                          const cell = result(label.id, variant.variant_id);
-                          const key = `${label.id}:${variant.variant_id}`;
-                          const verdict =
-                            cell?.passed === true
-                              ? 'pass'
-                              : cell?.passed === false
-                                ? 'fail'
-                                : 'pending';
-                          return (
-                            <td key={key}>
-                              <button
-                                className="eval-cell"
-                                data-result={verdict}
-                                aria-pressed={open === key}
-                                aria-label={`${label.name} under ${variant.name}: ${verdict}`}
-                                disabled={!cell || verdict === 'pending'}
-                                onClick={() => setOpen(open === key ? null : key)}
-                              >
-                                {verdict === 'pass'
-                                  ? 'Pass'
-                                  : verdict === 'fail'
-                                    ? 'Fail'
-                                    : (cell?.status ?? 'pending')}
-                              </button>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {opened && (
-                  <div className="settings-card eval-detail" aria-label="Result detail">
-                    <p>
-                      <StatusBadge status={opened.status} /> {opened.detail}
-                    </p>
-                    <p className="subtle">
-                      {amount(opened.input_tokens)} input · {amount(opened.output_tokens)} output ·{' '}
-                      {amount(opened.active_seconds, 's')} · {dollars(opened.cost)} · Run{' '}
-                      {opened.run_id?.slice(0, 8) ?? '—'}
-                    </p>
-                    <pre className="context-summary">{opened.output || 'No final reply.'}</pre>
-                  </div>
-                )}
-              </section>
+            <p className="page-intro">
+              Run the same tasks with different presets, models or access, and see which setup gets
+              more of them right. Every reply is checked by plain text rules, so a result never
+              depends on another model&apos;s judgment.
+            </p>
+            <div className="tabs eval-tabs" role="tablist" aria-label="Evaluation steps">
+              <button role="tab" aria-selected={tab === 'tasks'} onClick={() => setTab('tasks')}>
+                1 · Tasks <span className="count">{draft.cases.length}</span>
+              </button>
+              <button role="tab" aria-selected={tab === 'setups'} onClick={() => setTab('setups')}>
+                2 · Setups to compare <span className="count">{draft.variants.length}</span>
+              </button>
+              <button
+                role="tab"
+                aria-selected={tab === 'results'}
+                onClick={() => setTab('results')}
+              >
+                3 · Results {batch && <StatusBadge status={batch.status} />}
+              </button>
+            </div>
+            {error && (
+              <p className="error-text" role="alert">
+                {error}
+              </p>
             )}
+
+            {tab === 'tasks' && (
+              <fieldset disabled={busy || running} className="eval-step">
+                <p className="subtle">
+                  Each task starts a new conversation in <strong>{workspace}</strong>. When the run
+                  ends, its final reply is checked.
+                </p>
+                {draft.cases.map((item, index) => (
+                  <div
+                    className="settings-card eval-card"
+                    key={item.id}
+                    role="group"
+                    aria-label={item.name}
+                  >
+                    <div className="eval-card-head">
+                      <input
+                        className="eval-inline-name"
+                        aria-label="Task name"
+                        value={item.name}
+                        maxLength={120}
+                        onChange={(event) => updateCase(index, { name: event.target.value })}
+                      />
+                      <button
+                        className="icon-button"
+                        aria-label={`Remove ${item.name}`}
+                        disabled={draft.cases.length === 1}
+                        onClick={() =>
+                          setDraft({ ...draft, cases: draft.cases.filter((_, i) => i !== index) })
+                        }
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    <label>
+                      Task
+                      <textarea
+                        rows={2}
+                        value={item.input}
+                        placeholder="What the agent is asked, for example: Which file starts the server? Answer with its path."
+                        onChange={(event) => updateCase(index, { input: event.target.value })}
+                      />
+                    </label>
+                    <div className="eval-check">
+                      <label>
+                        The reply passes if it
+                        <select
+                          value={item.check?.kind ?? 'contains'}
+                          onChange={(event) =>
+                            updateCheck(index, { kind: event.target.value as EvalCheck['kind'] })
+                          }
+                        >
+                          {checkKinds.map((kind) => (
+                            <option key={kind.value} value={kind.value}>
+                              {kind.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {item.check?.kind !== 'succeeds' && (
+                        <label>
+                          {item.check?.kind === 'regex' ? 'Pattern' : 'Expected text'}
+                          <input
+                            value={item.check?.value ?? ''}
+                            placeholder={
+                              item.check?.kind === 'regex' ? 'server\\.(py|ts)' : 'server.py'
+                            }
+                            onChange={(event) => updateCheck(index, { value: event.target.value })}
+                          />
+                        </label>
+                      )}
+                      {item.check?.kind !== 'succeeds' && (
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={item.check?.ignore_case ?? true}
+                            onChange={(event) =>
+                              updateCheck(index, { ignore_case: event.target.checked })
+                            }
+                          />
+                          Ignore case
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                <button
+                  className="text-button"
+                  disabled={draft.cases.length >= 50}
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      cases: [
+                        ...draft.cases,
+                        {
+                          ...newCase(draft.cases.length + 1),
+                          name: uniqueName(
+                            `Task ${draft.cases.length + 1}`,
+                            draft.cases.map((item) => item.name),
+                          ),
+                        },
+                      ],
+                    })
+                  }
+                >
+                  <Plus size={14} /> Add task
+                </button>
+              </fieldset>
+            )}
+
+            {tab === 'setups' && (
+              <fieldset disabled={busy || running} className="eval-step">
+                <p className="subtle">
+                  A setup is one way of running the tasks: a prompt preset, and optionally its own
+                  model or workspace access. Without them it uses the default model and sandbox
+                  mode. Runs are unattended, so a run that would wait for approval is stopped and
+                  fails.
+                </p>
+                {duplicates.map(([first, second]) => (
+                  <p className="notice" key={`${first}-${second}`}>
+                    <AlertTriangle size={14} /> {draft.variants[first].name} and{' '}
+                    {draft.variants[second].name} are the same; their results can differ only by
+                    chance. Change the preset, model or access of one.
+                  </p>
+                ))}
+                <div className="eval-setups">
+                  {draft.variants.map((item, index) => (
+                    <div
+                      className="settings-card eval-card"
+                      key={item.id}
+                      role="group"
+                      aria-label={`Setup ${index + 1}`}
+                    >
+                      <div className="eval-card-head">
+                        <input
+                          className="eval-inline-name"
+                          aria-label="Setup name"
+                          value={item.name}
+                          maxLength={120}
+                          onChange={(event) => {
+                            setRenamed(new Set(renamed).add(item.id));
+                            updateSetup(index, { name: event.target.value });
+                          }}
+                        />
+                        <button
+                          className="icon-button"
+                          aria-label={`Remove ${item.name}`}
+                          disabled={draft.variants.length === 1}
+                          onClick={() =>
+                            setDraft({
+                              ...draft,
+                              variants: draft.variants.filter((_, i) => i !== index),
+                            })
+                          }
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                      <label>
+                        Prompt preset
+                        <select
+                          value={item.preset_id}
+                          onChange={(event) =>
+                            updateSetup(index, { preset_id: event.target.value })
+                          }
+                        >
+                          {data.presets.map((preset) => (
+                            <option key={preset.id} value={preset.id}>
+                              {preset.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Model
+                        <select
+                          value={
+                            item.model
+                              ? JSON.stringify([item.model.provider_id, item.model.model])
+                              : ''
+                          }
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (!value) return updateSetup(index, { model: null });
+                            const [provider_id, model] = JSON.parse(value) as [string, string];
+                            updateSetup(index, {
+                              model: { provider_id, model, reasoning_effort: null },
+                            });
+                          }}
+                        >
+                          <option value="">Default model</option>
+                          {models.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Workspace access
+                        <select
+                          value={item.access ?? ''}
+                          onChange={(event) =>
+                            updateSetup(index, {
+                              access: (event.target.value || null) as EvalVariant['access'],
+                            })
+                          }
+                        >
+                          <option value="">Default</option>
+                          <option value="read-only">Read only</option>
+                          <option value="workspace-write">Workspace write</option>
+                        </select>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="text-button"
+                  disabled={draft.variants.length >= 10}
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      variants: [
+                        ...draft.variants,
+                        newSetup(data.presets[0]?.id ?? '', draft.variants, data),
+                      ],
+                    })
+                  }
+                >
+                  <Plus size={14} /> Add setup
+                </button>
+              </fieldset>
+            )}
+
+            {tab === 'results' &&
+              (batch ? (
+                <EvalResults
+                  batch={batch}
+                  batches={batches.data ?? []}
+                  open={open}
+                  onOpen={setOpen}
+                  onBatch={(id) => {
+                    setBatchId(id);
+                    setOpen(null);
+                  }}
+                />
+              ) : (
+                <div className="empty-inspector">
+                  No results yet. Add tasks and setups, then run the evaluation to compare them.
+                </div>
+              ))}
           </div>
         </div>
+        <footer className="modal-footer eval-footer">
+          <p className="subtle">
+            {draft.cases.length} task{draft.cases.length === 1 ? '' : 's'} × {draft.variants.length}{' '}
+            setup{draft.variants.length === 1 ? '' : 's'} ={' '}
+            <strong>
+              {runs} run{runs === 1 ? '' : 's'}
+            </strong>{' '}
+            in {workspace}, one after another. Real models may cost money.
+          </p>
+          <div className="row">
+            <button
+              className="button"
+              disabled={busy || running || (!dirty && !!draft.id)}
+              onClick={() => void perform(async () => void (await save()))}
+            >
+              {dirty || !draft.id ? 'Save' : 'Saved'}
+            </button>
+            {running ? (
+              <button
+                className="button danger"
+                disabled={busy}
+                onClick={() =>
+                  void perform(async () => {
+                    await request(`/batches/${batch!.id}/cancel`, 'POST');
+                    await batches.refetch();
+                  })
+                }
+              >
+                <Square size={13} /> Stop
+              </button>
+            ) : (
+              <button className="button primary" disabled={busy} onClick={() => void perform(run)}>
+                <Play size={13} /> Run {runs} run{runs === 1 ? '' : 's'}
+              </button>
+            )}
+          </div>
+        </footer>
       </section>
     </div>
   );

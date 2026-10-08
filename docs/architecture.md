@@ -261,7 +261,7 @@ Automatic compaction is off unless enabled in `StudioConfig.auto_compact` (Setti
 
 ## Prompt evaluation
 
-An evaluation compares prompts by running the same cases under each variant. It adds no execution path of its own: `Studio.start_batch` freezes the definition into an `eval_batches` row and starts a background task that, for each variant and case in turn, creates a hidden `kind="eval"` session, submits an ordinary `PreviewRequest` through `Studio.start` (so each item has a normal snapshot, receipts, trace and budgets), and polls the Run to a terminal state. Every item gets a fresh session, so no case sees another's history.
+An evaluation compares prompts by running the same cases under each variant (the dialog calls them tasks and setups). It adds no execution path of its own: `Studio.start_batch` freezes the definition into an `eval_batches` row and starts a background task that, for each variant and case in turn, creates a hidden `kind="eval"` session, submits an ordinary `PreviewRequest` through `Studio.start` (so each item has a normal snapshot, receipts, trace and budgets), and polls the Run to a terminal state. Every item gets a fresh session, so no case sees another's history.
 
 `domain/evaluation.grade` judges the Run's last assistant text against the case check (`succeeds`, `contains`, `not_contains`, `equals`, `regex`); it is pure and deterministic. A Run that did not succeed never passes. Items are saved as they finish, so polling `GET /batches/{id}` shows progress; per-variant aggregates (pass rate over graded items, average input/output tokens and active seconds, leaving unreported usage out rather than counting it as zero) are computed when a batch is read.
 
