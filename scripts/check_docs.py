@@ -1,11 +1,11 @@
-"""Check that relative links and heading anchors in the project documentation resolve."""
+"""Check that relative links, images and heading anchors in the project documentation resolve."""
 
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
+LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")  # also matches ![image](...)
 HEADING = re.compile(r"#{1,6}\s+(.+?)\s*#*\s*$")
 
 

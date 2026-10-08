@@ -1,3 +1,5 @@
+![](web/public/favicon.svg)
+
 # Security Agent Studio
 
 A local agent workspace for coding, debugging, reverse engineering, CTF challenges and other authorized security work. One tool-using agent works in your project folder, runs commands in an OS sandbox without network access, and records every model request and tool result for inspection.

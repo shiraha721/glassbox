@@ -569,6 +569,17 @@ test('workspace context refreshes after terminal polling when SSE never connects
   await expect(skill).toBeVisible();
 });
 
+test('the studio icon is served for the browser tab and shown in the sidebar', async ({ page }) => {
+  await openWorkspace(page);
+  const icon = await page.request.get('/favicon.svg');
+  expect(icon.headers()['content-type']).toContain('image/svg+xml');
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/favicon.svg');
+  const mark = page.locator('.sidebar-heading .brand-mark');
+  await expect(mark).toBeVisible();
+  expect(await mark.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await page.locator('.sidebar-heading').screenshot({ path: 'test-results/studio-icon.png' });
+});
+
 test('the workbench remains usable on a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openWorkspace(page);

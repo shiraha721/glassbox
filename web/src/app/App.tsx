@@ -5,7 +5,6 @@ import {
   Bell,
   BellOff,
   Bot,
-  Code2,
   Eye,
   FlaskConical,
   FolderOpen,
@@ -364,9 +363,7 @@ function Workspace({ data }: { data: Bootstrap }) {
         hidden={!sidebarOpen}
       >
         <div className="sidebar-heading">
-          <span className="brand-mark" aria-hidden>
-            <Code2 size={15} />
-          </span>
+          <img className="brand-mark" src="/favicon.svg" alt="" />
           <strong>Agent Studio</strong>
           <button
             className="icon-button"

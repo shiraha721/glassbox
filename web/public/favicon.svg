@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- The studio's mark: a command prompt held inside a shield, for an agent that runs commands
+       only within its sandbox. The colors match the accent of web/src/style.css in each scheme. -->
+  <style>
+    .shield { fill: #4f46e5; stroke: #4f46e5; }
+    .facet { fill: #4338ca; }
+    @media (prefers-color-scheme: dark) {
+      .shield { fill: #7b73ff; stroke: #7b73ff; }
+      .facet { fill: #675ef2; }
+    }
+  </style>
+  <defs>
+    <path id="outline" stroke-width="2" stroke-linejoin="round"
+      d="M16 2.5 28 6.2v9c0 7-5 12-12 14.6C9 27.2 4 22.2 4 15.2v-9z" />
+    <mask id="inside"><use href="#outline" fill="#fff" stroke="#fff" /></mask>
+  </defs>
+  <use href="#outline" class="shield" />
+  <rect class="facet" x="16" width="16" height="32" mask="url(#inside)" />
+  <path fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+    d="m10.5 10.5 4.5 4.5-4.5 4.5M17.5 19.5h4.5" />
+</svg>

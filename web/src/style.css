@@ -521,14 +521,9 @@ summary::-webkit-details-marker {
   letter-spacing: -0.01em;
 }
 .brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  flex: none;
   width: 24px;
   height: 24px;
-  border-radius: 7px;
-  background: var(--accent);
-  color: var(--on-accent);
 }
 .new-conversation {
   justify-content: flex-start;
