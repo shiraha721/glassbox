@@ -389,6 +389,29 @@ class AutoCompact(Contract):
     keep_recent_turns: int = Field(default=2, ge=1, le=10)
 
 
+# Hosts fetch_url may download from in a new installation: source and package registries and
+# the download hosts they redirect to. Each download still asks first by default.
+COMMON_DOWNLOAD_HOSTS = (
+    "github.com",
+    "codeload.github.com",
+    "raw.githubusercontent.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+    "registry.npmjs.org",
+    "pypi.org",
+    "files.pythonhosted.org",
+    "huggingface.co",
+    "cdn-lfs.huggingface.co",
+    "cdn-lfs-us-1.huggingface.co",
+    "cas-bridge.xethub.hf.co",
+    "dl.google.com",
+    "storage.googleapis.com",
+    "static.crates.io",
+    "proxy.golang.org",
+    "repo1.maven.org",
+)
+
+
 class StudioConfig(Contract):
     """Version provider, tool permissions, connections, and execution limits together."""
 
@@ -427,7 +450,9 @@ class StudioConfig(Contract):
     )
     sandbox_mode: Literal["workspace-write", "read-only"] = "workspace-write"
     toolchain_roots: list[str] = Field(default_factory=list, max_length=3)
-    network_hosts: list[str] = Field(default_factory=list, max_length=20)
+    network_hosts: list[str] = Field(
+        default_factory=lambda: list(COMMON_DOWNLOAD_HOSTS), max_length=50
+    )
     # Shell command prefixes with their own permission; see CommandRule.
     command_rules: list[CommandRule] = Field(default_factory=list, max_length=100)
     mcp_servers: list[MCPServer] = Field(default_factory=list, max_length=10)

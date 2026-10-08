@@ -227,7 +227,7 @@ export function Settings({
                   <label>
                     Allowed HTTPS download hosts · one exact hostname per line
                     <textarea
-                      rows={3}
+                      rows={6}
                       className="code-input"
                       spellCheck={false}
                       value={draft.network_hosts.join('\n')}
@@ -236,10 +236,33 @@ export function Settings({
                       }
                     />
                   </label>
+                  <div className="row">
+                    <button
+                      className="button"
+                      disabled={data.common_download_hosts.every((host) =>
+                        draft.network_hosts.includes(host),
+                      )}
+                      onClick={() =>
+                        change({
+                          ...draft,
+                          network_hosts: [
+                            ...new Set([...draft.network_hosts, ...data.common_download_hosts]),
+                          ],
+                        })
+                      }
+                    >
+                      Add common hosts
+                    </button>
+                    <span className="subtle">
+                      GitHub, npm, PyPI, Hugging Face, Google downloads, crates.io, Go modules and
+                      Maven Central, with the hosts they redirect downloads to.
+                    </span>
+                  </div>
                   <p className="subtle">
-                    fetch_url can download up to 16 MiB from these hosts to a new workspace file.
-                    Only public HTTPS addresses are accepted, without redirects; commands still have
-                    no network access.
+                    fetch_url can download up to 16 MiB from these hosts to a new workspace file,
+                    and asks before each download unless you allow it in Tools. Only public HTTPS
+                    addresses are accepted; redirects are followed only to hosts in this list.
+                    Commands still have no network access.
                   </p>
                 </>
               )}

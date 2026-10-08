@@ -3,6 +3,7 @@
 from .changes import net_changes
 from .evaluation import final_text, grade, summarize_variant
 from .models import (
+    COMMON_DOWNLOAD_HOSTS,
     EFFORT_LEVELS,
     IMAGE_TYPES,
     SHELL_TOOL,
@@ -113,6 +114,7 @@ __all__ = [
     "AutoCompact",
     "CommandInfo",
     "CommandRule",
+    "COMMON_DOWNLOAD_HOSTS",
     "CommandUse",
     "Grant",
     "ModelPrice",

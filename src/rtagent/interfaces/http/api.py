@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from rtagent.domain import (
+    COMMON_DOWNLOAD_HOSTS,
     EFFORT_LEVELS,
     AppError,
     ApprovalDecision,
@@ -173,6 +174,8 @@ class Bootstrap(Contract):
     # Where each key referenced by providers and MCP servers comes from; never the value.
     credentials: list[CredentialStatus]
     effort_levels: dict[str, list[str]]
+    # Download hosts new installations allow, offered to add to existing settings.
+    common_download_hosts: list[str]
 
 
 class ModelList(Contract):
@@ -220,6 +223,7 @@ async def bootstrap(request: Request) -> Bootstrap:
         workspace_root=str(studio.registry.workspace),
         credentials=await studio.credential_status(referenced_credentials(config)),
         effort_levels={adapter: list(levels) for adapter, levels in EFFORT_LEVELS.items()},
+        common_download_hosts=list(COMMON_DOWNLOAD_HOSTS),
     )
 
 

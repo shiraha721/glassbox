@@ -176,7 +176,7 @@ def native_tools() -> list[ToolDefinition]:
         ),
         tool(
             "fetch_url",
-            "Download a bounded public HTTPS resource from an explicitly allowed host to a new workspace file. No redirects, credentials, private/local addresses or command networking. Supply sha256 when known. Ask the user to allow the exact host in Settings if blocked.",
+            "Download a bounded public HTTPS resource (up to 16 MiB) from an explicitly allowed host to a new workspace file. Redirects are followed only to allowed hosts. No credentials, private/local addresses or command networking. Supply sha256 when known. Ask the user to allow the exact host in Settings if blocked.",
             {
                 "url": {"type": "string", "maxLength": 2048},
                 "path": string,

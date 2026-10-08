@@ -1365,6 +1365,8 @@ export interface components {
             effort_levels: {
                 [key: string]: string[];
             };
+            /** Common Download Hosts */
+            common_download_hosts: string[];
         };
         /**
          * CallView
