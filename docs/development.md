@@ -22,11 +22,11 @@ These are relied on by recovery, inspection and the security model. Changing one
 - Duplicate IDs or orders, undeclared or missing variables and malformed conditions are errors. Blocks are never silently dropped, re-roled or moved; each has an activation reason.
 - Conditions use the restricted structured grammar. No `eval`, attribute access or template code.
 - Provider adaptation that changes structure (such as extracting system messages) must be listed in the request's transformations; adaptation that would lose information is rejected.
-- Over-budget context fails with a reason. Compaction is explicit, reversible and source-checked; there is no hidden trimming.
+- Over-budget context fails with a reason. Compaction is a recorded, reversible and source-checked job, started by the user or by the opt-in automatic setting; there is no hidden trimming.
 
 **Execution**
 
-- The loop is `model → tools → model` in one LangGraph graph with `thread_id = run_id`. Do not nest another agent loop.
+- The loop is `model → tools → model` in one LangGraph graph with `thread_id = run_id`. Do not add another agent loop: a sub-agent is a separate child Run with its own snapshot and thread, driven by the same graph inside the parent's `delegate` call.
 - Every model tool call keeps its `tool_call_id` and receives exactly one result before the next model call.
 - The model sees only tools that are permitted in the frozen settings (and non-mutating ones in read-only mode). Permissions, schema validation and approvals are enforced on the server; prompts, files, tool output and model text cannot change them.
 - Persist intent before an effect and the outcome after it. A call interrupted mid-effect is `outcome_unknown` and is never retried without an explicit decision. Do not claim exactly-once execution for external effects.
@@ -36,7 +36,7 @@ These are relied on by recovery, inspection and the security model. Changing one
 **Data**
 
 - Edits carry the revision they were based on. Editing settings or presets never alters existing Runs.
-- Record canonical messages, the prepared request and the actual outbound body separately for every model call. Unknown usage is `null`, never zero.
+- Record canonical messages, the prepared request and the actual outbound body separately for every model call. Records hold image references; the bytes are filled in only after the outbound body is recorded. Unknown usage and cost are `null`, never zero.
 - Event sequence numbers are persistent; reconnecting reads state and never starts work. A pending submission keeps its body and idempotency key together across retries.
 - Duplicates and forks copy saved evidence with new IDs and provenance; forks stop at a successful turn; folder deletion keeps its conversations.
 - Exports and default trace views are redacted and labelled as such.
@@ -80,6 +80,8 @@ npm --prefix web run build
 (cd web && npx playwright install chromium && npm run test:e2e)   # browser tests
 ```
 
+The browser tests start their own server on port 8765 with the simulated model and temporary data under `var/`, and it serves the built UI, so run `npm --prefix web run build` after frontend changes and before `test:e2e`.
+
 After changing an API model, regenerate the client types and commit `web/src/api/generated.ts` (the intermediate `schema.json` is ignored):
 
 ```bash
@@ -91,10 +93,10 @@ npm --prefix web run generate:api
 
 | Layer | Where | What it should prove |
 | --- | --- | --- |
-| Pure logic | `tests/test_prompts.py`, parts of `test_tools.py` and `test_evaluation.py` | Compiler ordering, conditions, variables, budgets; patch parsing and hunks; output buffering; eval grading and aggregation. |
-| Runtime and API | `tests/test_api.py`, `test_runtime.py`, `test_harness.py`, `test_evaluation.py`, `test_permissions.py`, `test_review_regressions.py` | The real app over ASGI with the simulated provider: idempotency, approvals, cancellation, checkpoint recovery, uncertain effects, compaction, concurrency, origin checks. |
-| Adapters | `tests/test_providers.py`, `test_tools.py`, `test_sandbox.py`, `test_storage.py`, `test_config.py` | Captured provider requests and errors, MCP over stdio and HTTP, real bubblewrap isolation (skipped without it), migrations and revisions. |
-| UI components | `web/src/**/*.test.tsx` | Rendering decisions such as tool step pairing and preset editing. |
+| Pure logic | `tests/test_prompts.py`, parts of `test_tools.py`, `test_evaluation.py`, `test_permissions.py` and `test_reasoning.py` | Compiler ordering, conditions, variables, budgets; patch parsing and hunks; output buffering; eval grading and aggregation; command rules; reading reasoning text. |
+| Runtime and API | `tests/test_api.py`, `test_runtime.py`, `test_harness.py`, `test_evaluation.py`, `test_permissions.py`, `test_review_regressions.py`, `test_file_undo.py`, `test_commands.py`, `test_subagents.py`, `test_attachments.py` | The real app over ASGI with the simulated or a mocked provider: idempotency, approvals and grants, cancellation, checkpoint recovery, uncertain effects, manual and automatic compaction, concurrency, origin checks, undo, slash commands, sub-agents, images. |
+| Adapters | `tests/test_providers.py`, `test_responses.py`, `test_tools.py`, `test_sandbox.py`, `test_storage.py`, `test_config.py`, `test_shell_hooks.py`, `test_git.py`, `test_web.py`, `test_desktop.py` | Captured provider requests and errors for all three APIs, MCP over stdio and HTTP, real bubblewrap isolation (skipped without it), migrations and revisions, hook processes, host Git, web search and page reading over mocked transports, the WSL folder dialog. |
+| UI components | `web/src/**/*.test.ts(x)` | Rendering and pure UI decisions: tool step pairing, preset editing, model choices, notifications, slash command and image helpers, the review task. |
 | Browser | `web/e2e/studio.spec.ts` | End-to-end workflows against a real backend with temporary data. |
 | Live service | `scripts/smoke_*.py` | Start a real HTTP server on a fixed port with disposable data and exercise actual OS effects. |
 | Real model | `scripts/acceptance_*.py --live` | Opt-in work against the configured provider; may cost money. |

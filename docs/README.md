@@ -112,7 +112,7 @@ While the agent works, its reply streams into the conversation. Each tool call a
 
 When a tool requires approval, the Run pauses with a card showing the exact arguments. **Approve once** covers only that call. **Allow … in this conversation** also lets later matching calls in the same conversation run without asking: for the shell tool it covers commands starting with the same program (for example `pytest`, as single commands only), for other tools every call. Standing approvals are listed under **Tools → Allowed in this conversation**, where **Revoke** removes them; copies of a conversation start without them. **Reject** returns an error to the model, which can continue another way. Approvals survive a page refresh or service restart.
 
-**Sub-agents.** The agent can hand a self-contained task to a sub-agent with the `delegate` tool: a separate Run with the same model, preset and workspace that starts without this conversation's history and returns its final answer as the tool result. Expand the `delegate` step to follow the sub-agent's own tool calls and answer while it works. A sub-agent cannot ask you anything: tools that would need your approval are unavailable to it, and it cannot delegate further. Stopping the Run stops its sub-agent too. Its cost counts toward the conversation in **Context**, and deleting the conversation deletes it. Settings saved before this tool existed show it as disabled in **Settings → Tools**.
+**Sub-agents.** The agent can hand a self-contained task to a sub-agent with the `delegate` tool: a separate Run with the same model, preset and workspace that starts without this conversation's history and returns its final answer as the tool result. Expand the `delegate` step to follow the sub-agent's own tool calls and answer while it works. A sub-agent cannot ask you anything: tools that would need your approval are unavailable to it, and it cannot delegate further. Stopping the Run stops its sub-agent too. Its cost counts toward the conversation in **Context**, and deleting the conversation deletes it. A duplicate or fork keeps the sub-agent's answer, but its `delegate` step still opens the original conversation's sub-agent (unavailable once that conversation is deleted), and the copy's **Context** does not count that cost. Settings saved before this tool existed show it as disabled in **Settings → Tools**.
 
 **Stop run** cancels the Run and waits for its processes to be cleaned up. It does not undo files that were already written; use **Undo file changes** on the turn (see [File tools](#file-tools)).
 
@@ -196,9 +196,9 @@ The native tools are: `list_files`, `search_files`, `search_text`, `read_text`, 
 
 ### File tools
 
-File tools take relative paths, reject `..`, links and absolute paths, and never touch credentials (`.env`, `.env.*` except `.env.example`), Git metadata, databases (`.db`, `.sqlite`), the studio's data directory, or dependency folders (`.venv`, `node_modules`, `__pycache__`). Replacing a file requires the hash from the last read, so a concurrent change is detected instead of overwritten. `apply_patch` validates every file before changing any; each file is replaced atomically, but a multi-file patch is not a transaction, and a failure reports which files were already changed.
+File tools take relative paths, reject `..`, links and absolute paths, and never touch credentials (`.env`, `.env.*` except `.env.example`, `access-token`), Git metadata, databases (`.db`, `.sqlite`, `.sqlite3`), the studio's data directory, or dependency folders (`.venv`, `node_modules`, `__pycache__`). Replacing a file requires the hash from the last read, so a concurrent change is detected instead of overwritten. `apply_patch` validates every file before changing any; each file is replaced atomically, but a multi-file patch is not a transaction, and a failure reports which files were already changed.
 
-A turn whose file tools changed files lists them under **Changed N files**. **Undo file changes** puts each file back as it was before that run, including removing files it created and restoring files it deleted, but only while the file is still as the run left it: a file changed since, by a later run, a command or you, is left alone and named. Changes made by shell commands and background processes are not tracked and cannot be undone this way; use Git for those.
+A turn whose file tools changed files lists them under **Changed N files**. **Undo file changes** puts each file back as it was before that run, including removing files it created and restoring files it deleted, but only while the file is still as the run left it: a file changed since, by a later run, a command or you, is left alone and named. Changes made by shell commands and background processes are not tracked and cannot be undone this way; use Git for those. The earlier versions are kept in the studio's data directory (`file-history/`), also after the conversation is deleted.
 
 ### Commands
 
@@ -251,14 +251,20 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 | "Excluded paths cannot be links…" | A credential-like name (such as `.env`) is a symlink; replace it with a regular file. |
 | A command cannot find `python`, `node` or a project venv | Register the runtime under **Settings → Sandbox → Trusted runtime directories**. |
 | Run stays "queued" | Four Runs from other conversations are active; it starts when one finishes. |
+| "Context compaction is running…" | A summary (possibly an automatic one) is in progress for this conversation. Wait for it, or stop it in **Context**. |
+| `web_search`, `read_url` or `delegate` is disabled, or never offered to the model | Settings saved before these tools existed have no permission for them; set one in **Settings → Tools**. `web_search` is also left out until a service is chosen under **Web search**. |
+| A request fails after turning on **Show the model's thinking** | The model or account does not support it (Claude models before 4.6; OpenAI organizations not verified for reasoning summaries). Turn the option off for that provider. |
+| A task with an image fails | The model does not accept images; the error carries the provider's reason. Choose a model with image input or remove the image. |
+| **Undo file changes** skips a file | The file changed after the Run (a later Run, a command or you), so it is left alone. Use Git for those changes. |
 | A Run is "interrupted" | The service restarted, or a call's outcome is unknown. Review each uncertain call and choose **Retry** or record a verified result before resuming. |
 
 ## Status and roadmap
 
-As of 2026-10-07:
+As of 2026-10-08:
 
-- Stages 1–4 below are implemented, and stage 6 in part (prompt evaluations). Real-model acceptance ran on Windows ([records](history/README.md)); the Linux sandbox is covered by automated tests against real bubblewrap, but a live-model Linux acceptance and a check against Anthropic's hosted API have not been run. The Messages adapter, thinking replay and reasoning effort are tested against recorded protocol fixtures.
-- Not implemented: full terminal emulation (PTY/ConPTY), command network access, disk quotas, stateful MCP sessions, specialized reverse-engineering integrations.
+- Stages 1–4 below are implemented, stage 6 in part (prompt evaluations), and the agent features row. Real-model acceptance ran on Windows ([records](history/README.md)); the Linux sandbox is covered by automated tests against real bubblewrap, but a live-model Linux acceptance and checks against Anthropic's and OpenAI's hosted APIs have not been run. The Messages and Responses adapters, thinking replay and display, reasoning effort, prompt caching and images are tested against mocked HTTP transports and local protocol fixtures.
+- Not implemented: full terminal emulation (PTY/ConPTY), command network access, disk quotas, stateful MCP sessions, specialized reverse-engineering integrations, undo of changes made by commands, approvals inside sub-agents, live streaming of model thinking.
+- Not planned: signing in with a ChatGPT or Claude subscription, IDE extensions, a terminal UI.
 
 | Stage | Scope | Status |
 | --- | --- | --- |
@@ -267,6 +273,7 @@ As of 2026-10-07:
 | 3 — Daily agent use | Context compaction, conversation branching, diffs, streamed command output, background processes, dependency/download policy | Done |
 | 4 — Extensible harness | CLI, JSON-RPC, Python client and embedding, hooks, trusted local tools, preset/Skill packages, Messages provider | Done |
 | 5 — Security analysis workflows | Stateful MCP, IDA/Ghidra/debugger/browser integrations, evidence artifacts, analysis Skills | Planned |
-| 6 — Evaluation | Prompt comparisons over task sets with deterministic checks and token/time reporting (done); replay of recorded Runs, model-judged grading, cost in currency (planned) | Partial |
+| 6 — Evaluation | Prompt comparisons over task sets with deterministic checks and token, time and cost reporting (done); replay of recorded Runs, model-judged grading (planned) | Partial |
+| Agent features | Prompt caching, cost in dollars, conversation approvals and command rules, automatic compaction, undo of file-tool changes, custom slash commands, shell hooks, Git changes panel, web search and page reading, images, Responses API, thinking display, sub-agents | Done |
 
 Later stages should add capabilities with a real workload and acceptance criteria each, while keeping the single-user local path simple.

@@ -12,6 +12,7 @@ uv run rtagent run --task-file task.txt --session SESSION_ID --skill debugging -
 uv run rtagent run "Review src/ for injection" --model anthropic:claude-opus-5-5 --effort high --access read-only
 uv run rtagent sessions
 uv run rtagent status RUN_ID
+uv run rtagent wait RUN_ID --timeout 600
 uv run rtagent events RUN_ID --after 0
 uv run rtagent approve RUN_ID APPROVAL_ID
 uv run rtagent approve RUN_ID APPROVAL_ID --reject
@@ -78,7 +79,7 @@ Each UTF-8 input line is an ID-bearing JSON-RPC 2.0 request; each output line is
 | `run.start` | `{request: PreviewRequest, key: string}`; captured-request retry identity. |
 | `run.get`, `run.cancel` | `run_id`; saved Run projection. |
 | `run.wait`, `events.list` | `run_id` plus optional `timeout` (seconds, up to 3600) or `after`; Run or finite event page. |
-| `run.approve` | `run_id`, `approval_id`, `body: {decision: approve or reject}`. |
+| `run.approve` | `run_id`, `approval_id`, `body: {decision: approve, approve_conversation or reject}`; `approve_conversation` also records a standing approval for the conversation. |
 | `run.resume` | `run_id`, `body: {resolutions: ...}` using the shared recovery contract. |
 | `run.files`, `run.revert_files` | `run_id`; the files the Run changed with file tools and their state, or the result of undoing them. |
 | `session.create`, `session.get` | Creation `body` (optional title/project), or `session_id`. |
@@ -156,6 +157,8 @@ hooks = Hooks(on_event=observe, before_tool=guard)
 
 Registration rejects invalid JSON Schemas before model exposure. Unexpected handler failures or invalid returned output after dispatch have uncertain effects: the Run interrupts and requires an explicit recovery decision. An integration can raise a known structured AppError for a verified failure; it must not claim certainty about an effect it cannot establish.
 
+These Python hooks are for programs that embed the harness. To run a command at the same points without code (before or after a tool call, or when a Run ends), use **Settings → Hooks**; see [Hooks](README.md#hooks) and [Architecture → Tools and permissions](architecture.md#tools-and-permissions). Both kinds can only add denials.
+
 Web integrations pass `hooks=` and `configure=` to `create_app`; the configure callback receives that same Harness before entry. This is the accepted way to add the source-inventory extension without patching core files or creating an alternate loop.
 
 ## Reusable data packages
@@ -185,10 +188,13 @@ Studio owns package use cases for HTTP and embedding. Explicit user Skill import
 
 ## Provider support
 
-Providers are configured in **Settings → Providers** (or seeded from `.env`) and addressed by ID. Both adapters are explicit; there is no fallback between them:
+Providers are configured in **Settings → Providers** (or seeded from `.env`) and addressed by ID. Each adapter is explicit; there is no fallback between them:
 
 - **OpenAI-compatible** streaming Chat Completions, with `reasoning_effort` low, medium or high.
-- **Anthropic Messages**, with `output_config.effort` low through max. Leading canonical system blocks become ordered top-level system text blocks; assistant calls become `tool_use`, paired results become user `tool_result` blocks. Thinking blocks are replayed unchanged within a Run and dropped from later turns (see [Architecture → Providers](architecture.md#providers)). Interleaved system blocks, incomplete streams and unsupported server-tool content fail explicitly; a classifier refusal is reported as `provider_refusal`.
+- **OpenAI Responses** (`adapter: "responses"`), with `reasoning.effort` and `store: false`. Encrypted reasoning items are echoed back within a Run and dropped from later turns. Refusals, filtered or truncated output and failed responses are reported explicitly.
+- **Anthropic Messages**, with `output_config.effort` low through max. Leading canonical system blocks become ordered top-level system text blocks; assistant calls become `tool_use`, paired results become user `tool_result` blocks. Two prompt-cache breakpoints are added and listed as a transformation. Thinking blocks are replayed unchanged within a Run and dropped from later turns (see [Architecture → Providers](architecture.md#providers)). Interleaved system blocks, incomplete streams and unsupported server-tool content fail explicitly; a classifier refusal is reported as `provider_refusal`.
+
+A provider's `show_reasoning` option asks Messages for summarized thinking and Responses for reasoning summaries; Run views return the readable text as `reasoning` on each message, never signatures or encrypted content. `.env` seeds only the `openai` and `anthropic` providers; add a Responses provider in Settings or through `PUT /config`.
 
 ```dotenv
 STUDIO_PROVIDER=anthropic
@@ -197,4 +203,4 @@ ANTHROPIC_MODEL=claude-opus-5-5
 ANTHROPIC_API_KEY=
 ```
 
-Inspector and every call record disclose transformations, canonical input, prepared/actual body, usage and returned metadata. No role relocation or automatic retry occurs. The [official Messages](https://platform.claude.com/docs/en/api/messages/create) and [streaming contracts](https://platform.claude.com/docs/en/build-with-claude/streaming) describe the external protocol. The adapter is tested against local real-HTTP fixtures, including thinking replay and refusals; no external Claude credential was available for a production endpoint check. See the [Stage 4 acceptance record](history/acceptance-stage4.md).
+Inspector and every call record disclose transformations, canonical input, prepared/actual body, usage and returned metadata. No role relocation or automatic retry occurs. The [official Messages](https://platform.claude.com/docs/en/api/messages/create) and [streaming contracts](https://platform.claude.com/docs/en/build-with-claude/streaming) describe the external protocol. The Messages adapter is tested against local real-HTTP fixtures, including thinking replay and refusals, and the Responses adapter against mocked HTTP transports; neither has been checked against the production endpoints. See the [Stage 4 acceptance record](history/acceptance-stage4.md).

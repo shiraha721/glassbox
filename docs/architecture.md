@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated 2026-10-06. This describes the implemented system. The [project guide](README.md) covers usage; the [development guide](development.md) covers conventions and commands.
+Last updated 2026-10-08. This describes the implemented system. The [project guide](README.md) covers usage; the [development guide](development.md) covers conventions and commands.
 
 ## Overview
 
@@ -18,6 +18,9 @@ flowchart LR
     Tools --> Files[File tools]
     Tools --> Sandbox[Linux bubblewrap / Windows AppContainer]
     Tools --> MCP[MCP servers]
+    Tools --> Web[Web search and pages]
+    Runner --> Hooks[Shell hooks]
+    Runner -->|delegate| Runner
     Studio --> DB[(app.db: SQLite)]
     Runner --> DB
     Runner --> CP[(checkpoints.db: LangGraph)]
@@ -30,12 +33,16 @@ The central idea: **a task becomes an immutable Run snapshot, and everything the
 ```text
 src/rtagent/
   domain/            Values and pure logic: models, prompt compiler, patch parser, permission
-                     decision, lifecycle sets, hook and execution contracts, eval grading,
-                     net file changes for undo, slash command expansion. No I/O.
+                     and command-rule decisions, lifecycle sets, hook and execution contracts,
+                     eval grading, net file changes for undo, slash command expansion, Git
+                     status and diff parsing. No I/O.
   application/       Use cases over concrete adapters:
-    studio.py          Submissions, previews, approvals, recovery, projects, packages, context
-    runner.py          The LangGraph model/tool loop, budgets, receipts and cancellation
-    context.py         Explicit conversation compaction and live context usage
+    studio.py          Submissions, previews, approvals and grants, recovery, projects,
+                       packages, context and automatic compaction, undo, commands, Git,
+                       attachments
+    runner.py          The LangGraph model/tool loop, budgets, receipts, cancellation, shell
+                       hooks and sub-agents
+    context.py         Compaction requests and context usage views
     evaluation.py      Prompt evaluation views and grading of finished Runs
   infrastructure/    Everything that talks to something external:
     storage.py         SQLite schema access, transactions, events, history copies
@@ -57,6 +64,8 @@ src/rtagent/
     tracing.py         Redacted views of evidence
   interfaces/        HTTP app and routes, AgentClient, CLI, JSON-RPC
   harness.py         Composition root: builds and owns Repository, ToolRegistry, Runner, Studio
+  client.py, cli.py, main.py, __main__.py
+                     Stable entry points that re-export the interfaces
   skills/            Bundled Skills (skill-creator, debugging, code-review)
 migrations/          Alembic revisions for app.db
 web/src/
@@ -159,7 +168,7 @@ Before compiling, `Studio._prepare` expands a custom slash command: input of the
 
 Blocks have a role (system, user, assistant), optional provider/model allowlists and a condition (`all`/`any`/`not` over `field`/`op`/`value` with `eq`, `in`, `exists` on provider, model, task_type, tools or a variable). Templates substitute only declared `{{variables}}` of type string, number or boolean; there is no expression evaluation. Disabled or filtered blocks stay in the activation report with their reason. Duplicate block IDs or orders, missing variables and malformed conditions are errors, never silent omissions.
 
-Token estimates are bytes ÷ 4. If Settings declare a context window, an estimate plus reserved output above it fails the compile; nothing is trimmed automatically. Actual usage comes from the provider and is `null` when unreported. The context view (`Studio.context`) also reports live usage from the most recent succeeded model call of the conversation (`Repository.latest_model_usage`): since every request resends the whole prefix, that one request's reported prompt size is the current context usage, and summing across calls would multiply-count it. Both adapters surface cached-prompt tokens at the top level of `usage` (`cache_read_input_tokens`/`cache_creation_input_tokens`); the Messages API reports `input_tokens` as the uncached part, so the full prompt is their sum, while Chat Completions already counts the cache inside `input_tokens`.
+Token estimates are bytes ÷ 4. If Settings declare a context window, an estimate plus reserved output above it fails the compile; nothing is trimmed automatically. Actual usage comes from the provider and is `null` when unreported. The context view (`Studio.context`) also reports live usage from the most recent succeeded model call of the conversation (`Repository.latest_model_usage`): since every request resends the whole prefix, that one request's reported prompt size is the current context usage, and summing across calls would multiply-count it. Every adapter surfaces cached-prompt tokens at the top level of `usage` (`cache_read_input_tokens`/`cache_creation_input_tokens`); the Messages API reports `input_tokens` as the uncached part, so the full prompt is their sum, while Chat Completions and Responses already count the cache inside `input_tokens`.
 
 Built-in presets are seeded on start. A stored built-in preset is upgraded only if its content exactly matches a previously shipped version (`PREVIOUS_BUILTIN_HASHES`), so user edits are never overwritten.
 
@@ -169,7 +178,7 @@ Built-in presets are seeded on start. A stored built-in preset is upgraded only 
 
 | Table | Contents |
 | --- | --- |
-| `settings` | One versioned settings aggregate: providers (endpoint, adapter, key name, model list, temperature, output and context limits), the default model, tool permissions, default sandbox mode, runtimes, download hosts, MCP servers, limits. Stores credential *names* only. |
+| `settings` | One versioned settings aggregate: providers (endpoint, adapter, key name, model list, temperature, output and context limits, per-model prices, the thinking option), the default model, tool permissions, command rules, default sandbox mode, runtimes, download hosts, MCP servers, automatic compaction, shell hooks, the web search service, limits. Stores credential *names* only. |
 | `presets` | Versioned presets with embedded blocks. |
 | `projects` | Registered workspace folders. |
 | `conversation_folders` | Flat folders for organizing conversations. |
@@ -177,10 +186,10 @@ Built-in presets are seeded on start. A stored built-in preset is upgraded only 
 | `evals` | Evaluation definitions (cases with checks, variants with preset, model and access), versioned by revision. |
 | `eval_batches` | Comparison runs: the frozen definition, status and each case/variant result with its Run ID, verdict and usage. |
 | `previews` | Saved compiled inputs, deleted when consumed by a Run or expired. |
-| `runs` | Immutable snapshot plus the live projection (status, messages, partial output, approval, usage). |
+| `runs` | Immutable snapshot (including the expanded slash `command`, image `attachments` and, for a sub-agent, `parent_run_id`) plus the live projection (status, messages, partial output, approval, usage). |
 | `events` | Numbered events per Run for SSE replay. |
-| `calls` | Model and tool receipts: intent, prepared and wire bodies, decision, result, attempts, and for file tools the `file_changes` they made. |
-| `compactions` | Summary jobs with source hash, provider calls and result. |
+| `calls` | Model and tool receipts: intent, prepared and wire bodies, decision, result, attempts, `granted_by`, shell `hooks` outcomes, for file tools the `file_changes` they made, and for `delegate` the `child_run_id`. |
+| `compactions` | Summary jobs with source hash, provider calls, result and `trigger` (`manual` or `auto`). |
 | `processes` | Background command records with bounded output. |
 
 Outside the database, the data directory holds `credentials.json` (keys saved from Settings), `skills/` (global Skills), `commands/` (global slash commands), `file-history/` (earlier versions of files that Runs changed, for undo) and `attachments/` (images attached to tasks, named by their SHA-256). All are hidden from file tools and commands like the rest of the data directory.
@@ -190,8 +199,8 @@ Rules that keep this consistent:
 - **Revisions.** Settings, presets, conversations and folders carry a revision; writes must name the revision they were based on, so a stale browser tab gets a conflict instead of overwriting.
 - **One writer.** All writes go through `Repository` methods holding an asyncio lock for short transactions. A state change and its event commit together.
 - **Snapshots are immutable.** Editing settings or presets never changes an existing Run. Run views read a few snapshot fields with `json_extract` instead of loading whole snapshots.
-- **Copies are independent.** Duplicate and fork copy conversations, Runs and receipts with new IDs and `source_run_id` provenance, but never checkpoints or processes, and never re-execute anything.
-- **Deletion is idle-only** and removes the conversation's Runs, receipts, events and checkpoints.
+- **Copies are independent.** Duplicate and fork copy conversations, Runs and receipts with new IDs and `source_run_id` provenance, but never checkpoints, processes, grants or sub-agent conversations, and never re-execute anything. A copied `delegate` result still names the original sub-agent Run.
+- **Deletion is idle-only** and removes the conversation's Runs, receipts, events and checkpoints, and its sub-agent conversations with theirs. Attached images stay in `attachments/`, since other conversations may reference the same file.
 
 ## Tools and permissions
 
@@ -269,7 +278,7 @@ A **provider** (`ProviderProfile`) is one endpoint: adapter, base URL, key varia
 - **OpenAI-compatible:** LangChain's `ChatOpenAI` serializes Chat Completions with streaming and tool calls; retries are disabled. Reasoning effort is sent as `reasoning_effort` (low, medium, high). A request hook compares the real body with the prepared one before sending.
 - **Anthropic Messages** (`providers/messages.py`): leading system messages become the `system` array, tool calls become `tool_use` blocks and results `tool_result` blocks. Effort is sent as `output_config.effort` (low through max); temperature is omitted unless set, because current Claude models reject non-default sampling. Two prompt-cache breakpoints (`cache_control: ephemeral`) mark the last system block, which also covers the tools rendered before it, and the last block of the newest message, so each step of a Run reads the unchanged prefix from Anthropic's cache; the marker moves forward with the conversation. A Run created before this change and resumed after it fails its first-request check rather than sending a different body. System messages inside the history, unsupported content blocks and incomplete streams are errors, and a classifier refusal (`stop_reason: "refusal"`) is reported as a declined request with its category.
 - **OpenAI Responses** (`providers/responses.py`): messages become `input` items with their roles unchanged (user images as `input_image` parts), tool calls `function_call` items with the same `call_id` and JSON-encoded arguments, tool results `function_call_output` items; tools are `function` tools. Requests set `store: false`. With an effort set, `reasoning.effort` is sent and `include: ["reasoning.encrypted_content"]` requested; a response containing reasoning keeps its output items, without provider IDs (an unstored response cannot resolve them), in `Message.blocks`, sent back unchanged within the Run like Claude's thinking blocks. The stream supplies text deltas; the result comes from `response.completed` (or `response.incomplete`). Refusal parts, content filtering, `response.failed`, truncated function arguments and streams without a final response are distinct errors. Usage maps `input_tokens_details.cached_tokens` to cache reads; as with Chat Completions, input tokens already include them.
-- **Simulated:** offline canned replies that drive real tools from `/read`, `/echo` and `/tool` commands. Explicitly selected only.
+- **Simulated:** offline canned replies that drive real tools from `/read`, `/echo` and `/tool` commands; `/think` returns a thinking block, `/slow` streams slowly and `/error` fails like a provider. Explicitly selected only.
 
 **Thinking blocks.** Current Claude models think by default and return signed `thinking`/`redacted_thinking` blocks. The adapter keeps an assistant turn's exact content array (`Message.blocks`) and sends it back unchanged for the tool continuations of the same Run, as the API requires. When the turn becomes conversation history, the blocks are dropped and only text and tool calls remain: a signature is bound to the conversation prefix and model that produced it, and each Run recompiles its system prompt (memory, instructions, Skills may have changed) and may use another model, so replaying older blocks would be rejected. Stripping every earlier block keeps each request valid; within a Run the history is append-only. Browser views omit the blocks but return their readable reasoning (`reasoning_text`: thinking text, Responses summary and reasoning text; never signatures or encrypted content) as `MessageView.reasoning`. Current Claude models return empty thinking text unless the request sets `thinking: {type: "adaptive", display: "summarized"}`, and the Responses API returns summaries only for `reasoning.summary`; the provider option `show_reasoning` (frozen into `ProviderConfig`) adds those parameters. A Responses reasoning item without encrypted content (no effort set) is kept for its summary but not echoed, since an unstored request cannot resolve it.
 
@@ -288,7 +297,7 @@ All routes live under `/api/v1` (`interfaces/http/api.py`); `/openapi.json` is t
 | Attachments | `POST /attachments` (raw image body), `GET /attachments/{hash}` |
 | Workspace | `GET /workspace`, `PUT /workspace/memory`, Skill get/save/export/import, `GET /workspace/commands`, `GET /workspace/git`, `GET /workspace/git/diff` (optional `path`), all with optional `project_id` |
 | Projects | `POST /projects`, `POST /desktop/folder-picker` |
-| Conversations | `POST /sessions`, `GET/PATCH/DELETE /sessions/{id}`, `/copy`, `/runs`, `/context`, `/compact`, `/compactions/{id}`, `/processes` |
+| Conversations | `POST /sessions`, `GET/PATCH/DELETE /sessions/{id}`, `/copy`, `/runs`, `GET /context` (`PUT` restores full context), `/compact`, `GET /compactions/{id}` and `/cancel`, `GET /processes`, `/processes/{id}/input` and `/stop` |
 | Folders | `POST /folders`, `PATCH/DELETE /folders/{id}` |
 | Prompts | `POST /prompts/inspect` (unsaved draft), `POST /prompts/preview` (saved, 15 minutes); both accept `model` and `access` |
 | Runs | `POST /runs` (with optional `model` and `access`), `GET /runs/{id}`, `/cancel`, `/approvals/{id}`, `/resume`, `/trace`, `/export`, `/events` (SSE), `/event-log` (pages), `GET /files` and `POST /files/revert` (undo file changes) |
@@ -302,11 +311,11 @@ Errors share one envelope: `{"error": {"code", "message", "details", "request_id
 
 ## Frontend
 
-React with TanStack Query; `api/generated.ts` types every request. `App.tsx` owns the selection (project and conversation), the composer, the pending submission and which side panel is open. Server state is cached per query: `bootstrap`, `runs/<conversation>`, `trace/<run>`, `workspace/<project>`, `context/<conversation>`, `processes/<conversation>`, `git/<project>`, `run-files/<run>`, `commands/<project>`.
+React with TanStack Query; `api/generated.ts` types every request. `App.tsx` owns the selection (project and conversation), the composer, the pending submission and which side panel is open. Server state is cached per query: `bootstrap`, `runs/<conversation>`, `trace/<run>`, `workspace/<project>`, `context/<conversation>`, `processes/<conversation>`, `git/<project>` and `git-diff`, `run-files/<run>`, `commands/<project>`, `subagent/<run>` (a delegated Run followed from its step), plus Settings and evaluation queries.
 
 While a Run is active, `useRunEvents` follows its SSE stream and refetches only that Run's projection (at most one request in flight, coalesced to 100 ms); broader queries refresh at lifecycle boundaries (tool completion, approvals) and when the Run ends. A slower poll covers a lost event stream. The Inspector loads the trace, which can be large, only while it is visible.
 
-Settings (sidebar) edit global configuration in pages: Providers and keys, Models, Tools, MCP servers, Skills, Sandbox, Context, Hooks and Run limits. Configuration pages share one versioned draft saved together; keys and global Skills save immediately through their own routes. The notification preference (`studio.notify`) lives in `localStorage` too; notifications fire only for status changes observed after the page loaded, and only while the page is hidden. The composer's model and access pickers hold the choice for the next Run in `localStorage` (`studio.choice`, IDs only) and adopt the last Run's choice when a conversation opens; the Tools panel shows permissions with the selected access applied, mirroring the server's transformation.
+Settings (sidebar) edit global configuration in pages: Providers and keys, Models, Tools (with command rules and the web search service), MCP servers, Skills, Sandbox, Context, Hooks and Run limits. Configuration pages share one versioned draft saved together; keys and global Skills save immediately through their own routes. The composer's model and access pickers hold the choice for the next Run in `localStorage` (`studio.choice`, IDs only) and adopt the last Run's choice when a conversation opens; the Tools panel shows permissions with the selected access applied, mirroring the server's transformation. The notification preference (`studio.notify`) and the open conversation and project (`studio.session`, `studio.project`) are kept in `localStorage` too; notifications fire only for status changes observed after the page loaded, and only while the page is hidden.
 
 A lost submission response is retried with the same body and idempotency key, even if the conversation advanced meanwhile, so it cannot create a second Run. Prompt edits are page-local drafts with undo history until saved. Styles use CSS custom properties with light and dark themes following the system setting.
 
@@ -321,4 +330,4 @@ A lost submission response is retried with the same body and idempotency key, ev
 - **No claimed atomicity across systems.** A model call, a file write, `app.db` and `checkpoints.db` cannot commit together; receipts and explicit uncertainty handle the gaps.
 - **Text is data.** Files, tool output, memory, Skills and model replies cannot change permissions or settings.
 - **Not a security boundary against the local user.** The sandbox protects the host from agent commands; it does not authenticate local API clients. MCP servers, trusted local tools and shell hooks run with the user's own authority. Hooks are commands the user typed in Settings; the model can supply only their stdin data, never their command line.
-- **Not implemented:** terminal emulation, command networking, disk quotas, stateful MCP sessions, multi-user deployment.
+- **Not implemented:** terminal emulation, command networking, disk quotas, stateful MCP sessions, multi-user deployment, undo of command changes, approvals inside sub-agents, streaming of thinking while it is generated.
