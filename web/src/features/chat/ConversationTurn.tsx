@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   SquareTerminal,
   User,
+  Users,
   Wrench,
   X,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ import { Json } from '../../shared/Json';
 import { Diff } from '../../shared/Diff';
 import { TaskPlan } from './TaskPlan';
 import { RunFiles } from './RunFiles';
+import { SubagentActivity } from './SubagentActivity';
 import { imageUrl } from '../composer/attachments';
 import { StatusBadge } from '../../shared/StatusBadge';
 import { modelLabel } from '../composer/choices';
@@ -334,6 +336,8 @@ function target(call: ToolCall): string {
       return text(args.process_id).slice(0, 10);
     case 'echo':
       return text(args.text);
+    case 'delegate':
+      return text(args.task).split('\n')[0];
     default:
       return text(args.path) || text(args.name) || '';
   }
@@ -360,6 +364,7 @@ function toolIcon(name: string): ReactNode {
     return <BookOpen size={14} />;
   if (name === 'fetch_url') return <Globe size={14} />;
   if (name === 'update_plan') return <ListChecks size={14} />;
+  if (name === 'delegate') return <Users size={14} />;
   if (['read_text', 'list_files'].includes(name)) return <FileText size={14} />;
   return <Wrench size={14} />;
 }
@@ -377,6 +382,8 @@ function outcome(name: string, content: string): { failed: boolean; label: strin
   const error = result.error as Record<string, unknown> | undefined;
   if (error && typeof error === 'object' && typeof error.code === 'string')
     return { failed: true, label: error.code.replaceAll('_', ' ') };
+  if (name === 'delegate' && typeof result.status === 'string')
+    return { failed: result.status !== 'succeeded', label: `sub-agent ${result.status}` };
   if (['bash', 'powershell'].includes(name) && 'exit_code' in result) {
     if (result.timed_out) return { failed: true, label: 'timed out' };
     return {
@@ -433,7 +440,11 @@ function ToolStep({
       <div className="tool-step-body">
         <div className="section-label">Arguments</div>
         <Json value={call.args} />
-        {result !== undefined ? (
+        {call.name === 'delegate' && (childRun(result) || live?.child_run_id) ? (
+          <SubagentActivity runId={childRun(result) || String(live?.child_run_id)}>
+            {(child) => <ChildMessages run={child} />}
+          </SubagentActivity>
+        ) : result !== undefined ? (
           <>
             <div className="section-label">Result</div>
             <ToolOutput content={result} />
@@ -455,6 +466,60 @@ function ToolStep({
         )}
       </div>
     </details>
+  );
+}
+
+/** The child Run ID a delegate result names, if any. */
+function childRun(result: string | undefined): string {
+  try {
+    const value = JSON.parse(result ?? '') as { run_id?: unknown };
+    return typeof value.run_id === 'string' ? value.run_id : '';
+  } catch {
+    return '';
+  }
+}
+
+/** A sub-agent's messages: its tool steps paired with results, then its answer. */
+function ChildMessages({ run }: { run: Run }) {
+  const results = new Map(
+    run.messages
+      .filter((message) => message.role === 'tool' && message.tool_call_id)
+      .map((message) => [message.tool_call_id!, message.content]),
+  );
+  return (
+    <div className="subagent-messages">
+      {run.messages
+        .filter((message) => message.role === 'assistant')
+        .map((message, index) => (
+          <div className="chat-message" key={index}>
+            {message.content && (
+              <div className="markdown">
+                <Markdown skipHtml components={markdownComponents}>
+                  {message.content}
+                </Markdown>
+              </div>
+            )}
+            {message.tool_calls.map((call) => (
+              <ToolStep
+                key={call.id}
+                call={call}
+                result={results.get(call.id)}
+                state={
+                  results.has(call.id)
+                    ? outcome(call.name, results.get(call.id)!).failed
+                      ? 'failed'
+                      : 'done'
+                    : terminal(run.status)
+                      ? 'missing'
+                      : 'running'
+                }
+                live={null}
+              />
+            ))}
+          </div>
+        ))}
+      {!terminal(run.status) && <p className="subtle">Working…</p>}
+    </div>
   );
 }
 

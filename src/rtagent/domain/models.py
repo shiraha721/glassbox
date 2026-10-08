@@ -421,6 +421,7 @@ class StudioConfig(Contract):
             "save_memory": "allow",
             "load_skill": "allow",
             "save_skill": "allow",
+            "delegate": "allow",
             "echo": "ask",
         }
     )

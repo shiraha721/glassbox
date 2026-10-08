@@ -200,6 +200,12 @@ def native_tools() -> list[ToolDefinition]:
             ["url"],
         ),
         tool(
+            "delegate",
+            "Hand a self-contained task to a sub-agent and get its final answer back. The sub-agent works in the same workspace with the same model and tools, but cannot ask for approval or delegate further, and does not see this conversation: describe the task, relevant paths and the expected answer fully. Use it for independent investigations or checks whose details would crowd this conversation.",
+            {"task": {"type": "string", "minLength": 1, "maxLength": 20000}},
+            ["task"],
+        ),
+        tool(
             "read_memory",
             "Read durable project notes and their hash from .rtagent/MEMORY.md.",
             {},
@@ -550,6 +556,8 @@ class ToolRegistry:
             return view.model_dump_json()
         if name == "echo":
             return args["text"]
+        if name == "delegate":
+            raise AppError("tool_unavailable", "Sub-agents run only through the Run loop.")
         if name == "update_plan":
             try:
                 return TaskPlan.model_validate(args).model_dump_json()

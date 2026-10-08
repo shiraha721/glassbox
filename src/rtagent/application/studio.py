@@ -148,9 +148,13 @@ class Studio:
         effective = await self.repository.effective_history(session)
         config = await self.repository.config()
         usage = await self.repository.latest_model_usage(session_id)
+        # Sub-agent Runs started from this conversation are part of what it spent.
         costs = [
             run["usage"].get("cost")
-            for run in await self.repository.list_runs(session_id)
+            for run in [
+                *await self.repository.list_runs(session_id),
+                *await self.repository.child_runs(session_id),
+            ]
             if run["status"] in TERMINAL
         ]
         return ContextView(
@@ -915,6 +919,12 @@ class Studio:
                         "id": active["id"],
                         "name": active["data"]["name"],
                         **active["data"].get("output", {}),
+                        # A running sub-agent, whose own Run the page can follow.
+                        **(
+                            {"child_run_id": active["data"]["child_run_id"]}
+                            if "child_run_id" in active["data"]
+                            else {}
+                        ),
                     }
                     if active
                     else None

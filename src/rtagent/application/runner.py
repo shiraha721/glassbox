@@ -1,10 +1,11 @@
 """An explicit, bounded LangGraph loop with durable call receipts."""
 
 import asyncio
+import contextvars
 import json
 import time
 from collections.abc import Callable
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -41,6 +42,13 @@ from rtagent.infrastructure.storage import Repository
 from rtagent.infrastructure.tools import ToolRegistry
 from rtagent.infrastructure.tracing import redact
 
+DELEGATE = "delegate"
+# Appended to a delegated task, so the sub-agent knows its reply is a result for another agent.
+SUBAGENT_NOTE = (
+    "\n\nYou are working as a sub-agent: you cannot ask the user anything or wait for "
+    "approval. Finish the task and give a complete final answer; it is returned to the agent "
+    "that delegated the task."
+)
 # Events that mark a Run's end, once each (finish is idempotent).
 RUN_END_EVENTS = frozenset({"run.completed", "run.failed", "run.cancelled"})
 # Each conversation has at most one active Run; this bounds concurrent provider and tool load
@@ -209,11 +217,14 @@ class Runner:
         finally:
             await self.stack.aclose()
 
-    async def drive(self, run_id: str, resume: bool) -> None:
-        """Execute or resume a graph under the Run budget and persist its stop state."""
+    async def drive(self, run_id: str, resume: bool, nested: bool = False) -> None:
+        """Execute or resume a graph under the Run budget and persist its stop state.
+
+        A `nested` Run is a sub-agent executing inside its parent's tool call: it uses the
+        parent's worker slot, and a cancellation is recorded and then passed on to the parent."""
         started = None
         try:
-            async with self.semaphore:
+            async with nullcontext() if nested else self.semaphore:
                 run = await self.repository.run(run_id)
                 if run["status"] in TERMINAL:
                     return
@@ -268,6 +279,8 @@ class Runner:
                 await self.repository.finish(
                     run_id, "cancelled", run["messages"], "cancelled_by_user"
                 )
+            if nested:
+                raise
         except Exception as exc:
             run = await self.repository.run(run_id)
             await self.mark_unknown(run_id)
@@ -304,6 +317,111 @@ class Runner:
                     - started,
                 }
                 await self.repository.emit(run_id, "run.metrics", {}, usage=usage)
+
+    async def delegate(
+        self,
+        run: dict[str, Any],
+        config: StudioConfig,
+        call: ToolCall,
+        call_id: str,
+        data: dict[str, Any],
+    ) -> str:
+        """Run a self-contained task as a sub-agent Run inside this tool call.
+
+        The child gets the parent's frozen preset, model, workspace and context. It cannot
+        pause for approval (tools that would ask are denied) or delegate again."""
+        snapshot = run["snapshot"]
+        policy = {
+            name: "deny" if permission == "ask" else permission
+            for name, permission in config.tools.items()
+            if name != DELEGATE
+        }
+        child_config = config.model_copy(
+            update={
+                "tools": policy,
+                "command_rules": [
+                    (
+                        rule.model_copy(update={"permission": "deny"})
+                        if rule.permission == "ask"
+                        else rule
+                    )
+                    for rule in config.command_rules
+                ],
+            }
+        )
+        tools = [
+            item
+            for item in snapshot["tools"]
+            if item["name"] != DELEGATE and policy.get(item["name"], "deny") != "deny"
+        ]
+        task = call.args["task"] + SUBAGENT_NOTE
+        context = [Message.model_validate(item) for item in snapshot.get("workspace_context", [])]
+        compiled = compile_prompt(
+            Preset.model_validate(snapshot["preset"]),
+            child_config,
+            [],
+            task,
+            snapshot["variables"],
+            tools,
+            workspace_context=context,
+        )
+        child_snapshot = {
+            "schema_version": snapshot.get("schema_version", 1),
+            "preset": snapshot["preset"],
+            "config": child_config.model_dump(),
+            "history": [],
+            "context_compaction_id": None,
+            "input": task,
+            "command": None,
+            "attachments": [],
+            "variables": snapshot["variables"],
+            "tools": tools,
+            "session_revision": 0,
+            "workspace_root": snapshot["workspace_root"],
+            "project_id": snapshot.get("project_id"),
+            "workspace_context": snapshot.get("workspace_context", []),
+            "prepared_request": prepare(child_config.provider, compiled, tools),
+            "access": snapshot.get("access"),
+            "parent_run_id": run["id"],
+            "parent_call_id": call_id,
+        }
+        child = await self.repository.create_child_run(
+            run["session_id"], f"subagent:{call_id}", child_snapshot
+        )
+        # Record the link before the child works, so the parent's receipt always names it.
+        data["child_run_id"] = child["id"]
+        await self.repository.save_call(call_id, run["id"], "tool", "executing", data)
+        await self.repository.emit(run["id"], "tool.output", {"call_id": call_id})
+        if child["status"] not in TERMINAL:
+            # A fresh context keeps the parent's graph state (and execution identity) out of
+            # the child's graph. Cancelling this call cancels the awaited child task too.
+            await asyncio.get_running_loop().create_task(
+                self.drive(child["id"], resume=child["status"] != "queued", nested=True),
+                context=contextvars.Context(),
+            )
+        finished = await self.repository.run(child["id"])
+        answer = next(
+            (
+                message["content"]
+                for message in reversed(finished["messages"])
+                if message["role"] == "assistant" and message["content"]
+            ),
+            "",
+        )
+        return json.dumps(
+            {
+                "run_id": child["id"],
+                "status": finished["status"],
+                "answer": answer[:48_000],
+                "answer_truncated": len(answer) > 48_000,
+                "error": finished["error"],
+                "usage": {
+                    key: finished["usage"].get(key)
+                    for key in ("input_tokens", "output_tokens", "cost")
+                },
+            },
+            ensure_ascii=False,
+        )
 
     async def mark_unknown(self, run_id: str) -> None:
         """Preserve the uncertainty of calls interrupted before a durable receipt."""
@@ -555,11 +673,12 @@ class Runner:
                 await self.repository.emit(
                     run_id, "tool.started", {"call_id": call_id, "name": call.name}, approval=None
                 )
-                # Bash owns its command deadline; allow its process-tree cleanup to finish.
+                # Bash owns its command deadline; allow its process-tree cleanup to finish. A
+                # sub-agent has its own Run budget, enforced inside its Run.
                 deadline = (
                     config.tool_timeout + 35
                     if call.name in {"bash", "powershell"}
-                    else config.tool_timeout
+                    else config.run_timeout + 60 if call.name == DELEGATE else config.tool_timeout
                 )
                 async with asyncio.timeout(deadline):
                     # Session/project changes never redirect tools from the frozen Run root.
@@ -584,7 +703,10 @@ class Runner:
                     token = current_execution.set(execution)
                     dispatched = True
                     try:
-                        content = await registry.execute(definition, call.args, config)
+                        if call.name == DELEGATE:
+                            content = await self.delegate(run, config, call, call_id, data)
+                        else:
+                            content = await registry.execute(definition, call.args, config)
                     finally:
                         current_execution.reset(token)
                         # Kept even when the call fails, e.g. a patch that stopped part way.

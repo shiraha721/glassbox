@@ -1351,6 +1351,14 @@ summary::-webkit-details-marker {
 .command-suggestions button:focus-visible {
   background: var(--surface-2);
 }
+.subagent {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border);
+}
+.subagent-messages .chat-message {
+  margin-top: 6px;
+}
 .reasoning {
   margin: 4px 0 8px;
   color: var(--muted);

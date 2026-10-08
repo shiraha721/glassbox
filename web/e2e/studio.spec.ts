@@ -1129,3 +1129,19 @@ test('reasoning returned by the model is shown under Thinking', async ({ page })
   await expect(thinking).toContainText('Simulated reasoning about: which file to read first');
   await page.screenshot({ path: 'test-results/thinking.png' });
 });
+
+test('a delegated task runs as a sub-agent whose work is shown in the step', async ({ page }) => {
+  await openWorkspace(page);
+  await startTask(
+    page,
+    '/tool delegate ' + JSON.stringify({ task: 'Say hello from the sub-agent.' }),
+  );
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  const step = page.locator('.conversation-turn').last().locator('details.tool-step').first();
+  await expect(step.locator('.tool-step-status')).toHaveText('sub-agent succeeded');
+  await step.locator('summary').first().click();
+  const activity = step.getByRole('region', { name: 'Sub-agent activity' });
+  await expect(activity.getByText('succeeded', { exact: true })).toBeVisible();
+  await expect(activity).toContainText('Say hello from the sub-agent.');
+  await page.screenshot({ path: 'test-results/subagent.png' });
+});

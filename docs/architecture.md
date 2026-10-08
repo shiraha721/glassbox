@@ -173,7 +173,7 @@ Built-in presets are seeded on start. A stored built-in preset is upgraded only 
 | `presets` | Versioned presets with embedded blocks. |
 | `projects` | Registered workspace folders. |
 | `conversation_folders` | Flat folders for organizing conversations. |
-| `sessions` | Conversations: committed message history, revision, active Run, project, folder, archive flag, compaction pointers, standing approvals (`grants`), and `kind` (`chat`, or `eval` for the hidden sessions that host evaluation Runs). |
+| `sessions` | Conversations: committed message history, revision, active Run, project, folder, archive flag, compaction pointers, standing approvals (`grants`), `kind` (`chat`, or the hidden `eval` and `subagent` sessions that host evaluation and sub-agent Runs) and, for sub-agents, `parent_session_id`. |
 | `evals` | Evaluation definitions (cases with checks, variants with preset, model and access), versioned by revision. |
 | `eval_batches` | Comparison runs: the frozen definition, status and each case/variant result with its Run ID, verdict and usage. |
 | `previews` | Saved compiled inputs, deleted when consumed by a Run or expired. |
@@ -195,7 +195,7 @@ Rules that keep this consistent:
 
 ## Tools and permissions
 
-`ToolRegistry` holds the catalog: twenty-two native tools, discovered MCP tools (namespaced `mcp_<server>_<name>_<hash>`) and trusted local tools registered by embedding code. At submission, the tools whose effective permission (after the Run's workspace access) is not `deny`, and in read-only mode that do not write, are frozen into the snapshot with their schema hashes. At dispatch:
+`ToolRegistry` holds the catalog: twenty-three native tools (`delegate` is dispatched by the Runner), discovered MCP tools (namespaced `mcp_<server>_<name>_<hash>`) and trusted local tools registered by embedding code. At submission, the tools whose effective permission (after the Run's workspace access) is not `deny`, and in read-only mode that do not write, are frozen into the snapshot with their schema hashes. At dispatch:
 
 1. The call is validated against the frozen JSON schema.
 2. The frozen permission decides: allow, ask (persist approval, interrupt) or deny (return an error result). For the shell tool, the frozen `command_rules` can replace the tool default (`domain/policies.command_permission`; allow and ask rules only for commands without chaining, pipes, redirects or substitution). Before asking, the runner checks the conversation's grants (`sessions.grants`, added by an `approve_conversation` decision without a revision change, revoked by a revision-checked edit); a matching grant allows the call and is recorded in the receipt as `granted_by`. Grants only turn ask into allow.
@@ -231,6 +231,12 @@ Both sandboxes take the same inputs (command, working directory, mode, timeout, 
 **Output.** `command_io.OutputBuffer` keeps the first 8,000 and last 16,000 characters of each stream and marks how much was dropped in between; the final result is trimmed further only if JSON escaping would exceed the 64 KiB tool limit. While a command runs, `CommandOutput` publishes snapshots of the bounded text to the Run (every 0.1 s) or process record (every 0.5 s); `tool.output` events only signal progress.
 
 **Background processes (`sandbox/processes.py`).** `start_process` runs the same sandbox with a stdin pipe and returns once the process has started. At most four run at a time. Each belongs to its original Run, conversation and workspace root, has an absolute deadline no later than the Run time limit, and accepts stdin writes of up to 8 KiB each through a bounded queue. Stop, deadline, Run failure or cancellation, and service shutdown kill the process tree. A restart marks unfinished processes interrupted; they are never relaunched. Archiving, deleting or moving a conversation with a running process is refused.
+
+## Sub-agents
+
+The `delegate` tool is executed by the Runner, not the registry (`Runner.delegate`). From the parent Run's frozen snapshot it builds a child snapshot: the same preset, model, variables, workspace and captured context; no history; the task plus a note that the reply goes back to another agent; and a policy where every `ask` permission or command rule becomes `deny` and `delegate` is removed, so the child never pauses for approval and cannot nest. `Repository.create_child_run` creates the child Run in a new hidden conversation (`kind = "subagent"`, `parent_session_id` set; migration 0009), idempotent by the parent call ID, without the preview and revision checks of a user submission. The parent's receipt records `child_run_id` before the child starts, and Run views expose it on the active tool so the page can follow the child.
+
+The child runs as `drive(..., nested=True)` inside the parent's tool call: it uses the parent's worker slot (a separate slot could deadlock when every slot holds a waiting parent), and it runs as its own asyncio task with an empty context, so the parent's LangGraph configuration cannot make it a subgraph. Cancelling the parent cancels the awaited child task; the child records `cancelled` and passes the cancellation on. The tool's deadline is the Run budget plus a minute; the child enforces its own budget. The result is JSON with the child's ID, status, final answer (cut at 48,000 characters), error and usage. On restart, queued sub-agent Runs are marked interrupted rather than started without their parent, whose call becomes `outcome_unknown` like any other. Context counts finished child Runs in the conversation's cost, and deleting a conversation deletes its sub-agent conversations.
 
 ## Image attachments
 

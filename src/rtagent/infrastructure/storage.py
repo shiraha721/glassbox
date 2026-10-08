@@ -93,6 +93,8 @@ sessions = Table(
     Column("kind", String, nullable=False, server_default="chat"),
     # Standing approvals the user granted in this conversation (Grant contracts).
     Column("grants", JSON, nullable=False, server_default="[]"),
+    # For kind "subagent": the conversation whose Run delegated the task.
+    Column("parent_session_id", String, index=True),
 )
 evals = Table(
     "evals",
@@ -230,7 +232,11 @@ def call_order(identifier: str) -> tuple[int, int, int]:
 
 def _session_view(row: Any) -> dict[str, Any]:
     """Exclude internal flags (auto-title, eval kind) from the public conversation contract."""
-    value = {key: item for key, item in dict(row).items() if key not in {"title_locked", "kind"}}
+    value = {
+        key: item
+        for key, item in dict(row).items()
+        if key not in {"title_locked", "kind", "parent_session_id"}
+    }
     return {**value, "message_count": len(value["messages"])}
 
 
@@ -460,7 +466,7 @@ class Repository:
         columns = [
             column
             for column in sessions.c
-            if column.name not in {"messages", "title_locked", "kind"}
+            if column.name not in {"messages", "title_locked", "kind", "parent_session_id"}
         ]
         query = (
             select(*columns, func.json_array_length(sessions.c.messages).label("message_count"))
@@ -1591,7 +1597,19 @@ class Repository:
                 .scalars()
                 .all()
             )
-            for run_id in stranded:
+            # A sub-agent Run only runs inside its parent's tool call, which is now uncertain.
+            orphaned = (
+                (
+                    await connection.execute(
+                        select(runs.c.id)
+                        .join(sessions, runs.c.session_id == sessions.c.id)
+                        .where(runs.c.status == "queued", sessions.c.kind == "subagent")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for run_id in [*stranded, *orphaned]:
                 await self._event(
                     connection,
                     run_id,
@@ -1604,6 +1622,74 @@ class Repository:
                     await connection.execute(select(runs.c.id).where(runs.c.status == "queued"))
                 ).scalars()
             )
+
+    async def create_child_run(
+        self, parent_session_id: str, key: str, snapshot: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Create a sub-agent Run in a new hidden conversation, or return the one for `key`.
+
+        The snapshot is derived from the parent Run's frozen one, so unlike `create_run` it
+        does not depend on current settings or presets."""
+        async with self.lock, self.engine.begin() as connection:
+            existing = (
+                (await connection.execute(select(runs).where(runs.c.idempotency_key == key)))
+                .mappings()
+                .first()
+            )
+            if existing:
+                return dict(existing)
+            stamp = now()
+            session_id, run_id = uid(), uid()
+            await connection.execute(
+                insert(sessions).values(
+                    id=session_id,
+                    title=snapshot["input"].split("\n", 1)[0][:80] or "Sub-agent",
+                    revision=0,
+                    active_run_id=run_id,
+                    messages=[],
+                    created_at=stamp,
+                    folder_id=None,
+                    project_id=snapshot.get("project_id"),
+                    archived=False,
+                    title_locked=True,
+                    copied_from_session_id=None,
+                    kind="subagent",
+                    grants=[],
+                    parent_session_id=parent_session_id,
+                )
+            )
+            value = {
+                "id": run_id,
+                "session_id": session_id,
+                "preview_id": uid(),
+                "idempotency_key": key,
+                "request_hash": digest({"subagent": key}),
+                "snapshot": {**snapshot, "session_id": session_id},
+                "status": "queued",
+                "stop_reason": None,
+                "messages": [],
+                "partial_output": "",
+                "latest_event_seq": 0,
+                "approval": None,
+                "error": None,
+                "usage": {"input_tokens": None, "output_tokens": None},
+                "created_at": stamp,
+                "updated_at": stamp,
+            }
+            await connection.execute(insert(runs).values(**value))
+            await self._event(connection, run_id, "run.queued", {})
+            value["latest_event_seq"] = 1
+        return value
+
+    async def child_runs(self, session_id: str) -> list[dict[str, Any]]:
+        """Status and usage of the sub-agent Runs that a conversation's Runs started."""
+        async with self.engine.connect() as connection:
+            rows = await connection.execute(
+                select(runs.c.id, runs.c.status, runs.c.usage)
+                .join(sessions, runs.c.session_id == sessions.c.id)
+                .where(sessions.c.parent_session_id == session_id)
+            )
+            return [dict(row) for row in rows.mappings()]
 
     async def delete_session(self, session_id: str) -> list[str]:
         """Delete an idle session and cascade its owned business records."""
@@ -1623,14 +1709,20 @@ class Repository:
                 raise AppError(
                     "session_busy", "Stop active work before deleting this session.", 409
                 )
-            run_ids = list(
+            # Sub-agent conversations belong to this one and go with it.
+            owned = [session_id] + list(
                 (
                     await connection.execute(
-                        select(runs.c.id).where(runs.c.session_id == session_id)
+                        select(sessions.c.id).where(sessions.c.parent_session_id == session_id)
                     )
                 ).scalars()
             )
-            await connection.execute(delete(sessions).where(sessions.c.id == session_id))
+            run_ids = list(
+                (
+                    await connection.execute(select(runs.c.id).where(runs.c.session_id.in_(owned)))
+                ).scalars()
+            )
+            await connection.execute(delete(sessions).where(sessions.c.id.in_(owned)))
             await connection.execute(
                 delete(previews).where(
                     func.json_extract(previews.c.data, "$.snapshot.session_id") == session_id
