@@ -899,7 +899,8 @@ summary::-webkit-details-marker {
   border-bottom: 0;
 }
 .compaction-marker {
-  margin: -8px 0 28px;
+  /* Keep the auto side margins that center every item in the conversation column. */
+  margin: -8px auto 28px;
   padding: 10px 12px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);

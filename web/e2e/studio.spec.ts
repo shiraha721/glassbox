@@ -80,6 +80,11 @@ test('daily work compacts history, reuses preset packages and controls a native 
   await expect(context.getByText('Active summary', { exact: true })).not.toBeAttached();
   await expect(marker).toHaveAttribute('data-state', 'inactive');
   await context.getByRole('button', { name: 'Close context' }).click();
+  // With the panel closed the column is centered; the marker shares it with the turns.
+  const markerBox = (await marker.boundingBox())!;
+  const turnBox = (await page.locator('.conversation-turn').nth(1).boundingBox())!;
+  expect(Math.abs(markerBox.x - turnBox.x)).toBeLessThan(1);
+  expect(Math.abs(markerBox.width - turnBox.width)).toBeLessThan(1);
   await page.getByRole('button', { name: 'Prompt', exact: true }).click();
   const boot = await (await page.request.get('/api/v1/bootstrap')).json();
   const packageData = {
