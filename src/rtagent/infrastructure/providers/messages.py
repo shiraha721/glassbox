@@ -11,6 +11,7 @@ from rtagent.infrastructure.providers.attachments import BASE64, fill_attachment
 from rtagent.infrastructure.providers.errors import (
     error_message,
     provider_failure,
+    transport_failure,
     truncated_output,
 )
 
@@ -269,10 +270,8 @@ async def stream_anthropic(
                         raise AppError("provider_protocol", "Messages output exceeds 1 MiB.", 502)
     except AppError:
         raise
-    except httpx.TimeoutException:
-        raise provider_failure("the provider did not respond in time; no retry was made.") from None
-    except httpx.TransportError:
-        raise provider_failure("could not connect to the configured base URL.") from None
+    except httpx.TransportError as exc:
+        raise transport_failure(exc) from None
     except Exception as exc:
         raise provider_failure(f"{type(exc).__name__}; no automatic retry.", key) from None
     if not complete:

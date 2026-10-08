@@ -2,6 +2,8 @@
 
 import asyncio
 
+import httpx
+import openai
 import pytest
 
 from rtagent.domain import (
@@ -277,3 +279,73 @@ async def test_mcp_tools_are_rediscovered_after_restart(tmp_path):
         run = await harness.wait((await harness.run(f'/tool {name} {{"text": "again"}}')).id, 30)
         assert run.status == "succeeded", run.error
         assert "MCP evidence: again" in run.messages[1].content
+
+
+@pytest.mark.parametrize("failures,status", [(1, "succeeded"), (3, "failed")])
+async def test_summary_requests_are_retried_after_a_broken_connection(
+    tmp_path, monkeypatch, failures, status
+):
+    """A summary request has no effect but its cost, so a dropped connection is retried."""
+    from rtagent.domain import CompactRequest
+    from rtagent.infrastructure.providers.errors import transport_failure
+
+    settings = Settings(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    )
+    async with Harness(settings) as harness:
+        first = await harness.run("Evidence to summarize.")
+        assert (await harness.wait(first.id, 10)).status == "succeeded"
+        second = await harness.run("Recent turn.", session_id=first.session_id)
+        assert (await harness.wait(second.id, 10)).status == "succeeded"
+        attempts = []
+
+        async def flaky(_config, _compiled, _tools, _prepared, on_wire, _key=""):
+            await on_wire(None)
+            attempts.append(1)
+            if len(attempts) <= failures:
+                raise transport_failure(httpx.RemoteProtocolError("peer closed"))
+            yield {
+                "kind": "result",
+                "message": Message(role="assistant", content="Summary."),
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+        monkeypatch.setattr("rtagent.application.context.generate", flaky)
+        monkeypatch.setattr("rtagent.application.context.RETRY_DELAYS", (0, 0))
+        session = await harness.repository.session(first.session_id)
+        job = await harness.studio.compact(
+            first.session_id,
+            CompactRequest(
+                expected_revision=session["revision"],
+                config_revision=(await harness.repository.config()).revision,
+                keep_recent_turns=1,
+            ),
+        )
+        await harness.studio.compaction_tasks[job.id]
+        record = await harness.repository.compaction(job.id)
+        assert record["status"] == status
+        call = record["data"]["calls"][0]
+        assert len(call["attempt_history"]) == min(failures, 2)
+        assert "closed before the response was complete" in call["attempt_history"][0]["error"]
+        if status == "failed":
+            assert record["data"]["error"].endswith("Tried 3 times.")
+
+
+def test_connection_failures_say_what_happened():
+    from rtagent.infrastructure.providers.errors import sdk_failure, transport_failure
+
+    refused = transport_failure(httpx.ConnectError("refused"))
+    assert "could not connect" in refused.message and refused.details == {"transient": True}
+    dropped = transport_failure(httpx.ReadError("reset"))
+    assert "closed before the response was complete (ReadError)" in dropped.message
+    request = httpx.Request("POST", "https://api.example/v1/chat/completions")
+    wrapped = openai.APIConnectionError(request=request)
+    wrapped.__cause__ = httpx.RemoteProtocolError("peer closed")
+    assert "closed before" in sdk_failure(wrapped, "").message
+    status = sdk_failure(
+        openai.APIStatusError(
+            "bad", response=httpx.Response(400, request=request), body={"error": "x"}
+        ),
+        "",
+    )
+    assert status.details is None

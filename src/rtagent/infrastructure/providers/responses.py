@@ -16,6 +16,7 @@ from rtagent.infrastructure.providers.attachments import DATA_URL, fill_attachme
 from rtagent.infrastructure.providers.errors import (
     error_message,
     provider_failure,
+    transport_failure,
     truncated_output,
 )
 from rtagent.infrastructure.providers.messages import sse_events
@@ -183,10 +184,8 @@ async def stream_responses(
                         raise provider_failure(error_message(event) or "streaming error", key)
     except AppError:
         raise
-    except httpx.TimeoutException:
-        raise provider_failure("the provider did not respond in time; no retry was made.") from None
-    except httpx.TransportError:
-        raise provider_failure("could not connect to the configured base URL.") from None
+    except httpx.TransportError as exc:
+        raise transport_failure(exc) from None
     except Exception as exc:
         raise provider_failure(f"{type(exc).__name__}; no automatic retry.", key) from None
     if not isinstance(final, dict):
