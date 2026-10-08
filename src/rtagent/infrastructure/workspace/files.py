@@ -137,12 +137,36 @@ class Workspace:
             self._write_bytes(target, content)
             return True
 
+    def relative(self, requested: str) -> str:
+        """Accept a path as a model writes it: relative, or absolute but inside the workspace.
+
+        An absolute path may name the workspace by its real location or by `/workspace`, where
+        Linux commands see it. Anything else absolute is denied with the root to use instead.
+        The result is checked like any relative path, so `..` and links stay refused."""
+        if requested == "/workspace" or requested.startswith("/workspace/"):
+            return requested.removeprefix("/workspace").lstrip("/") or "."
+        absolute = Path(requested)
+        if absolute.is_absolute():
+            if absolute == self.root or absolute.is_relative_to(self.root):
+                return absolute.relative_to(self.root).as_posix() or "."
+            raise AppError(
+                "tool_denied",
+                f"{requested} is outside this workspace ({self.root}). Use a path relative to "
+                "the workspace root; another folder must be opened as its own project.",
+                403,
+            )
+        return requested
+
     def path(self, relative: str) -> Path:
         """Reject traversal, links, runtime data, and credential paths before I/O."""
+        relative = self.relative(relative)
         requested = Path(relative)
         if requested.is_absolute() or ".." in requested.parts or ":" in relative:
             raise AppError(
-                "tool_denied", "Paths outside the workspace are denied; use a relative path.", 403
+                "tool_denied",
+                f"Paths outside the workspace ({self.root}) are denied; use a relative path "
+                "without '..'.",
+                403,
             )
         candidate = self.root
         for part in requested.parts:
@@ -343,7 +367,12 @@ class Workspace:
                 exists = target.exists()
                 if operation.action == "add":
                     if exists:
-                        raise AppError("file_conflict", "Add File must name a new file.", 409)
+                        raise AppError(
+                            "file_conflict",
+                            f"{operation.path} already exists; Add File only creates files. Use "
+                            "*** Update File with its hash from read_text instead.",
+                            409,
+                        )
                     before, after = "", "\n".join(line[1:] for line in operation.lines)
                     if operation.lines:
                         after += "\n"
@@ -443,12 +472,31 @@ class Workspace:
             raise AppError("tool_output_limit", "Text exceeds the 2 MiB file limit.")
         with self.lock:
             previous = self.read_path(target, TEXT_FILE_LIMIT) if target.exists() else ""
-            if (target.exists() and expected_hash != digest(previous)) or (
-                not target.exists() and expected_hash not in (None, digest(""))
-            ):
+            name = (
+                target.relative_to(self.root).as_posix()
+                if target.is_relative_to(self.root)
+                else target.name
+            )
+            if target.exists() and expected_hash is None:
                 raise AppError(
                     "file_conflict",
-                    "The file changed or already exists. Read it before replacing it.",
+                    f"{name} already exists. To replace it, read it with read_text and pass the "
+                    "returned hash as expected_hash; to change part of it, use edit_text or "
+                    "apply_patch.",
+                    409,
+                )
+            if target.exists() and expected_hash != digest(previous):
+                raise AppError(
+                    "file_conflict",
+                    f"{name} changed since it was read (or the hash is wrong). Read it again with "
+                    "read_text and pass the new hash.",
+                    409,
+                )
+            if not target.exists() and expected_hash not in (None, digest("")):
+                raise AppError(
+                    "file_conflict",
+                    f"{name} no longer exists; it was moved or deleted since it was read. Write "
+                    "it without expected_hash to create it again.",
                     409,
                 )
             target.parent.mkdir(parents=True, exist_ok=True)

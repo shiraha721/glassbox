@@ -211,3 +211,35 @@ def test_output_buffer_keeps_head_and_newest_tail():
     short = OutputBuffer(head=5, tail=5)
     short.append("0123456789")
     assert not short.truncated and short.text() == "0123456789"
+
+
+def test_absolute_paths_inside_the_workspace_are_accepted(tmp_path):
+    """Models often name files by absolute path; inside the workspace that is the same file."""
+    root = tmp_path / "project"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "a.txt").write_text("alpha", encoding="utf-8")
+    (root / "AGENTS.md").write_text("Rules", encoding="utf-8")
+    workspace = Workspace(root)
+    assert workspace.read(str(root / "src" / "a.txt"))["content"] == "alpha"
+    # /workspace is where Linux commands see the same folder.
+    assert workspace.read("/workspace/src/a.txt")["content"] == "alpha"
+    assert workspace.path(str(root)) == root.resolve()
+    assert workspace.read_instructions(str(root))["documents"][0]["content"] == "Rules"
+    for outside in ("/etc/passwd", str(root / ".." / "elsewhere"), "/workspace/../etc"):
+        with pytest.raises(AppError) as denied:
+            workspace.path(outside)
+        assert denied.value.code == "tool_denied" and str(root.resolve()) in denied.value.message
+
+
+def test_write_conflicts_say_how_to_recover(tmp_path):
+    workspace = Workspace(tmp_path)
+    (tmp_path / "notes.md").write_text("old", encoding="utf-8")
+    with pytest.raises(AppError) as exists:
+        workspace.write("notes.md", "new")
+    assert "notes.md already exists" in exists.value.message
+    assert "read_text" in exists.value.message and "expected_hash" in exists.value.message
+    with pytest.raises(AppError) as stale:
+        workspace.write("notes.md", "new", "0" * 64)
+    assert "changed since it was read" in stale.value.message
+    read = workspace.read("notes.md")
+    assert workspace.write("notes.md", "new", read["hash"])["path"] == "notes.md"
