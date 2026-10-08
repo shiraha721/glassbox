@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import threading
+from contextlib import suppress
 from difflib import unified_diff
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -21,7 +22,9 @@ from rtagent.domain.patches import apply_hunks, parse_patch
 
 FILE_LIMIT = 65_536
 TEXT_FILE_LIMIT = 2 * 1024 * 1024
-MEMORY_PATH = ".rtagent/MEMORY.md"
+# Memory is studio data, kept per workspace in the data directory. Earlier versions kept it
+# in the project at this path; it moves out the first time the workspace's memory is used.
+LEGACY_MEMORY_PATH = ".rtagent/MEMORY.md"
 SKILL_ROOT = ".agents/skills"
 COMMAND_ROOT = ".agents/commands"
 SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -482,11 +485,46 @@ class Workspace:
                 break
         return {"path": path, "entries": entries[:200], "truncated": len(entries) > 200}
 
+    @property
+    def memory_file(self) -> Path:
+        """This workspace's memory in the data directory, in a folder named by its root."""
+        key = hashlib.sha256(str(self.root).encode()).hexdigest()[:16]
+        return self.data_dir / "memory" / key / "MEMORY.md"
+
+    def _memory_target(self) -> Path:
+        """The memory file, after moving one an earlier version left in the project."""
+        target = self.memory_file
+        try:
+            legacy = self.path(LEGACY_MEMORY_PATH)  # rejects links and anything outside the root
+        except AppError:
+            return target
+        with self.lock:
+            if not target.exists() and legacy.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                # Copy, then remove: the project and the data directory may be on other drives.
+                shutil.copy2(legacy, target)
+                with suppress(FileNotFoundError):
+                    legacy.unlink()
+                with suppress(OSError):
+                    legacy.parent.rmdir()  # only if nothing else, such as packages, is left
+        return target
+
     def memory(self) -> dict[str, str]:
-        """Read project memory, treating a missing file as an empty editable document."""
-        if not self.path(MEMORY_PATH).exists():
-            return {"path": MEMORY_PATH, "content": "", "hash": digest("")}
-        return self.read(MEMORY_PATH)
+        """Read workspace memory, treating a missing file as an empty editable document."""
+        target = self._memory_target()
+        content = self.read_path(target) if target.exists() else ""
+        return {"path": str(target), "content": content, "hash": digest(content)}
+
+    def save_memory(self, content: str, expected_hash: str | None = None) -> dict[str, str]:
+        """Replace workspace memory only if it still has the hash the caller last read."""
+        if len(content.encode()) > FILE_LIMIT:
+            raise AppError("tool_output_limit", "Memory is limited to 64 KiB of text.")
+        target = self._memory_target()
+        with self.lock:
+            self._write_file(target, content, expected_hash)
+            # Name the workspace beside its memory, so the folder can be recognized.
+            (target.parent / "workspace.txt").write_text(f"{self.root}\n", encoding="utf-8")
+        return {"path": str(target), "hash": digest(content)}
 
     @staticmethod
     def skill_name(name: str) -> str:
@@ -747,7 +785,7 @@ class Workspace:
                 Message(
                     role="system",
                     source="workspace:memory",
-                    content="Workspace memory (.rtagent/MEMORY.md):\n" + memory,
+                    content="Workspace memory:\n" + memory,
                 )
             )
         skills, errors = self.skills()

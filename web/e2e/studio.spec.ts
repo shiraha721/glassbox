@@ -545,21 +545,23 @@ test('workspace context refreshes after terminal polling when SSE never connects
   expect((await page.request.put('/api/v1/config', { data: bootstrap.config })).ok()).toBe(true);
   await page.reload();
   await page.getByRole('button', { name: 'Workspace', exact: true }).click();
-  await expect(page.getByLabel('Project memory', { exact: true })).toBeVisible();
-  const previousMemory = await page.getByLabel('Project memory', { exact: true }).inputValue();
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  const skill = page.getByLabel('Use poll-check', { exact: true });
+  await expect(page.getByLabel('Use debugging', { exact: true })).toBeVisible();
+  await expect(skill).not.toBeAttached();
   await page.route('**/api/v1/runs/*/events', (route) => route.abort());
   // Delay the real file effect until the ordinary post-submission refresh has completed.
+  const text = '---\\nname: poll-check\\ndescription: Written by a command.\\n---\\nBody\\n';
   const command =
     shell === 'powershell'
-      ? "Start-Sleep -Milliseconds 1200; New-Item -ItemType Directory -Force -Path (Join-Path $env:RTAGENT_WORKSPACE '.rtagent') | Out-Null; [IO.File]::WriteAllText((Join-Path $env:RTAGENT_WORKSPACE '.rtagent/MEMORY.md'), 'Terminal poll memory', [Text.UTF8Encoding]::new($false))"
-      : "sleep 1.2; mkdir -p .rtagent; printf 'Terminal poll memory' > .rtagent/MEMORY.md";
+      ? `Start-Sleep -Milliseconds 1200; $d = Join-Path $env:RTAGENT_WORKSPACE '.agents/skills/poll-check'; New-Item -ItemType Directory -Force -Path $d | Out-Null; [IO.File]::WriteAllText((Join-Path $d 'SKILL.md'), "${text.replaceAll('\\n', '`n')}", [Text.UTF8Encoding]::new($false))`
+      : `sleep 1.2; mkdir -p .agents/skills/poll-check; printf -- '${text}' > .agents/skills/poll-check/SKILL.md`;
   await startTask(page, `/tool ${shell} ${JSON.stringify({ command })}`);
   await page.getByRole('button', { name: 'Workspace', exact: true }).click();
-  await expect(page.getByLabel('Project memory', { exact: true })).toHaveValue(previousMemory);
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await expect(skill).not.toBeAttached();
   await expect(page.getByTestId('run-status')).toHaveText('succeeded');
-  await expect(page.getByLabel('Project memory', { exact: true })).toHaveValue(
-    'Terminal poll memory',
-  );
+  await expect(skill).toBeVisible();
 });
 
 test('the workbench remains usable on a narrow viewport', async ({ page }) => {

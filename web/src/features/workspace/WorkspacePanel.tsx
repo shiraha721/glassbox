@@ -229,7 +229,10 @@ function MemoryEditor({
           onChange={(event) => setContent(event.target.value)}
         />
       </label>
-      <p className="subtle">{memory.path} · Loaded with AGENTS.md at the start of each run.</p>
+      <p className="subtle">
+        Loaded with AGENTS.md at the start of each run. Kept in the studio&apos;s data folder, not
+        in the project: <code>{memory.path}</code>
+      </p>
       <button
         className="button"
         disabled={busy || content === memory.content}

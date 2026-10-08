@@ -35,7 +35,9 @@ uv run rtagent serve          # or: uv run python -m rtagent
 
 Open **http://127.0.0.1:8001**. Use `uv run rtagent serve --port 8080` for another port. The service listens on loopback only and has no login; it is a single-user local tool, not a server to expose on a network.
 
-Start-up applies database migrations. Runtime data lives in `STUDIO_DATA_DIR` (default `var/`), which Git ignores.
+Start-up applies database migrations. The studio keeps its data (conversations, settings, saved keys, memory, global Skills and commands, undo history, images) in a folder of your own, never in a project or in this checkout: `~/.local/share/rtagent` on Linux and WSL (`$XDG_DATA_HOME/rtagent` if that is set), `%LOCALAPPDATA%\rtagent` on Windows, `~/Library/Application Support/rtagent` on macOS. Set `STUDIO_DATA_DIR` to use another folder.
+
+Earlier versions kept this data in `var/` under the folder the studio was started from. The first start with the default folder moves the studio's own files from there (other files in `var/` stay, and `var/MOVED.txt` says where the data went). If the old data is still open, for example because another studio is running from that folder, start-up stops with a message instead; stop the other studio and start again, or set `STUDIO_DATA_DIR` to the old folder to keep using it. A `.env` copied from an older `.env.example` sets `STUDIO_DATA_DIR=var`; remove that line to move.
 
 ## Configure a model
 
@@ -165,7 +167,7 @@ Each conversation belongs to one project, or to the default workspace (`STUDIO_W
 At the start of each Run, the agent receives:
 
 - **Instructions:** the first non-empty `AGENTS.override.md` or `AGENTS.md` at the project root. The `read_instructions` tool loads the chain for deeper directories, where deeper files take precedence.
-- **Memory:** `.rtagent/MEMORY.md`, editable in **Workspace → Memory** and through the agent's `read_memory`/`save_memory` tools. It is plain Markdown; there is no hidden summarization.
+- **Memory:** notes kept per workspace, editable in **Workspace → Memory** and through the agent's `read_memory`/`save_memory` tools. It is plain Markdown; there is no hidden summarization. Memory is studio data, stored in the data folder (`memory/<id>/MEMORY.md`, with `workspace.txt` naming the folder it belongs to), not in the project; a `.rtagent/MEMORY.md` left by an earlier version moves there the first time the workspace is used. Commands cannot read it, and **Undo file changes** does not cover it.
 - **Skill catalog:** the name and description of each Skill. The agent loads a Skill's full text with `load_skill` when it matches the task, or you select it in **Workspace → Skills** or mention `$name`.
 
 Skills are folders with a `SKILL.md`:
@@ -259,6 +261,7 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 | A request fails after turning on **Show the model's thinking** | The model or account does not support it (Claude models before 4.6; OpenAI organizations not verified for reasoning summaries). Turn the option off for that provider. |
 | A task with an image fails | The model does not accept images; the error carries the provider's reason. Choose a model with image input or remove the image. |
 | **Undo file changes** skips a file | The file changed after the Run (a later Run, a command or you), so it is left alone. Use Git for those changes. |
+| "Studio data in … could not be moved" at start-up | The old `var/` data is still open, usually by another studio started from the same folder. Stop it and start again, or set `STUDIO_DATA_DIR` to the old folder. |
 | A Run is "interrupted" | The service restarted, or a call's outcome is unknown. Review each uncertain call and choose **Retry** or record a verified result before resuming. |
 
 ## Status and roadmap

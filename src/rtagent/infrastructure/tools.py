@@ -31,7 +31,7 @@ from rtagent.infrastructure.sandbox.processes import ProcessManager, process_vie
 from rtagent.infrastructure.storage import Repository
 from rtagent.infrastructure.web import read_url, web_search
 from rtagent.infrastructure.workspace.downloads import fetch_url
-from rtagent.infrastructure.workspace.files import MEMORY_PATH, Workspace
+from rtagent.infrastructure.workspace.files import Workspace
 
 WRITE_TOOLS = {"write_text", "edit_text", "apply_patch", "save_memory", "save_skill", "fetch_url"}
 # Tools that change files or run code; "Ask before changes" requires approval for each call.
@@ -207,7 +207,7 @@ def native_tools() -> list[ToolDefinition]:
         ),
         tool(
             "read_memory",
-            "Read durable project notes and their hash from .rtagent/MEMORY.md.",
+            "Read this workspace's durable notes (its memory) and their hash.",
             {},
             [],
         ),
@@ -577,7 +577,7 @@ class ToolRegistry:
             "save_skill": self.files.save_skill,
         }
         if name == "save_memory":
-            result = await asyncio.to_thread(self.files.write, MEMORY_PATH, **args)
+            result = await asyncio.to_thread(self.files.save_memory, **args)
         elif name in operations:
             result = await asyncio.to_thread(operations[name], **args)
         else:

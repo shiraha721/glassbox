@@ -92,7 +92,10 @@ async def exercise(client: httpx.AsyncClient, roots: list[Path]) -> None:
         )
         skill = await api("GET", f'/workspace/skills/project-check?project_id={project["id"]}')
         assert f"project-{index}" in skill["content"]
-        assert (roots[index] / ".rtagent/MEMORY.md").read_text() == f"memory-{index}"
+        # Memory is studio data: it is kept per workspace outside the project folder.
+        assert not (roots[index] / ".rtagent").exists()
+        saved = await api("GET", f'/workspace?project_id={project["id"]}')
+        assert saved["memory"]["content"] == f"memory-{index}"
         draft = await api(
             "POST",
             "/prompts/inspect",

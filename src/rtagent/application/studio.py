@@ -80,7 +80,6 @@ from rtagent.infrastructure.storage import Repository
 from rtagent.infrastructure.tools import ToolRegistry
 from rtagent.infrastructure.tracing import redact
 from rtagent.infrastructure.workspace import git
-from rtagent.infrastructure.workspace.files import MEMORY_PATH
 from rtagent.infrastructure.workspace.toolchains import validate_toolchains
 
 
@@ -625,7 +624,7 @@ class Studio:
     ) -> MemoryDocument:
         """Persist a user-authored note without silently overwriting a concurrent edit."""
         registry = await self.workspace_registry(project_id)
-        await asyncio.to_thread(registry.files.write, MEMORY_PATH, **request.model_dump())
+        await asyncio.to_thread(registry.files.save_memory, **request.model_dump())
         return MemoryDocument.model_validate(await asyncio.to_thread(registry.files.memory))
 
     async def skill(self, name: str, project_id: str | None = None) -> SkillDocument:
