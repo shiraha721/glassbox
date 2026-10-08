@@ -753,7 +753,16 @@ test('conversations start under the workspace and context reports live request u
     'Spent in this conversation: $0.0000 · 1 run without a price or reported usage.',
   );
 
-  // A provider that does report usage fills the window bar, cache-hit rate and output metrics.
+  // A provider that does report usage fills the conversation totals, the window bar and a
+  // column per request.
+  const request = (prompt: number, cached: number) => ({
+    run_id: 'run',
+    model: 'test-model',
+    prompt_tokens: prompt,
+    cache_read_tokens: cached,
+    output_tokens: 800,
+    context_window: 200000,
+  });
   await page.route('**/api/v1/sessions/*/context', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -766,15 +775,36 @@ test('conversations start under the workspace and context reports live request u
       cache_write_tokens: 0,
       output_tokens: 800,
     };
+    body.session_usage = {
+      requests: 3,
+      reported_requests: 3,
+      subagent_requests: 0,
+      prompt_tokens: 120000,
+      cache_read_tokens: 96000,
+      cache_write_tokens: 2000,
+      output_tokens: 2400,
+      cache_hit_rate: 0.8,
+      peak_prompt_tokens: 50000,
+    };
+    body.requests = [request(30000, 20000), request(40000, 31000), request(50000, 45000)];
     await route.fulfill({ response, json: body });
   });
   await page.getByRole('button', { name: 'Close context', exact: true }).click();
   await page.getByRole('button', { name: 'Context', exact: true }).click();
-  const usage = page.locator('.context-usage');
-  await expect(usage).toContainText('50,000 / 200,000 tokens');
-  await expect(usage).toContainText('25%'); // window used
-  await expect(usage).toContainText('90%'); // cache hit rate
-  await expect(usage.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25');
+  const totals = page.getByRole('region', { name: 'Usage in this conversation' });
+  await expect(totals).toContainText('3 requests');
+  await expect(totals).toContainText('80%'); // cache hit rate over the whole conversation
+  await expect(totals).toContainText('120K'); // prompt tokens sent in total
+  const window = page.getByRole('region', { name: 'Context window' });
+  await expect(window).toContainText('50,000 / 200,000 tokens');
+  await expect(window).toContainText('25% used by the latest request · peak 50,000 (25%)');
+  await expect(window.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25');
+  await expect(window.locator('.request-column')).toHaveCount(3);
+  await expect(window.locator('.request-readout')).toHaveText(
+    'Request 3: 50,000 prompt tokens · 25% of the window · 45,000 from cache · test-model',
+  );
+  await window.locator('.request-column').first().hover();
+  await expect(window.locator('.request-readout')).toContainText('Request 1: 30,000 prompt');
 });
 
 test('an evaluation compares prompt variants on the same cases', async ({ page }) => {

@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from test_api import start, wait_state
 
-from rtagent.application.context import context_usage
+from rtagent.application.context import context_usage, session_usage
 from rtagent.application.runner import Runner
 from rtagent.domain import Message, ToolCall
 
@@ -56,6 +56,78 @@ async def test_context_reports_the_latest_request_usage(studio_client, monkeypat
     assert usage["cache_read_tokens"] == 200
     # The default test provider is the fake adapter, where input already counts any cache.
     assert usage["prompt_tokens"] == 321
+
+
+def test_session_usage_totals_every_reported_request():
+    """Totals cover the whole conversation; the cache rate uses requests that report caching."""
+
+    def row(run, adapter, inputs, read=None, write=None, subagent=0):
+        return {
+            "run_id": run,
+            "adapter": adapter,
+            "input_tokens": inputs,
+            "output_tokens": 10 if inputs is not None else None,
+            "cache_read": read,
+            "cache_write": write,
+            "model": "m",
+            "subagent": subagent,
+            "context_window": 200_000,
+        }
+
+    totals, requests = session_usage(
+        [
+            row("r1", "anthropic", 100, read=0, write=900),
+            row("r1", "anthropic", 50, read=950, write=0),
+            row("r2", "openai", 400, subagent=1),
+            row("r3", "fake", None),
+        ]
+    )
+    assert (totals.requests, totals.reported_requests, totals.subagent_requests) == (4, 3, 1)
+    assert totals.prompt_tokens == 2400 and totals.output_tokens == 30
+    assert (totals.cache_read_tokens, totals.cache_write_tokens) == (950, 900)
+    # The sub-agent's provider reported no cache figures, so its prompt is not in the rate.
+    assert totals.cache_hit_rate == round(950 / 2000, 4)
+    assert totals.peak_prompt_tokens == 1000
+    # Only the conversation's own requests are listed for the window chart.
+    assert [item.run_id for item in requests] == ["r1", "r1", "r3"]
+    assert requests[1].prompt_tokens == 1000 and requests[-1].prompt_tokens is None
+    assert session_usage([])[0].cache_hit_rate is None
+
+
+async def test_context_totals_cover_every_request(studio_client, monkeypatch):
+    """Each model request of a Run adds to the conversation totals, not just the latest one."""
+    client, _app = studio_client
+    replies = iter(
+        [
+            (
+                Message(
+                    role="assistant",
+                    tool_calls=[ToolCall(id="c1", name="list_files", args={"path": "."})],
+                ),
+                {"input_tokens": 1000, "output_tokens": 30, "cache_read_input_tokens": 0},
+            ),
+            (
+                Message(role="assistant", content="Listed."),
+                {"input_tokens": 1500, "output_tokens": 20, "cache_read_input_tokens": 1000},
+            ),
+        ]
+    )
+
+    async def scripted_model(_config, _compiled, _tools, _prepared, on_wire, _key=""):
+        await on_wire(None)
+        message, usage = next(replies)
+        yield {"kind": "result", "message": message, "usage": usage}
+
+    monkeypatch.setattr("rtagent.application.runner.generate", scripted_model)
+    run, _body, session_id, _preview = await start(client)
+    await wait_state(client, run["id"], {"succeeded"})
+    context = (await client.get(f"/api/v1/sessions/{session_id}/context")).json()
+    totals = context["session_usage"]
+    assert (totals["requests"], totals["prompt_tokens"], totals["output_tokens"]) == (2, 2500, 50)
+    assert totals["cache_read_tokens"] == 1000 and totals["cache_hit_rate"] == 0.4
+    assert totals["peak_prompt_tokens"] == 1500
+    assert [item["prompt_tokens"] for item in context["requests"]] == [1000, 1500]
+    assert context["live_usage"]["prompt_tokens"] == 1500
 
 
 async def allow_echo(client, **limits):

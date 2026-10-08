@@ -989,6 +989,38 @@ class ContextUsage(Contract):
     output_tokens: int | None = None
 
 
+class ContextRequest(Contract):
+    """One model request of the conversation, as its provider reported it.
+
+    `prompt_tokens` is everything sent (cached and uncached) and `context_window` the window of
+    the model that Run used, so each request's fill can be drawn against its own limit."""
+
+    run_id: str
+    model: str | None = None
+    prompt_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    output_tokens: int | None = None
+    context_window: int | None = None
+
+
+class SessionUsage(Contract):
+    """Provider-reported totals over every model request of a conversation and its sub-agents.
+
+    Requests without reported usage are counted in `requests` but add nothing to the sums; the
+    cache figures are null when no request reported cache usage, never a misleading zero."""
+
+    requests: int = 0
+    reported_requests: int = 0
+    subagent_requests: int = 0
+    prompt_tokens: int = 0
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    output_tokens: int = 0
+    # Share of prompt tokens served from cache, over requests that reported cache usage.
+    cache_hit_rate: float | None = None
+    peak_prompt_tokens: int | None = None
+
+
 class ContextView(Contract):
     """Estimated history size and explicit summary boundaries, separate from actual model usage."""
 
@@ -1003,6 +1035,9 @@ class ContextView(Contract):
     context_window: int | None
     reserved_output_tokens: int
     live_usage: ContextUsage | None
+    # Totals over the whole conversation, and its own requests in order (at most the last 200).
+    session_usage: SessionUsage = Field(default_factory=SessionUsage)
+    requests: list[ContextRequest] = Field(default_factory=list)
     # Sum of priced Runs in US dollars; Runs without a price or usage are counted separately.
     spent: float = 0
     unpriced_runs: int = 0

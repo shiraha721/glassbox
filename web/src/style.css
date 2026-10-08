@@ -31,6 +31,9 @@
   --progress-soft: #ebf2ff;
   --diff-add: #e6f6ea;
   --diff-remove: #fdecea;
+  /* Chart series, validated for color-vision deficiency against each theme's surface. */
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
   --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
   --shadow-md: 0 4px 18px rgb(16 24 40 / 8%);
   --shadow-lg: 0 20px 60px rgb(16 24 40 / 20%);
@@ -76,6 +79,8 @@
     --progress-soft: #152340;
     --diff-add: #143020;
     --diff-remove: #3a1a1a;
+    --viz-1: #3987e5;
+    --viz-2: #d95926;
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
     --shadow-md: 0 4px 18px rgb(0 0 0 / 40%);
     --shadow-lg: 0 20px 60px rgb(0 0 0 / 60%);
@@ -2105,6 +2110,105 @@ summary::-webkit-details-marker {
 }
 .context-usage .subtle {
   margin: 0;
+}
+.request-chart {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+.request-chart figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.chart-legend {
+  display: flex;
+  gap: 10px;
+}
+.chart-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 3px;
+  border-radius: 2px;
+}
+[data-series='cached'] {
+  background: var(--viz-1);
+}
+[data-series='uncached'] {
+  background: var(--viz-2);
+}
+.request-plot {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px;
+  height: 96px;
+}
+.request-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.request-columns {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-strong);
+}
+.request-column {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column-reverse;
+  gap: 2px;
+  max-width: 24px;
+  height: 100%;
+  cursor: default;
+}
+.request-column > span {
+  flex: none;
+  min-height: 0;
+}
+.request-column > span:last-child {
+  border-radius: 4px 4px 0 0;
+}
+.request-column:not([data-active]) > span {
+  opacity: 0.55;
+}
+.request-columns:not(:hover) .request-column > span {
+  opacity: 1;
+}
+.request-readout {
+  min-height: 18px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.request-table summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.request-table table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.request-table th,
+.request-table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
 }
 .context-accounting {
   display: grid;

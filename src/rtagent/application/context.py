@@ -4,7 +4,16 @@ import asyncio
 import json
 from typing import Any
 
-from rtagent.domain import AppError, Block, CompactionView, ContextUsage, Preset, StudioConfig
+from rtagent.domain import (
+    AppError,
+    Block,
+    CompactionView,
+    ContextRequest,
+    ContextUsage,
+    Preset,
+    SessionUsage,
+    StudioConfig,
+)
 from rtagent.domain.prompts import compile_prompt
 from rtagent.infrastructure.credentials import CredentialStore
 from rtagent.infrastructure.providers.chat import generate, prepare, transformations
@@ -69,6 +78,47 @@ def context_usage(row: dict[str, Any] | None, model: str) -> ContextUsage | None
         cache_write_tokens=write,
         output_tokens=row.get("output_tokens"),
     )
+
+
+def session_usage(rows: list[dict[str, Any]]) -> tuple[SessionUsage, list[ContextRequest]]:
+    """Total a conversation's reported request usage and list its own requests for display.
+
+    Sums count only what providers reported. The cache hit rate divides cache reads by the
+    prompt tokens of the requests that reported cache usage, so a provider that reports no
+    cache figures neither lowers nor fakes the rate."""
+    totals = SessionUsage(requests=len(rows))
+    cached_prompt = 0
+    requests: list[ContextRequest] = []
+    for row in rows:
+        usage = context_usage(row, "")
+        assert usage is not None
+        if row["subagent"]:
+            totals.subagent_requests += 1
+        else:
+            requests.append(
+                ContextRequest(
+                    run_id=row["run_id"],
+                    model=usage.model,
+                    prompt_tokens=usage.prompt_tokens,
+                    cache_read_tokens=usage.cache_read_tokens,
+                    output_tokens=usage.output_tokens,
+                    context_window=row.get("context_window"),
+                )
+            )
+        if usage.prompt_tokens is None:
+            continue
+        totals.reported_requests += 1
+        totals.prompt_tokens += usage.prompt_tokens
+        totals.output_tokens += usage.output_tokens or 0
+        totals.peak_prompt_tokens = max(totals.peak_prompt_tokens or 0, usage.prompt_tokens)
+        if usage.cache_read_tokens is not None:
+            totals.cache_read_tokens = (totals.cache_read_tokens or 0) + usage.cache_read_tokens
+            cached_prompt += usage.prompt_tokens
+        if usage.cache_write_tokens is not None:
+            totals.cache_write_tokens = (totals.cache_write_tokens or 0) + usage.cache_write_tokens
+    if totals.cache_read_tokens is not None and cached_prompt:
+        totals.cache_hit_rate = round(totals.cache_read_tokens / cached_prompt, 4)
+    return totals, requests[-200:]
 
 
 async def reduce_context(

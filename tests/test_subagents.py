@@ -56,6 +56,11 @@ async def test_a_delegated_task_runs_as_a_hidden_child_run(studio_client, monkey
     assert child["snapshot"]["workspace_root"] == finished["workspace_root"]
     assert (await client.get(f"/api/v1/runs/{child_id}")).json()["status"] == "succeeded"
     # Hidden from the conversation list, counted with the conversation, deleted with it.
+    # The conversation's request totals include the sub-agent's request; its chart does not.
+    context = (await client.get(f"/api/v1/sessions/{session_id}/context")).json()
+    assert context["session_usage"]["requests"] == 3
+    assert context["session_usage"]["subagent_requests"] == 1
+    assert len(context["requests"]) == 2
     listed = [item["id"] for item in (await client.get("/api/v1/bootstrap")).json()["sessions"]]
     assert child["session_id"] not in listed
     assert [item["id"] for item in await repository.child_runs(session_id)] == [child_id]

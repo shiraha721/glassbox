@@ -12,6 +12,7 @@ from rtagent.application.context import (
     context_usage,
     estimated_tokens,
     reduce_context,
+    session_usage,
 )
 from rtagent.application.evaluation import batch_view, eval_record, eval_summary, graded_item
 from rtagent.application.runner import Runner
@@ -147,7 +148,10 @@ class Studio:
         session = await self.repository.session(session_id)
         effective = await self.repository.effective_history(session)
         config = await self.repository.config()
-        usage = await self.repository.latest_model_usage(session_id)
+        rows = await self.repository.model_usage(session_id)
+        totals, requests = session_usage(rows)
+        # The latest request of this conversation (not of a sub-agent) is its live context.
+        latest = next((row for row in reversed(rows) if not row["subagent"]), None)
         # Sub-agent Runs started from this conversation are part of what it spent.
         costs = [
             run["usage"].get("cost")
@@ -164,9 +168,11 @@ class Studio:
             effective_messages=len(effective),
             raw_estimated_tokens=estimated_tokens(session["messages"]),
             effective_estimated_tokens=estimated_tokens(effective),
-            context_window=config.provider.context_window,
+            context_window=(latest or {}).get("context_window") or config.provider.context_window,
             reserved_output_tokens=config.provider.max_output_tokens,
-            live_usage=context_usage(usage, config.provider.model),
+            live_usage=context_usage(latest, config.provider.model),
+            session_usage=totals,
+            requests=requests,
             spent=round(sum(cost for cost in costs if cost is not None), 6),
             unpriced_runs=sum(1 for cost in costs if cost is None),
             active_compaction_id=session.get("compaction_id"),

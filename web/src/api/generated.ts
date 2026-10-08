@@ -1532,6 +1532,27 @@ export interface components {
             input_hash: string;
         };
         /**
+         * ContextRequest
+         * @description One model request of the conversation, as its provider reported it.
+         *
+         *     `prompt_tokens` is everything sent (cached and uncached) and `context_window` the window of
+         *     the model that Run used, so each request's fill can be drawn against its own limit.
+         */
+        ContextRequest: {
+            /** Run Id */
+            run_id: string;
+            /** Model */
+            model: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens: number | null;
+            /** Output Tokens */
+            output_tokens: number | null;
+            /** Context Window */
+            context_window: number | null;
+        };
+        /**
          * ContextRestore
          * @description Restore the complete effective history using the observed conversation revision.
          */
@@ -1583,6 +1604,9 @@ export interface components {
             /** Reserved Output Tokens */
             reserved_output_tokens: number;
             live_usage: components["schemas"]["ContextUsage"] | null;
+            session_usage: components["schemas"]["SessionUsage"];
+            /** Requests */
+            requests: components["schemas"]["ContextRequest"][];
             /**
              * Spent
              * @default 0
@@ -3040,6 +3064,48 @@ export interface components {
             project_id?: string | null;
             /** Grants */
             grants?: components["schemas"]["Grant-Input"][] | null;
+        };
+        /**
+         * SessionUsage
+         * @description Provider-reported totals over every model request of a conversation and its sub-agents.
+         *
+         *     Requests without reported usage are counted in `requests` but add nothing to the sums; the
+         *     cache figures are null when no request reported cache usage, never a misleading zero.
+         */
+        SessionUsage: {
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+            /**
+             * Reported Requests
+             * @default 0
+             */
+            reported_requests: number;
+            /**
+             * Subagent Requests
+             * @default 0
+             */
+            subagent_requests: number;
+            /**
+             * Prompt Tokens
+             * @default 0
+             */
+            prompt_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number | null;
+            /** Cache Write Tokens */
+            cache_write_tokens: number | null;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /** Cache Hit Rate */
+            cache_hit_rate: number | null;
+            /** Peak Prompt Tokens */
+            peak_prompt_tokens: number | null;
         };
         /**
          * SessionView
