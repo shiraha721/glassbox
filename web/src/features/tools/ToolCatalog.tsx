@@ -158,7 +158,7 @@ export function ToolsPanel({
   config: Config;
   access: WorkspaceAccess;
   grants: Grant[];
-  onRevoke: (remaining: Grant[]) => void;
+  onRevoke: (grant: Grant) => void;
   onClose: () => void;
   onSettings: () => void;
 }) {
@@ -183,7 +183,7 @@ export function ToolsPanel({
                   <button
                     className="text-button"
                     aria-label={`Revoke ${label}`}
-                    onClick={() => onRevoke(grants.filter((item) => item !== grant))}
+                    onClick={() => onRevoke(grant)}
                   >
                     Revoke
                   </button>

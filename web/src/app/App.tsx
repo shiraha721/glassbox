@@ -892,11 +892,16 @@ function Workspace({ data }: { data: Bootstrap }) {
                 config={effectiveConfig(data.config, data.tools, choice.access)}
                 access={choice.access}
                 grants={session?.grants ?? []}
-                onRevoke={(remaining) =>
+                onRevoke={(grant) =>
                   void perform(async () => {
-                    await request(`/sessions/${session!.id}`, 'PATCH', {
-                      expected_revision: session!.revision,
-                      grants: remaining,
+                    // Edit the conversation as it is now: a run that just ended has advanced
+                    // its revision before the cached list catches up.
+                    const current = await request<Session>(`/sessions/${session!.id}`);
+                    await request(`/sessions/${current.id}`, 'PATCH', {
+                      expected_revision: current.revision,
+                      grants: current.grants.filter(
+                        (item) => item.tool !== grant.tool || item.prefix !== grant.prefix,
+                      ),
                     });
                     await refresh();
                   })
