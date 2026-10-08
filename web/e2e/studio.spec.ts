@@ -1088,6 +1088,45 @@ test('the task box completes Skills and runs on the chosen send key', async ({ p
   await expect(page.getByTestId('run-status')).toHaveText('succeeded');
 });
 
+test('side panels leave the conversation visible on a laptop-sized window', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await openWorkspace(page);
+  await expect(page.locator('.conversation-empty')).not.toContainText('Summarize how');
+  await startTask(page, 'A turn that must stay visible.');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await page.getByRole('button', { name: 'Context', exact: true }).click();
+  const panel = page.getByLabel('Conversation context');
+  await expect(panel.getByRole('button', { name: 'Compact older turns' })).toBeVisible();
+  const turn = page.locator('.conversation-turn').first();
+  await expect(turn).toBeInViewport();
+  const turnBox = (await turn.boundingBox())!;
+  const panelBox = (await panel.boundingBox())!;
+  expect(turnBox.x + turnBox.width).toBeLessThanOrEqual(panelBox.x);
+  // The message box fits its narrower column instead of spilling under the panel.
+  const composer = (await page.locator('.task-composer').boundingBox())!;
+  const run = (await page.getByRole('button', { name: 'Run', exact: true }).boundingBox())!;
+  expect(run.x + run.width).toBeLessThanOrEqual(composer.x + composer.width);
+});
+
+test('common download hosts can be added to existing settings', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings
+    .getByRole('navigation', { name: 'Settings pages' })
+    .getByRole('button', { name: 'Sandbox', exact: true })
+    .click();
+  const hosts = settings.getByLabel('Allowed HTTPS download hosts', { exact: false });
+  await expect(hosts).toContainText('github.com');
+  const add = settings.getByRole('button', { name: 'Add common hosts', exact: true });
+  await expect(add).toBeDisabled();
+  await hosts.fill('example.org');
+  await add.click();
+  await expect(hosts).toHaveValue(/^example\.org\ngithub\.com\n/);
+  await expect(hosts).toContainText('files.pythonhosted.org');
+  await settings.getByLabel('Close settings').click();
+});
+
 test('the prompt preview compiles as soon as it is opened', async ({ page }) => {
   await openWorkspace(page);
   await page.getByLabel('Task', { exact: true }).fill('Explain the entry point');

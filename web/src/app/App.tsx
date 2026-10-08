@@ -68,11 +68,6 @@ import { addImages, IMAGE_TYPES, imageFiles, uploadImages } from '../features/co
 type Panel = 'prompt' | 'inspector' | 'workspace' | 'tools' | 'context' | 'processes' | 'changes';
 
 const emptyRuns: Run[] = [];
-const starters = [
-  'Summarize how this project is organized and how to run its tests.',
-  'Find the cause of the failing tests and fix it.',
-  'Review the code under src/ for security issues and report evidence.',
-];
 
 /** Load the local workspace directly, without accounts or an unlock screen. */
 export default function App() {
@@ -585,23 +580,6 @@ function Workspace({ data }: { data: Bootstrap }) {
                     <code title={workspaceRoot}>{project?.name || 'the default workspace'}</code>{' '}
                     and runs commands in an isolated sandbox without network access.
                   </p>
-                  {!session?.archived && (
-                    <div className="starter-list">
-                      {starters.map((text) => (
-                        <button
-                          key={text}
-                          className="starter"
-                          disabled={busy}
-                          onClick={() => {
-                            setInput(text);
-                            document.getElementById('task-input')?.focus();
-                          }}
-                        >
-                          {text}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
             </div>

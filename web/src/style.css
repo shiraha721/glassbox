@@ -842,6 +842,7 @@ summary::-webkit-details-marker {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  container: conversation / inline-size;
   padding: 28px 28px 12px;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
@@ -886,30 +887,6 @@ summary::-webkit-details-marker {
   background: var(--surface-3);
   color: var(--text);
 }
-.starter-list {
-  display: grid;
-  gap: 8px;
-  max-width: 560px;
-  margin: 0 auto;
-}
-.starter {
-  padding: 11px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  text-align: left;
-  font-size: 13px;
-  color: var(--text-2);
-  box-shadow: var(--shadow-sm);
-  transition:
-    border-color 0.12s,
-    color 0.12s;
-}
-.starter:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--text);
-}
-
 /* Conversation turns */
 .conversation-turn {
   scroll-margin-top: 16px;
@@ -1551,6 +1528,7 @@ summary::-webkit-details-marker {
 .task-dock {
   padding: 8px 28px 14px;
   flex-shrink: 0;
+  container: composer / inline-size;
 }
 .task-composer {
   width: 100%;
@@ -1653,6 +1631,41 @@ summary::-webkit-details-marker {
   background: var(--surface);
   color: var(--text-2);
   font-size: 13px;
+}
+
+/* A side panel can leave the conversation column narrow at any window width, so the
+   composer and turns adapt to the column itself rather than to the window. */
+@container composer (max-width: 640px) {
+  .composer-actions {
+    flex-wrap: wrap;
+  }
+  .composer-context {
+    flex-wrap: wrap;
+  }
+  .composer-actions > .row {
+    margin-left: auto;
+  }
+  .preset-select {
+    max-width: 130px;
+  }
+  .access-picker .trigger-text {
+    display: none;
+  }
+}
+@container conversation (max-width: 560px) {
+  .turn-heading {
+    flex-wrap: wrap;
+  }
+  .turn-preset {
+    display: none;
+  }
+  .message-avatar {
+    display: none;
+  }
+  .task-message,
+  .agent-activity {
+    gap: 0;
+  }
 }
 
 /* Side panels: optional work areas beside the conversation. */
@@ -2265,28 +2278,57 @@ summary::-webkit-details-marker {
   border-bottom: 1px solid var(--border);
   text-align: right;
 }
-.context-accounting {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.usage-metrics[data-columns='2'] {
+  grid-template-columns: repeat(2, 1fr);
+}
+.compact-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  margin: 0 0 14px;
 }
-.context-accounting div {
-  display: grid;
-  gap: 2px;
-  padding: 12px 14px;
+.compact-controls .inline-field {
+  margin: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.compact-controls .inline-field select {
+  width: 72px;
+  flex: none;
+}
+.compact-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
 }
-.context-accounting strong {
-  font-size: 22px;
-}
-.context-accounting span {
+.compact-status > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
   font-size: 13px;
 }
-.context-accounting small {
-  color: var(--muted);
+.context-section {
+  margin-bottom: 14px;
+}
+.context-section h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.context-file > summary > .subtle {
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.context-file-body > * {
+  margin: 0 0 8px;
 }
 .workspace-content > label,
 .workspace-content > .row,
@@ -2738,7 +2780,29 @@ summary::-webkit-details-marker {
 }
 
 /* Medium widths: panels cover the conversation; the composer stays reachable below. */
+@media (max-width: 1279px) {
+  .utility-pane {
+    width: 380px;
+  }
+  .conversation-scroll {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+  .task-dock {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+}
 @media (max-width: 1100px) {
+  .toggle-label {
+    display: none;
+  }
+  .panel-toggle {
+    padding: 6px 8px;
+  }
+}
+/* Below this width a side panel would squeeze the conversation unreadably, so it covers it. */
+@media (max-width: 960px) {
   .workbench {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -2762,12 +2826,6 @@ summary::-webkit-details-marker {
     border-left: 0;
     border-bottom: 1px solid var(--border);
     overflow: hidden;
-  }
-  .toggle-label {
-    display: none;
-  }
-  .panel-toggle {
-    padding: 6px 8px;
   }
 }
 @media (max-width: 760px) {

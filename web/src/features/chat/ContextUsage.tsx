@@ -181,10 +181,15 @@ function WindowUsage({ context }: { context: Context }) {
   const used = usage?.prompt_tokens;
   if (used === null || used === undefined)
     return (
-      <p className="subtle">
-        The last request ran{usage?.model ? ` on ${usage.model}` : ''}, but this provider reported
-        no token usage.
-      </p>
+      <section className="context-usage" aria-label="Context window">
+        <div className="context-usage-head">
+          <span>Context window now</span>
+        </div>
+        <p className="subtle">
+          The last request ran{usage?.model ? ` on ${usage.model}` : ''}, but this provider reported
+          no token usage.
+        </p>
+      </section>
     );
   const fill = window ? Math.min(100, percent(used, window)) : null;
   const peak = context.session_usage.peak_prompt_tokens ?? used;
