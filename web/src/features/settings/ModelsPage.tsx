@@ -143,7 +143,7 @@ function ProviderModels({
       <div className="row">
         <input
           aria-label={`Add model to ${profile.name}`}
-          placeholder="Model ID, e.g. gpt-5 or claude-opus-5-5"
+          placeholder="Model ID"
           value={added}
           onChange={(event) => setAdded(event.target.value)}
           onKeyDown={(event) => {
@@ -192,9 +192,10 @@ function ProviderModels({
         </label>
       </div>
       <p className="subtle">
-        Thinking counts toward the output limit. Leave temperature empty for models that reject it,
-        such as current Claude models. A context window enables budget checks before a request is
-        sent.
+        Thinking counts toward the output limit. Leave temperature empty to send none, so each model
+        uses its own default; many reasoning models accept only 1, and current Claude models reject
+        any. A context window enables budget checks before a request is sent, the window bar in
+        Context, and compaction when a request fills it.
       </p>
       {profile.adapter !== 'openai' ? (
         <label className="checkbox-label">

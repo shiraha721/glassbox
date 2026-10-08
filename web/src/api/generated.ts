@@ -1215,10 +1215,12 @@ export interface components {
              */
             enabled: boolean;
             /**
-             * Threshold Tokens
-             * @default 100000
+             * Window Percent
+             * @default 90
              */
-            threshold_tokens: number;
+            window_percent: number | null;
+            /** Threshold Tokens */
+            threshold_tokens?: number | null;
             /**
              * Keep Recent Turns
              * @default 2
@@ -1239,10 +1241,12 @@ export interface components {
              */
             enabled: boolean;
             /**
-             * Threshold Tokens
-             * @default 100000
+             * Window Percent
+             * @default 90
              */
-            threshold_tokens: number;
+            window_percent: number | null;
+            /** Threshold Tokens */
+            threshold_tokens: number | null;
             /**
              * Keep Recent Turns
              * @default 2

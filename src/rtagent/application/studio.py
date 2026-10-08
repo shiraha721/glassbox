@@ -261,11 +261,21 @@ class Studio:
         session = await self.repository.session(run["session_id"])
         if session["active_run_id"] or session["compacting_id"] or session["archived"]:
             return None
-        history = await self.repository.effective_history(session)
-        if estimated_tokens(history) < settings.threshold_tokens:
-            return None
         # Summarize with the model the conversation just used rather than the default.
         provider = StudioConfig.model_validate(run["snapshot"]["config"]).provider
+        history = await self.repository.effective_history(session)
+        full_history = (
+            settings.threshold_tokens is not None
+            and estimated_tokens(history) >= settings.threshold_tokens
+        )
+        full_window = False
+        if settings.window_percent is not None and provider.context_window:
+            used = await self.context_used(run_id)
+            full_window = (
+                used is not None and used * 100 >= provider.context_window * settings.window_percent
+            )
+        if not (full_history or full_window):
+            return None
         model = (
             ModelChoice(
                 provider_id=provider.profile_id,
@@ -285,6 +295,24 @@ class Studio:
             return await self.compact(session["id"], request, trigger="auto")
         except AppError:
             return None
+
+    async def context_used(self, run_id: str) -> int | None:
+        """The prompt size of a Run's latest model request: as the provider reported it, or
+        estimated from the request body when it reported nothing."""
+        run = await self.repository.run(run_id)
+        rows = [
+            row
+            for row in await self.repository.model_usage(run["session_id"])
+            if row["run_id"] == run_id
+        ]
+        if not rows:
+            return None
+        reported = context_usage(rows[-1], "")
+        if reported is not None and reported.prompt_tokens is not None:
+            return reported.prompt_tokens
+        call = await self.repository.call(rows[-1]["call_id"])
+        body = call["data"].get("wire_request_body") or call["data"].get("prepared_request")
+        return estimated_tokens([body]) if body else None
 
     async def stop_compaction(self, session_id: str, identifier: str) -> CompactionView:
         """Stop a selected reduction without activating partial summary text."""

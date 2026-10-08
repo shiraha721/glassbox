@@ -153,10 +153,13 @@ textarea {
   resize: vertical;
   line-height: 1.6;
 }
-input[type='checkbox'] {
+input[type='checkbox'],
+input[type='radio'] {
+  flex: none;
   width: 15px;
   height: 15px;
   margin: 0;
+  padding: 0;
   accent-color: var(--accent);
 }
 label {
@@ -1395,6 +1398,39 @@ summary::-webkit-details-marker {
 .task-suggestions li[aria-selected='true'] {
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+.compact-triggers {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.compact-triggers legend {
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.compact-trigger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.settings-content .compact-trigger .checkbox-label,
+.settings-content .compact-triggers .inline-field {
+  margin: 0;
+  font-size: 13px;
+}
+.compact-trigger input[type='number'] {
+  width: 110px;
+}
+.compact-triggers .inline-field select {
+  width: 72px;
+  flex: none;
 }
 .choice-group {
   display: grid;

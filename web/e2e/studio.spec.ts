@@ -966,10 +966,11 @@ test('automatic compaction summarizes older turns once enabled and can be undone
     .getByRole('navigation', { name: 'Settings pages' })
     .getByRole('button', { name: 'Context', exact: true })
     .click();
-  await settings
-    .getByLabel("Compact automatically when a conversation's history grows large")
-    .check();
-  await settings.getByLabel('History size that triggers it (estimated tokens)').fill('1000');
+  await settings.getByLabel('Compact automatically', { exact: true }).check();
+  // The simulated model has no context window, so the history size condition starts it here.
+  await expect(settings.getByLabel('Share of the context window (%)')).toHaveValue('90');
+  await settings.getByLabel('The history the next run sends exceeds').check();
+  await settings.getByLabel('Estimated history size (tokens)').fill('1000');
   await settings.getByLabel('Recent turns kept verbatim').selectOption('1');
   await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
   await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
@@ -1082,6 +1083,12 @@ test('the task box completes Skills and runs on the chosen send key', async ({ p
     .getByRole('navigation', { name: 'Settings pages' })
     .getByRole('button', { name: 'Composer', exact: true })
     .click();
+  // Each choice is a compact row: the radio sits right beside its text.
+  const radio = (await settings.getByLabel('Ctrl+Enter runs the task').boundingBox())!;
+  const text = (await settings
+    .getByText('Ctrl+Enter runs the task', { exact: true })
+    .boundingBox())!;
+  expect(text.x - (radio.x + radio.width)).toBeLessThan(24);
   await settings.getByLabel('Ctrl+Enter runs the task').check();
   await settings.getByRole('button', { name: 'Close settings', exact: true }).click();
   await expect(page.locator('.input-hint')).toContainText('Ctrl + Enter to run');

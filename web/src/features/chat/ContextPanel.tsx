@@ -13,6 +13,20 @@ import { ContextUsagePanel } from './ContextUsage';
 
 type Context = components['schemas']['ContextView'];
 
+/** Say when automatic compaction starts, in the terms Settings uses. */
+function autoCompactStatus(config: Config): string {
+  const auto = config.auto_compact;
+  if (!auto?.enabled) return 'Automatic compaction is off; turn it on in Settings › Context.';
+  const when = [
+    auto.window_percent != null &&
+      `a request fills ${auto.window_percent}% of the model's context window`,
+    auto.threshold_tokens != null &&
+      `the history exceeds ~${auto.threshold_tokens.toLocaleString()} tokens`,
+  ].filter(Boolean);
+  const keep = `${auto.keep_recent_turns} recent turn${auto.keep_recent_turns === 1 ? '' : 's'}`;
+  return `Automatic compaction is on: after a run in which ${when.join(' or ')}, older turns are summarized, keeping ${keep}.`;
+}
+
 /** Inspect history accounting and explicitly summarize or restore older complete turns. */
 export function ContextPanel({
   session,
@@ -168,9 +182,7 @@ export function ContextPanel({
                 </div>
               )}
               <p className="subtle" data-testid="auto-compact-status">
-                {config.auto_compact?.enabled
-                  ? `Automatic compaction is on: after a run, history over ~${config.auto_compact.threshold_tokens.toLocaleString()} tokens is summarized, keeping ${config.auto_compact.keep_recent_turns} recent turn${config.auto_compact.keep_recent_turns === 1 ? '' : 's'}.`
-                  : 'Automatic compaction is off; turn it on in Settings › Context.'}
+                {autoCompactStatus(config)}
               </p>
             </section>
             {active && (

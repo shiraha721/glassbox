@@ -384,9 +384,19 @@ class AutoCompact(Contract):
     summary is inspectable and Restore full context undoes it. Off unless the user enables it."""
 
     enabled: bool = False
-    # Compared with the byte-based estimate of the history the next Run would send.
-    threshold_tokens: int = Field(default=100_000, ge=1_000, le=2_000_000)
+    # Compact once the Run's latest request used this share of its model's context window.
+    # Models without a configured context window never meet this condition.
+    window_percent: int | None = Field(default=90, ge=50, le=99)
+    # Or once the byte-based estimate of the history the next Run would send passes this.
+    threshold_tokens: int | None = Field(default=None, ge=1_000, le=2_000_000)
     keep_recent_turns: int = Field(default=2, ge=1, le=10)
+
+    @model_validator(mode="after")
+    def has_a_condition(self) -> "AutoCompact":
+        """Automatic compaction needs at least one condition that can start it."""
+        if self.enabled and self.window_percent is None and self.threshold_tokens is None:
+            raise ValueError("Choose when automatic compaction starts.")
+        return self
 
 
 # Hosts fetch_url may download from in a new installation: source and package registries and

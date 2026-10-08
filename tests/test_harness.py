@@ -349,3 +349,57 @@ def test_connection_failures_say_what_happened():
         "",
     )
     assert status.details is None
+
+
+async def test_auto_compaction_starts_when_a_request_fills_the_context_window(
+    tmp_path, monkeypatch
+):
+    """By default, automatic compaction waits until a request used 90% of the model's window."""
+    settings = Settings(data_dir=tmp_path / "data", workspace_root=tmp_path, _env_file=None)
+    prompts = iter([1_000, 100_000, 185_000])
+
+    async def model(_config, _compiled, _tools, _prepared, on_wire, _key=""):
+        await on_wire(None)
+        usage = {"input_tokens": next(prompts), "output_tokens": 10}
+        yield {
+            "kind": "result",
+            "message": Message(role="assistant", content="Ok."),
+            "usage": usage,
+        }
+
+    async def summarizer(_config, _compiled, _tools, _prepared, on_wire, _key=""):
+        await on_wire(None)
+        yield {
+            "kind": "result",
+            "message": Message(role="assistant", content="Derived summary."),
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+
+    monkeypatch.setattr("rtagent.application.runner.generate", model)
+    monkeypatch.setattr("rtagent.application.context.generate", summarizer)
+    async with Harness(settings) as harness:
+        assert AutoCompact().window_percent == 90 and AutoCompact().threshold_tokens is None
+        config = await harness.repository.config()
+        profile = config.providers[0]
+        profile.models, profile.context_window, profile.credential_ref = ["m"], 200_000, ""
+        config.provider = ProviderConfig(profile_id=profile.id, model="m", credential_ref="")
+        config.auto_compact = AutoCompact(enabled=True, keep_recent_turns=1)
+        await harness.studio.save_config(config)
+        session_id = None
+        for task in ("First.", "Second, half the window.", "Third, nearly full."):
+            run = await harness.run(task, session_id=session_id)
+            session_id = run.session_id
+            assert (await harness.wait(run.id, 10)).status == "succeeded"
+            # A request at 50% of the window leaves the conversation alone.
+            if task.startswith("Second"):
+                await asyncio.sleep(0.2)
+                assert not await harness.repository.list_compactions(session_id)
+        assert await harness.studio.context_used(run.id) == 185_000
+        async with asyncio.timeout(5):
+            while not (records := await harness.repository.list_compactions(session_id)):
+                await asyncio.sleep(0.05)
+            await asyncio.gather(*harness.studio.compaction_tasks.values())
+        job = await harness.repository.compaction(records[0]["id"])
+        assert job["status"] == "succeeded" and job["data"]["trigger"] == "auto"
+        with pytest.raises(ValueError, match="Choose when"):
+            AutoCompact(enabled=True, window_percent=None, threshold_tokens=None)
