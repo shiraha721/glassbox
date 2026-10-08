@@ -967,7 +967,7 @@ test('a custom slash command is suggested, expanded and shown as typed', async (
   await openWorkspace(page);
   const task = page.getByLabel('Task', { exact: true });
   await task.fill('/e2e');
-  const suggestions = page.getByRole('list', { name: 'Commands' });
+  const suggestions = page.getByRole('listbox', { name: 'Commands' });
   await expect(suggestions).toContainText('Review one file');
   await task.press('Tab');
   await expect(task).toHaveValue('/e2e-review ');
@@ -983,6 +983,50 @@ test('a custom slash command is suggested, expanded and shown as typed', async (
   );
   // The simulated model reports the task it received: the expansion, not the typed command.
   await expect(turn.locator('.agent-activity')).toContainText('Task: Review README.md and');
+});
+
+test('the task box completes Skills and runs on the chosen send key', async ({ page }) => {
+  await openWorkspace(page);
+  const task = page.getByLabel('Task', { exact: true });
+  await task.fill('Use $deb');
+  const skills = page.getByRole('listbox', { name: 'Skills' });
+  await expect(skills).toContainText('debugging');
+  // Enter picks the highlighted Skill while the list is open instead of running.
+  await task.press('Enter');
+  await expect(task).toHaveValue('Use $debugging ');
+  await expect(skills).not.toBeAttached();
+  await task.press('Shift+Enter');
+  await task.pressSequentially('then report');
+  await expect(task).toHaveValue('Use $debugging \nthen report');
+  await task.press('Enter');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  await expect(page.locator('.conversation-turn').last()).toContainText('then report');
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings
+    .getByRole('navigation', { name: 'Settings pages' })
+    .getByRole('button', { name: 'Composer', exact: true })
+    .click();
+  await settings.getByLabel('Ctrl+Enter runs the task').check();
+  await settings.getByRole('button', { name: 'Close settings', exact: true }).click();
+  await expect(page.locator('.input-hint')).toContainText('Ctrl + Enter to run');
+  await task.fill('first line');
+  await task.press('Enter');
+  await expect(task).toHaveValue('first line\n');
+  await task.press('Control+Enter');
+  await expect(page.locator('.conversation-turn')).toHaveCount(2);
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+});
+
+test('the prompt preview compiles as soon as it is opened', async ({ page }) => {
+  await openWorkspace(page);
+  await page.getByLabel('Task', { exact: true }).fill('Explain the entry point');
+  await page.getByRole('button', { name: 'Inspector', exact: true }).click();
+  const inspector = page.getByLabel('Request inspector');
+  await inspector.getByRole('tab', { name: 'Prompt preview' }).click();
+  await expect(inspector.getByText('Live draft', { exact: true })).toBeVisible();
+  await expect(inspector).toContainText('Explain the entry point');
 });
 
 test('a hook added in Settings runs when a run ends', async ({ page }) => {

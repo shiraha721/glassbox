@@ -72,7 +72,7 @@ For offline development, choose **Simulated model** in the model picker or set `
 
 ### Run a task
 
-Type a task in the message box and press **Run** or **Ctrl+Enter** (**Cmd+Enter** on macOS). The empty conversation suggests a few starting tasks. The preset selector beside the box switches between the built-in presets:
+Type a task in the message box and press **Enter** or **Run**; **Shift+Enter** starts a new line. If you write long multi-line tasks, **Settings → Composer** switches this browser to **Ctrl+Enter** (**Cmd+Enter** on macOS) for running, so Enter adds lines. The empty conversation suggests a few starting tasks. The preset selector beside the box switches between the built-in presets:
 
 | Preset | Focus |
 | --- | --- |
@@ -82,11 +82,11 @@ Type a task in the message box and press **Run** or **Ctrl+Enter** (**Cmd+Enter*
 | Debugging | Reproduce first, change one cause at a time, re-run the reproduction. |
 | Code review | Report actionable findings with locations; do not modify files unless asked. |
 
-Presets change how the agent works, not what it is allowed to do. Mention `$skill-name` in a task to load a Skill (see below).
+Presets change how the agent works, not what it is allowed to do. Mention `$skill-name` in a task to load a Skill (see below): typing `$` at the start of a word lists the workspace's Skills. Typing `/` at the start of the task lists custom commands. In either list the arrow keys choose, **Enter** or **Tab** inserts the name and **Esc** closes the list.
 
 **Images** can go with a task: paste them into the message box, drop them on it, or use the image button beside the preset. PNG, JPEG, GIF and WebP images up to 5 MiB each are accepted, at most ten per task; the turn shows them with your message, and later turns of the conversation keep them in context. The model must accept images (most current Claude and GPT models do); a text-only model rejects the request with the provider's explanation. Images are stored once in the studio's data directory (`attachments/`) and stay there when a conversation is deleted.
 
-**Custom commands** are prompts you reuse. Save a Markdown file as `.agents/commands/<name>.md` in the workspace (or in `commands/` in the studio's data directory, for every project) and type `/name arguments` as the task. Typing `/` lists the available commands; **Tab** completes the first match. In the template, `$ARGUMENTS` stands for everything after the name and `$1` to `$9` for single words; arguments given to a template without placeholders are added at the end. Optional frontmatter sets what the list shows:
+**Custom commands** are prompts you reuse. Save a Markdown file as `.agents/commands/<name>.md` in the workspace (or in `commands/` in the studio's data directory, for every project) and type `/name arguments` as the task. Typing `/` lists the available commands with their descriptions. In the template, `$ARGUMENTS` stands for everything after the name and `$1` to `$9` for single words; arguments given to a template without placeholders are added at the end. Optional frontmatter sets what the list shows:
 
 ```markdown
 ---
@@ -124,7 +124,7 @@ With prices set, each Run's cost appears in **Inspector → Run trace**, **Conte
 
 **Inspector → Run trace** lists every model request and tool call of a turn in execution order. For a model request it shows the canonical messages with their sources, the prepared request, the actual outbound body, usage and provider metadata. The view is redacted by default; **Show original trace** reveals the local original, and **Export JSON** downloads a labelled, redacted copy.
 
-**Preview** (or **Inspector → Prompt preview**) compiles the current draft without running anything: final message sequence, block activation, prepared request and the tool schemas the model would receive. It updates as you edit and never blocks **Run**.
+**Inspector → Prompt preview** compiles the current draft whenever it is open, without running anything: final message sequence, block activation, prepared request and the tool schemas the model would receive. It updates as you edit and never blocks **Run**; **Preview** beside **Run** is a shortcut that opens it. While a Run is active the preview waits for it to end.
 
 **Changes** shows the workspace's uncommitted Git changes: branch and upstream (with commits ahead ↑ and behind ↓), each changed file with its status letters, and a file's diff against the last commit when you select it. **Review changes** switches to the Code review preset and puts a review task with the whole diff (up to about 90,000 characters) in the message box for you to check and send, because the agent itself cannot run Git. The studio runs Git on this computer read-only, with your Git configuration but with repository-provided programs (hooks, fsmonitor, external diff and textconv drivers) disabled. Private files such as `.env` are listed but their content is never shown or included.
 

@@ -56,8 +56,8 @@ import { AccessPicker } from '../features/composer/AccessPicker';
 import { useRunChoice } from '../features/composer/useRunChoice';
 import { effectiveConfig } from '../features/composer/choices';
 import type { SettingsPage } from '../features/settings/pages';
-import { matchingCommands, useCommands } from '../features/composer/commands';
-import { CommandSuggestions } from '../features/composer/CommandSuggestions';
+import { TaskInput } from '../features/composer/TaskInput';
+import { sendKeyLabel, useSendKey } from '../features/composer/sendKey';
 import { GitPanel } from '../features/workspace/GitPanel';
 import { AttachmentStrip } from '../features/composer/AttachmentStrip';
 import { addImages, IMAGE_TYPES, imageFiles, uploadImages } from '../features/composer/attachments';
@@ -116,7 +116,6 @@ function Workspace({ data }: { data: Bootstrap }) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [variables, setVariables] = useState('{}');
-  const [previewEnabled, setPreviewEnabled] = useState(false);
   const [tab, setTab] = useState<'preview' | 'trace'>(() =>
     localStorage.getItem('studio.session') ? 'trace' : 'preview',
   );
@@ -155,14 +154,16 @@ function Workspace({ data }: { data: Bootstrap }) {
   const active = runs.find((item) => !terminal(item.status));
   const latestRun = active || runs.at(-1);
   const workspaceRoot = project?.workspace_root || data.workspace_root;
+  // The preview compiles whenever it is on screen; the Preview button only opens it.
+  const previewVisible = panel === 'inspector' && tab === 'preview';
   const workspaceQuery = useQuery({
     queryKey: ['workspace', projectId],
     queryFn: () => request<WorkspaceView>(workspacePath('', projectId)),
-    enabled: panel === 'prompt' || panel === 'workspace' || previewEnabled,
+    enabled: panel === 'prompt' || panel === 'workspace' || previewVisible,
     refetchOnWindowFocus: false,
   });
   const inspection = useLivePreview(
-    previewEnabled && !active,
+    previewVisible && !active,
     JSON.stringify({
       session_id: session?.id || null,
       project_id: projectId || null,
@@ -231,7 +232,6 @@ function Workspace({ data }: { data: Bootstrap }) {
     if (window.matchMedia('(max-width: 760px)').matches) setSidebarOpen(false);
     setSelectedRun('');
     setPanel(null);
-    setPreviewEnabled(false);
     setInput('');
     setError('');
   };
@@ -268,8 +268,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       ...runChoice,
     };
   };
-  const buildPreview = () => {
-    setPreviewEnabled(true);
+  const openPreview = () => {
     setTab('preview');
     setPanel('inspector');
   };
@@ -316,7 +315,6 @@ function Workspace({ data }: { data: Bootstrap }) {
     setSelectedRun(created.id);
     setInput('');
     setAttachments([]);
-    setPreviewEnabled(false);
     setTab('trace');
     setPanel(null);
     await refresh();
@@ -331,8 +329,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       .catch((failure) => setError(errorMessage(failure)))
       .finally(() => setUploading(false));
   };
-  const commands = useCommands(projectId, input.startsWith('/'));
-  const commandMatches = matchingCommands(input, commands);
+  const sendKey = useSendKey();
   const togglePanel = (name: Panel) => setPanel(panel === name ? null : name);
   const panelButton = (name: Panel, label: string, icon: React.ReactNode, disabled = false) => (
     <button
@@ -624,38 +621,24 @@ function Workspace({ data }: { data: Bootstrap }) {
                   <label className="sr-only" htmlFor="task-input">
                     Task
                   </label>
-                  <textarea
-                    id="task-input"
+                  <TaskInput
                     value={input}
-                    onChange={(event) => setInput(event.target.value)}
+                    onChange={setInput}
+                    projectId={projectId}
+                    sendKey={sendKey}
+                    disabled={!!active || busy}
                     placeholder={
                       active ? 'The agent is working…' : 'Describe a task for the agent…'
                     }
-                    rows={2}
-                    disabled={!!active || busy}
+                    onSend={() => {
+                      if (canRun) void perform(start);
+                    }}
                     onPaste={(event) => {
                       const images = imageFiles(event.clipboardData.files);
                       if (images.length) {
                         event.preventDefault();
                         attach(images);
                       }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Tab' && commandMatches.length) {
-                        event.preventDefault();
-                        setInput(`/${commandMatches[0].name} `);
-                      }
-                      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && canRun) {
-                        event.preventDefault();
-                        void perform(start);
-                      }
-                    }}
-                  />
-                  <CommandSuggestions
-                    matches={commandMatches}
-                    onPick={(command) => {
-                      setInput(`/${command.name} `);
-                      document.getElementById('task-input')?.focus();
                     }}
                   />
                   {skills.length > 0 && (
@@ -760,7 +743,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                             className="button"
                             disabled={busy}
                             title="Inspect the exact model input without running"
-                            onClick={buildPreview}
+                            onClick={openPreview}
                           >
                             <Eye size={14} />
                             Preview
@@ -768,7 +751,7 @@ function Workspace({ data }: { data: Bootstrap }) {
                           <button
                             className="button primary"
                             disabled={!canRun}
-                            title="Run (Ctrl+Enter)"
+                            title={`Run (${sendKeyLabel(sendKey)})`}
                             onClick={() => void perform(start)}
                           >
                             <Play size={13} />
@@ -780,8 +763,16 @@ function Workspace({ data }: { data: Bootstrap }) {
                   </div>
                 </div>
                 <div className="input-hint">
-                  <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run · mention <code>$skill-name</code> to
-                  load a skill
+                  {sendKey === 'enter' ? (
+                    <>
+                      <kbd>Enter</kbd> to run · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line
+                    </>
+                  ) : (
+                    <>
+                      <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run
+                    </>
+                  )}{' '}
+                  · <kbd>/</kbd> commands · <kbd>$</kbd> skills
                 </div>
               </div>
             )}
@@ -836,6 +827,7 @@ function Workspace({ data }: { data: Bootstrap }) {
               preview={inspection.preview}
               previewUpdating={inspection.updating}
               previewError={inspection.error}
+              previewPaused={!!active}
               runs={runs}
               run={run}
               onRun={(id) => {

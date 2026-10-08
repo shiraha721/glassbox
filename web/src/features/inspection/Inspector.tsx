@@ -11,6 +11,7 @@ export function Inspector({
   preview,
   previewUpdating,
   previewError,
+  previewPaused,
   runs,
   run,
   onRun,
@@ -22,6 +23,7 @@ export function Inspector({
   preview: PromptInspection | null;
   previewUpdating: boolean;
   previewError: string;
+  previewPaused: boolean;
   runs: Run[];
   run?: Run;
   onRun: (id: string) => void;
@@ -143,7 +145,9 @@ export function Inspector({
             </>
           ) : (
             <div className="empty-inspector">
-              Select Preview to inspect current instructions and input.
+              {previewPaused
+                ? 'The preview resumes when the current run ends.'
+                : 'Compiling the current instructions and input…'}
             </div>
           ))}
         {tab === 'trace' &&

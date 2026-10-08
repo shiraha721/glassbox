@@ -3,6 +3,7 @@ import {
   BookOpen,
   Cpu,
   Gauge,
+  Keyboard,
   Webhook,
   KeyRound,
   Layers,
@@ -23,6 +24,7 @@ import { CommandRules } from './CommandRules';
 import { SearchSettings } from './SearchSettings';
 import { ContextPage } from './ContextPage';
 import { HooksPage } from './HooksPage';
+import { ComposerPage } from './ComposerPage';
 import type { SettingsPage } from './pages';
 
 const pages = [
@@ -35,6 +37,7 @@ const pages = [
   { id: 'context', label: 'Context', icon: Layers },
   { id: 'hooks', label: 'Hooks', icon: Webhook },
   { id: 'limits', label: 'Run limits', icon: Gauge },
+  { id: 'composer', label: 'Composer', icon: Keyboard },
 ] as const;
 
 /** Split a one-entry-per-line text area into trimmed nonempty values. */
@@ -276,6 +279,7 @@ export function Settings({
               )}
             </fieldset>
             {page === 'skills' && <SkillsPage />}
+            {page === 'composer' && <ComposerPage />}
           </div>
         </div>
         <footer className="modal-footer">
