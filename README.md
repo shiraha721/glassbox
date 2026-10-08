@@ -15,6 +15,6 @@ Documentation lives in [docs/](docs/README.md):
 - [Architecture](docs/architecture.md): how a task becomes a recorded Run, the data model, sandboxes, providers and API.
 - [Development guide](docs/development.md): conventions, invariants, commands and testing.
 - [Harness interfaces](docs/harness.md): CLI, JSON-RPC, Python client, embedding and extensions.
-- [Review 2026-10-06](docs/review.md): the latest assessment and changes, with the 2026-10-07 follow-ups (settings and model selection, then features from comparable agents).
+- [Review 2026-10-06](docs/review.md): the latest assessment and changes, with the follow-ups of 2026-10-07 (settings and model selection, then features from comparable agents) and 2026-10-08 (usability changes).
 
 Coding agents start with [AGENTS.md](AGENTS.md).
