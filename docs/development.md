@@ -45,7 +45,7 @@ These are relied on by recovery, inspection and the security model. Changing one
 ## Engineering conventions
 
 - **Python 3.12+**, dependencies with `uv` (commit `uv.lock`), Pydantic v2 models at boundaries, type annotations on public interfaces. Ruff for linting, Black and isort (Black profile) for formatting, line length 100.
-- **Frontend:** React, TypeScript (strict), Vite, TanStack Query; npm with `package-lock.json`; ESLint and Prettier. API types are generated from the backend schema, never written by hand. Styles use the design tokens at the top of `web/src/style.css`; add colors as tokens with light and dark values.
+- **Frontend:** React, TypeScript (strict), Vite, TanStack Query; npm with `package-lock.json`; ESLint and Prettier. API types are generated from the backend schema, never written by hand. Styles use the design tokens at the top of `web/src/style.css`; add colors as tokens with light and dark values. The icon `web/public/favicon.svg` repeats the accent colors because an image cannot read the tokens; change both together.
 - **Schema changes** go through an Alembic migration in `migrations/versions`. Never modify LangGraph's checkpoint tables directly.
 - **Child processes** use `pathlib` and argument lists; never concatenate shell strings on the host side. Blocking file or Win32 work runs off the event loop.
 - **Timestamps** are stored in UTC ISO format and displayed in local time.
@@ -72,7 +72,7 @@ uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations
 uv run isort --check-only src tests scripts migrations
 uv run python scripts/check_layers.py               # dependency direction, Python and TS
-uv run python scripts/check_docs.py                 # Markdown links and anchors
+uv run python scripts/check_docs.py                 # Markdown links, images and anchors
 npm --prefix web run lint
 npm --prefix web run typecheck
 npm --prefix web run format:check

@@ -37,7 +37,7 @@ Open **http://127.0.0.1:8001**. Use `uv run rtagent serve --port 8080` for anoth
 
 Start-up applies database migrations. The studio keeps its data (conversations, settings, saved keys, memory, global Skills and commands, undo history, images) in a folder of your own, never in a project or in this checkout: `~/.local/share/rtagent` on Linux and WSL (`$XDG_DATA_HOME/rtagent` if that is set), `%LOCALAPPDATA%\rtagent` on Windows, `~/Library/Application Support/rtagent` on macOS. Set `STUDIO_DATA_DIR` to use another folder.
 
-Earlier versions kept this data in `var/` under the folder the studio was started from. The first start with the default folder moves the studio's own files from there (other files in `var/` stay, and `var/MOVED.txt` says where the data went). If the old data is still open, for example because another studio is running from that folder, start-up stops with a message instead; stop the other studio and start again, or set `STUDIO_DATA_DIR` to the old folder to keep using it. A `.env` copied from an older `.env.example` sets `STUDIO_DATA_DIR=var`; remove that line to move.
+Earlier versions kept this data in `var/` under the folder the studio was started from. The first start with the default folder moves the studio's own files from there (other files in `var/` stay, and `var/MOVED.txt` says where the data went). Only a `var/app.db` that is a studio database starts the move; another program's `var/` folder is left alone. If the old data is still open, for example because another studio is running from that folder, start-up stops with a message instead; stop the other studio and start again, or set `STUDIO_DATA_DIR` to the old folder to keep using it. A `.env` copied from an older `.env.example` sets `STUDIO_DATA_DIR=var`; remove that line to move.
 
 ## Configure a model
 
@@ -157,7 +157,7 @@ The sidebar's **Conversations** section lists the selected workspace's conversat
 **Context** shows how the conversation uses the model, from the provider's own accounting, top to bottom:
 
 - **This conversation:** every model request so far, sub-agents' included: how many, the cache hit rate (the share of all prompt tokens the provider served from its cache), prompt and output tokens, and dollars spent.
-- **Context window now:** how full the window is (the latest request's prompt against the model's window), the peak so far, and a column per request split into the part served from cache and the part sent fresh. Point at a column for its numbers, or open the table under the chart.
+- **Context window now:** how full the window is (the latest request's prompt against the model's window), the conversation's largest request so far (sub-agents fill their own windows, so theirs are not counted), and a column per request split into the part served from cache and the part sent fresh. Point at a column for its numbers, or open the table under the chart.
 - **History sent to the next run:** the conversation's messages and how many the next Run sends (fewer while a summary is in use), as a byte estimate.
 - **Compaction:** choose how many recent turns to keep and press **Compact older turns** to have the model selected below the message box summarize the rest. While it runs, **Stop compaction** cancels it; while a summary is in use, **Restore full context** switches back.
 - **Compaction history:** each summary with its status, the summary text and a link to its recorded requests.

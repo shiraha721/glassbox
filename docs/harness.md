@@ -93,16 +93,17 @@ Unknown parameters fail. IDs are strict strings/integers, not booleans. Errors d
 
 ## Own an embedded harness
 
-Use embedding when another Python program owns the agent lifecycle. **Do not share its data directory with a running Web server or another Harness.** `Settings()` without `data_dir` (and without `STUDIO_DATA_DIR`) uses the same per-user folder as `rtagent serve`, so give an embedded harness its own `data_dir`, as below. Use AgentClient to attach to an existing owner.
+Use embedding when another Python program owns the agent lifecycle. **Do not share its data directory with a running Web server or another Harness.** `Settings()` without `data_dir` (and without `STUDIO_DATA_DIR`) uses the same per-user folder as `rtagent serve`, so give an embedded harness its own `data_dir`, as below (a folder beside the studio's, outside the project). Use AgentClient to attach to an existing owner.
 
 ```python
 import asyncio
 from pathlib import Path
-from rtagent.infrastructure.config import Settings
+from rtagent.infrastructure.config import Settings, default_data_dir
 from rtagent.harness import Harness
 
 async def main() -> None:
-    settings = Settings(data_dir=Path("var/embedded"), workspace_root=Path("."))
+    data = default_data_dir().with_name("rtagent-embedded")
+    settings = Settings(data_dir=data, workspace_root=Path("."))
     async with Harness(settings) as harness:
         run = await harness.run(
             "Inspect this project's startup", preset_id="coding", access="read-only"
