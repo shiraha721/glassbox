@@ -8,6 +8,7 @@ Conventions and constraints for everyone changing this repository, including cod
 - **Run works directly from a task.** Preview is optional inspection through the same compiler, never a gate. Never fall back to simulation silently.
 - **Evidence over convenience.** Keep Run snapshots immutable, message roles and sources intact, every tool call paired with one result, revision checks on edits, and provenance on copies. Copies never replay effects or clone checkpoints.
 - **Real isolation.** Use bubblewrap with Bash on Linux and AppContainer with PowerShell on Windows. Never replace OS isolation with host execution or require WSL.
+- **Program data stays out of projects and the checkout.** Databases, saved keys, memory, undo copies and images live in the data directory (a per-user folder by default); the studio writes into a workspace only what the user or agent asked for.
 - **Secrets stay on the server.** Resolve credentials from environment variable names at the moment of use. Keep secret values out of snapshots, prompts, logs, browser storage and Git.
 - **Finish one vertical workflow at a time:** UI, API, persistence, execution feedback and tests together. Check the real service behaves as intended before broadening tests.
 
@@ -29,7 +30,7 @@ These are relied on by recovery, inspection and the security model. Changing one
 - The loop is `model → tools → model` in one LangGraph graph with `thread_id = run_id`. Do not add another agent loop: a sub-agent is a separate child Run with its own snapshot and thread, driven by the same graph inside the parent's `delegate` call.
 - Every model tool call keeps its `tool_call_id` and receives exactly one result before the next model call.
 - The model sees only tools that are permitted in the frozen settings (and non-mutating ones in read-only mode). Permissions, schema validation and approvals are enforced on the server; prompts, files, tool output and model text cannot change them.
-- Persist intent before an effect and the outcome after it. A call interrupted mid-effect is `outcome_unknown` and is never retried without an explicit decision. Do not claim exactly-once execution for external effects.
+- Persist intent before an effect and the outcome after it. A call interrupted mid-effect is `outcome_unknown` and is never retried without an explicit decision. Do not claim exactly-once execution for external effects. The one automatic retry is a compaction summary request after a transient connection failure: it has no effect beyond cost, and every attempt is recorded.
 - Budgets bound steps, tool calls, time and output. Cancellation awaits local cleanup; it does not claim to undo effects.
 - Each Run binds to one frozen workspace root. Background processes belong to their original Run, conversation and root, never restart from records, and block archive, delete and workspace moves while running.
 

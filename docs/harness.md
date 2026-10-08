@@ -93,7 +93,7 @@ Unknown parameters fail. IDs are strict strings/integers, not booleans. Errors d
 
 ## Own an embedded harness
 
-Use embedding when another Python program owns the agent lifecycle. **Do not share its data directory with a running Web server or another Harness.** Use AgentClient to attach to an existing owner.
+Use embedding when another Python program owns the agent lifecycle. **Do not share its data directory with a running Web server or another Harness.** `Settings()` without `data_dir` (and without `STUDIO_DATA_DIR`) uses the same per-user folder as `rtagent serve`, so give an embedded harness its own `data_dir`, as below. Use AgentClient to attach to an existing owner.
 
 ```python
 import asyncio
@@ -203,4 +203,4 @@ ANTHROPIC_MODEL=claude-opus-5-5
 ANTHROPIC_API_KEY=
 ```
 
-Inspector and every call record disclose transformations, canonical input, prepared/actual body, usage and returned metadata. No role relocation or automatic retry occurs. The [official Messages](https://platform.claude.com/docs/en/api/messages/create) and [streaming contracts](https://platform.claude.com/docs/en/build-with-claude/streaming) describe the external protocol. The Messages adapter is tested against local real-HTTP fixtures, including thinking replay and refusals, and the Responses adapter against mocked HTTP transports; neither has been checked against the production endpoints. See the [Stage 4 acceptance record](history/acceptance-stage4.md).
+Inspector and every call record disclose transformations, canonical input, prepared/actual body, usage and returned metadata. No role relocation occurs, and a Run never retries a model request by itself; connection failures say whether the connection could not open, broke mid-response or timed out. The [official Messages](https://platform.claude.com/docs/en/api/messages/create) and [streaming contracts](https://platform.claude.com/docs/en/build-with-claude/streaming) describe the external protocol. The Messages adapter is tested against local real-HTTP fixtures, including thinking replay and refusals, and the Responses adapter against mocked HTTP transports; neither has been checked against the production endpoints. See the [Stage 4 acceptance record](history/acceptance-stage4.md).

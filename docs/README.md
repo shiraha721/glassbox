@@ -66,7 +66,7 @@ Each Run records the provider, model, effort and access it used, so its snapshot
 
 The **Responses API** provider talks to OpenAI's `/v1/responses` endpoint, which current OpenAI reasoning models are built for. Responses are not stored by OpenAI (`store: false`). With a reasoning effort chosen, the Run keeps the model's encrypted reasoning between its own tool calls, like Claude's thinking blocks; later turns receive the conversation without it.
 
-If a request fails, the error states the provider's reason and HTTP status (with any credential removed), or what happened to the connection: it could not be opened, it closed before the response was complete, or the provider did not answer in time. A Run never retries a model request by itself (see [Inspect what happened](#inspect-what-happened) for recovering an interrupted Run); compaction requests are retried, as described under Context. A missing model is a configuration error rather than a silent switch to simulation.
+If a request fails, the error states the provider's reason and HTTP status (with any credential removed), or what happened to the connection: it could not be opened, it closed before the response was complete, or the provider did not answer in time. A Run never retries a model request by itself; an interrupted Run waits for you to choose **Retry** (see [Troubleshooting](#troubleshooting)). Compaction requests are the exception, since they change nothing but cost (see [Context and compaction](#context-and-compaction)). A missing model is a configuration error rather than a silent switch to simulation.
 
 For offline development, choose **Simulated model** in the model picker or set `STUDIO_PROVIDER=fake`. It answers with canned text but runs real tools: `/read README.md`, `/echo hello` (which requires approval), `/tool bash {"command":"ls"}` (Linux) or `/tool powershell {"command":"Get-Location"}` (Windows), and `/slow` to try **Stop**.
 
@@ -150,11 +150,25 @@ Comparison runs are unattended. A Run that stops for approval is cancelled and c
 
 The sidebar's **Conversations** section lists the selected workspace's conversations, with **New conversation** to start another there, search, an **Archived** filter and flat folders. A conversation's **…** menu can rename, move to a folder, change its workspace, duplicate, fork from an earlier turn, archive or delete it. **Fork here** on a turn does the same from that point. Copies share no state with the original and never repeat model or tool calls.
 
-**Context** reports how the conversation uses the model, from the provider's own accounting. **This conversation** totals every model request so far, including its sub-agents' requests: the number of requests, the cache hit rate (the share of all prompt tokens the provider served from its cache), and the prompt and output tokens and dollars spent. **Context window** shows how full the window is now (the latest request's prompt against the model's window), the peak so far, and a column for each request, split into the part served from cache and the part sent fresh; point at a column for its numbers, or open the table under the chart. A provider that reports no usage, including the simulated model, says so rather than showing zeros. Below that, estimated history size, and **Compact older turns** asks the model for a summary of all but the most recent turns. The original messages are kept, and **Restore full context** switches back. To compact without asking, turn on **Settings › Context › Compact automatically**: after a run, if the history the next run would send is over the size you set, older turns are summarized with that run's model, keeping the recent turns you chose. Automatic summaries cost model calls, are listed in Context as *Automatic*, and are restored the same way. A summary request whose connection fails or breaks is sent again, up to three times in all; the attempts are listed in its recorded requests.
-
-Every compaction, manual or automatic, also appears in the conversation itself, as a marker after the last turn it summarizes: while it runs, once it is in use (with the summary the model now receives instead of the turns above), and quieter once it has been replaced, restored, or has failed.
-
 **Processes** lists background commands the agent started, with their output, and lets you send input lines, close stdin or stop them.
+
+### Context and compaction
+
+**Context** shows how the conversation uses the model, from the provider's own accounting, top to bottom:
+
+- **This conversation:** every model request so far, sub-agents' included: how many, the cache hit rate (the share of all prompt tokens the provider served from its cache), prompt and output tokens, and dollars spent.
+- **Context window now:** how full the window is (the latest request's prompt against the model's window), the peak so far, and a column per request split into the part served from cache and the part sent fresh. Point at a column for its numbers, or open the table under the chart.
+- **History sent to the next run:** the conversation's messages and how many the next Run sends (fewer while a summary is in use), as a byte estimate.
+- **Compaction:** choose how many recent turns to keep and press **Compact older turns** to have the model selected below the message box summarize the rest. While it runs, **Stop compaction** cancels it; while a summary is in use, **Restore full context** switches back.
+- **Compaction history:** each summary with its status, the summary text and a link to its recorded requests.
+
+A provider that reports no usage, including the simulated model, says so rather than showing zeros.
+
+Compaction never deletes anything: every turn stays in the conversation and in its history, and new Runs send the summary plus the recent turns instead. Each compaction, manual or automatic, also appears in the conversation as a marker after the last turn it summarizes: while it runs, once it is in use (with its summary), and quieter once it has been replaced, restored or has failed. A summary request whose connection fails or breaks is sent again, up to three times in all, and the attempts are kept in its record.
+
+To compact without asking, turn on **Settings › Context › Compact automatically**: after a Run, if the history the next Run would send is over the size you set, older turns are summarized with that Run's model, keeping the recent turns you chose. Automatic summaries cost model calls, are marked *Automatic*, and are restored the same way.
+
+Side panels such as Context sit beside the conversation in windows at least 961 pixels wide; in narrower windows they cover it until closed.
 
 ## Projects, memory and Skills
 
@@ -264,6 +278,8 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 | "Model request failed: the connection to the provider closed before the response was complete" | The network or the provider dropped the connection mid-response; the other variants say the connection could not be opened or the provider did not answer in time. Run the task again (an interrupted Run offers **Retry**). Compaction already retried twice. |
 | A side panel covers the conversation | The window is narrower than 960 pixels; close the panel or widen the window. Wider windows keep the conversation beside the panel. |
 | "Studio data in … could not be moved" at start-up | The old `var/` data is still open, usually by another studio started from the same folder. Stop it and start again, or set `STUDIO_DATA_DIR` to the old folder. |
+| "… is outside this workspace (…)" from a file tool | The agent asked for a file in another folder. Add that folder as a project (**Projects → +**) and work there, or copy what it needs into this workspace. |
+| "The download redirected to …, which is not an allowed download host" | The download host sends files from another host. Add that host under **Settings → Sandbox → Allowed HTTPS download hosts** if you trust it. |
 | A Run is "interrupted" | The service restarted, or a call's outcome is unknown. Review each uncertain call and choose **Retry** or record a verified result before resuming. |
 
 ## Status and roadmap

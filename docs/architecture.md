@@ -151,7 +151,7 @@ A conversation has at most one active Run. Up to four Runs from different conver
 
 ### Uncertain effects and recovery
 
-If the process stops or a call times out while a model or tool call is executing, its outcome is unknown: the request may have reached the provider, the command may have changed files. Such receipts become `outcome_unknown` and the Run becomes `interrupted`. Resuming requires an explicit decision for every uncertain call: retry it, or (for tools) record a verified result. Nothing is retried automatically, and earlier attempts stay in the receipt's `attempt_history`. Stop and shutdown wait for local cleanup but cannot undo completed effects.
+If the process stops or a call times out while a model or tool call is executing, its outcome is unknown: the request may have reached the provider, the command may have changed files. Such receipts become `outcome_unknown` and the Run becomes `interrupted`. Resuming requires an explicit decision for every uncertain call: retry it, or (for tools) record a verified result. Nothing in a Run is retried automatically, and earlier attempts stay in the receipt's `attempt_history`. (Compaction requests, which change nothing but cost, are retried after transient connection failures; see [Context compaction](#context-compaction).) Stop and shutdown wait for local cleanup but cannot undo completed effects.
 
 ## Prompt compilation
 
@@ -294,7 +294,7 @@ All routes live under `/api/v1` (`interfaces/http/api.py`); `/openapi.json` is t
 
 | Area | Routes |
 | --- | --- |
-| Startup | `GET /health`, `GET /bootstrap` (settings, presets, conversation summaries, folders, projects, evaluation summaries, tool catalog) |
+| Startup | `GET /health`, `GET /bootstrap` (settings, presets, conversation summaries, folders, projects, evaluation summaries, tool catalog, key status, effort levels, common download hosts) |
 | Settings and tools | `PUT /config`, `POST /tools/refresh`, `PUT /presets/{id}`, preset export/import |
 | Models and keys | `POST /providers/models` (list a provider's models), `GET /credentials?name=…` (status only), `PUT/DELETE /credentials/{name}` |
 | Global Skills | `GET /skills`, `GET/DELETE /skills/{name}`, `PUT /skills` |
