@@ -70,6 +70,20 @@ def default_data_dir() -> Path:
     )
 
 
+# Tables every studio database has had since its first migration.
+STUDIO_TABLES = {"alembic_version", "settings", "presets", "sessions", "runs", "calls"}
+
+
+def studio_database(path: Path) -> bool:
+    """Whether `path` is a studio database, not another program's `var/app.db`."""
+    try:
+        with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as database:
+            names = {row[0] for row in database.execute("SELECT name FROM sqlite_master")}
+    except sqlite3.Error:
+        return False
+    return STUDIO_TABLES <= names
+
+
 def release_database(path: Path) -> None:
     """Fold a closed SQLite database's write-ahead log back into the file, so it moves alone.
 
@@ -88,9 +102,12 @@ def release_database(path: Path) -> None:
 def move_legacy_data(legacy: Path, target: Path) -> list[str]:
     """Move studio data an earlier version kept in `legacy` to `target`, once.
 
-    Nothing happens unless `legacy` holds a database and `target` does not. The move refuses
-    to start while a database is open elsewhere, and returns the names it moved."""
+    Nothing happens unless `legacy` holds a studio database and `target` does not. The move
+    refuses to start while a database is open elsewhere, and returns the names it moved."""
     if legacy.resolve() == target.resolve() or not (legacy / "app.db").is_file():
+        return []
+    if not studio_database(legacy / "app.db"):
+        logger.warning("Not moving %s: its app.db is not a studio database.", legacy)
         return []
     if (target / "app.db").exists():
         logger.warning("Using %s; the older studio data in %s is not used.", target, legacy)

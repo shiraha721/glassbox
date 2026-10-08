@@ -49,6 +49,9 @@ describe('evaluation drafts', () => {
 
   it('warns about identical setups and incomplete tasks before running', () => {
     expect(identicalSetups([setup(), setup({ preset_id: 'coding' }), setup()])).toEqual([[0, 2]]);
+    const effort = (reasoning_effort: 'low' | 'high') =>
+      setup({ model: { provider_id: 'openai', model: 'gpt-x', reasoning_effort } });
+    expect(identicalSetups([effort('low'), effort('high')])).toEqual([]);
     const draft = blank(data);
     expect(problems(draft)).toEqual(['Task 1 has no text to send.']);
     draft.cases[0].input = 'Find the entry point.';

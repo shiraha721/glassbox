@@ -105,7 +105,13 @@ export function fromEval(value: Eval): Draft {
 /** Pairs of setups that would run identically, so their results differ only by chance. */
 export function identicalSetups(variants: EvalVariant[]): [number, number][] {
   const key = (item: EvalVariant) =>
-    JSON.stringify([item.preset_id, item.model?.provider_id, item.model?.model, item.access]);
+    JSON.stringify([
+      item.preset_id,
+      item.model?.provider_id,
+      item.model?.model,
+      item.model?.reasoning_effort,
+      item.access,
+    ]);
   const pairs: [number, number][] = [];
   variants.forEach((item, index) =>
     variants.slice(0, index).forEach((other, before) => {

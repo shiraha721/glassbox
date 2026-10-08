@@ -114,11 +114,12 @@ async def fetch_url(
             ) as response:
                 if response.status_code in REDIRECTS:
                     location = response.headers.get("location")
-                    if not location or hop == MAX_REDIRECTS:
+                    if not location:
+                        raise AppError("download_failed", "A redirect gave no location.")
+                    if hop == MAX_REDIRECTS:
                         raise AppError(
                             "download_failed",
-                            f"Download stopped after {hop + 1} redirects or a redirect without "
-                            "a location.",
+                            f"Download stopped: more than {MAX_REDIRECTS} redirects.",
                         )
                     parsed = allowed_url(urljoin(urlunsplit(parsed), location), hosts, True)
                     continue

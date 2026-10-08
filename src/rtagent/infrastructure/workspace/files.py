@@ -143,12 +143,13 @@ class Workspace:
         An absolute path may name the workspace by its real location or by `/workspace`, where
         Linux commands see it. Anything else absolute is denied with the root to use instead.
         The result is checked like any relative path, so `..` and links stay refused."""
+        absolute = Path(requested)
+        # The real location wins, for a workspace that itself lives under /workspace/.
+        if absolute.is_absolute() and absolute.is_relative_to(self.root):
+            return absolute.relative_to(self.root).as_posix() or "."
         if requested == "/workspace" or requested.startswith("/workspace/"):
             return requested.removeprefix("/workspace").lstrip("/") or "."
-        absolute = Path(requested)
         if absolute.is_absolute():
-            if absolute == self.root or absolute.is_relative_to(self.root):
-                return absolute.relative_to(self.root).as_posix() or "."
             raise AppError(
                 "tool_denied",
                 f"{requested} is outside this workspace ({self.root}). Use a path relative to "

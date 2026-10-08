@@ -115,7 +115,8 @@ def session_usage(rows: list[dict[str, Any]]) -> tuple[SessionUsage, list[Contex
         totals.reported_requests += 1
         totals.prompt_tokens += usage.prompt_tokens
         totals.output_tokens += usage.output_tokens or 0
-        totals.peak_prompt_tokens = max(totals.peak_prompt_tokens or 0, usage.prompt_tokens)
+        if not row["subagent"]:  # a sub-agent fills its own context window, not this one
+            totals.peak_prompt_tokens = max(totals.peak_prompt_tokens or 0, usage.prompt_tokens)
         if usage.cache_read_tokens is not None:
             totals.cache_read_tokens = (totals.cache_read_tokens or 0) + usage.cache_read_tokens
             cached_prompt += usage.prompt_tokens

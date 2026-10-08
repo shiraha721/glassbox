@@ -16,6 +16,8 @@ def legacy_store(folder):
     folder.mkdir()
     database = sqlite3.connect(folder / "app.db")
     database.execute("PRAGMA journal_mode=WAL")
+    for table in ("alembic_version", "settings", "presets", "runs", "calls"):
+        database.execute(f"CREATE TABLE {table} (id TEXT)")
     database.execute("CREATE TABLE sessions (title TEXT)")
     database.execute("INSERT INTO sessions VALUES ('kept')")
     database.commit()
@@ -52,6 +54,17 @@ def test_old_data_moves_once_and_only_when_no_one_has_it_open(tmp_path):
     assert not list(target.glob("app.db-*")) and not list(legacy.glob("app.db*"))
     assert (legacy / "e2e-123").is_dir() and "data" in (legacy / "MOVED.txt").read_text()
     assert move_legacy_data(legacy, target) == []
+
+
+def test_another_programs_var_folder_is_left_alone(tmp_path):
+    legacy, target = tmp_path / "var", tmp_path / "data"
+    legacy.mkdir()
+    with closing(sqlite3.connect(legacy / "app.db")) as other:
+        other.execute("CREATE TABLE users (name TEXT)")
+    (legacy / "skills").mkdir()
+    assert move_legacy_data(legacy, target) == []
+    assert (legacy / "app.db").exists() and (legacy / "skills").is_dir()
+    assert not target.exists() and not (legacy / "MOVED.txt").exists()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="XDG locations apply on Linux and WSL")

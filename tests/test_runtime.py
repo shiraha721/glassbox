@@ -78,15 +78,16 @@ def test_session_usage_totals_every_reported_request():
         [
             row("r1", "anthropic", 100, read=0, write=900),
             row("r1", "anthropic", 50, read=950, write=0),
-            row("r2", "openai", 400, subagent=1),
+            row("r2", "openai", 4000, subagent=1),
             row("r3", "fake", None),
         ]
     )
     assert (totals.requests, totals.reported_requests, totals.subagent_requests) == (4, 3, 1)
-    assert totals.prompt_tokens == 2400 and totals.output_tokens == 30
+    assert totals.prompt_tokens == 6000 and totals.output_tokens == 30
     assert (totals.cache_read_tokens, totals.cache_write_tokens) == (950, 900)
     # The sub-agent's provider reported no cache figures, so its prompt is not in the rate.
     assert totals.cache_hit_rate == round(950 / 2000, 4)
+    # The sub-agent's larger prompt filled its own window, not this conversation's.
     assert totals.peak_prompt_tokens == 1000
     # Only the conversation's own requests are listed for the window chart.
     assert [item.run_id for item in requests] == ["r1", "r1", "r3"]

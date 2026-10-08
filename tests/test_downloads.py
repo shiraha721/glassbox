@@ -78,7 +78,7 @@ async def test_redirect_loops_and_query_urls_are_refused(tmp_path, served):
     routes["github.com/loop"] = httpx.Response(302, headers={"location": "/loop"})
     with pytest.raises(AppError) as loop:
         await downloads.fetch_url(Workspace(tmp_path), HOSTS, "https://github.com/loop", "f")
-    assert loop.value.code == "download_failed" and "6 redirects" in loop.value.message
+    assert loop.value.code == "download_failed" and "more than 5 redirects" in loop.value.message
     with pytest.raises(AppError) as query:
         await downloads.fetch_url(Workspace(tmp_path), HOSTS, "https://github.com/f?token=1", "f")
     assert query.value.code == "network_url"

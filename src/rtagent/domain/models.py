@@ -1053,6 +1053,7 @@ class SessionUsage(Contract):
     output_tokens: int = 0
     # Share of prompt tokens served from cache, over requests that reported cache usage.
     cache_hit_rate: float | None = None
+    # The largest prompt among the conversation's own requests; sub-agents have their own context.
     peak_prompt_tokens: int | None = None
 
 

@@ -231,6 +231,15 @@ def test_absolute_paths_inside_the_workspace_are_accepted(tmp_path):
         assert denied.value.code == "tool_denied" and str(root.resolve()) in denied.value.message
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths")
+def test_a_workspace_under_slash_workspace_keeps_its_own_paths(tmp_path):
+    """In a container the real root may itself be under /workspace/; its paths win."""
+    workspace = Workspace(tmp_path)
+    workspace.root = Path("/workspace/project")
+    assert workspace.relative("/workspace/project/src/a.txt") == "src/a.txt"
+    assert workspace.relative("/workspace/src/a.txt") == "src/a.txt"
+
+
 def test_write_conflicts_say_how_to_recover(tmp_path):
     workspace = Workspace(tmp_path)
     (tmp_path / "notes.md").write_text("old", encoding="utf-8")
