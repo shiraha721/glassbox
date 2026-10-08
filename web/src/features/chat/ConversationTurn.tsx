@@ -3,6 +3,7 @@ import {
   Ban,
   BookOpen,
   Bot,
+  Brain,
   Check,
   CircleAlert,
   Eye,
@@ -205,6 +206,18 @@ export function RunTurn({
               );
             return (
               <div className="chat-message" key={messageIndex}>
+                {message.reasoning && (
+                  <details className="reasoning">
+                    <summary>
+                      <Brain size={13} /> Thinking
+                    </summary>
+                    <div className="markdown">
+                      <Markdown skipHtml components={markdownComponents}>
+                        {message.reasoning}
+                      </Markdown>
+                    </div>
+                  </details>
+                )}
                 {message.content && (
                   <div className="markdown">
                     <Markdown skipHtml components={markdownComponents}>

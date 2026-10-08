@@ -40,5 +40,6 @@ export function newProvider(adapter: Adapter, existing: string[]): ProviderProfi
     temperature: null,
     context_window: null,
     prices: {},
+    show_reasoning: false,
   };
 }

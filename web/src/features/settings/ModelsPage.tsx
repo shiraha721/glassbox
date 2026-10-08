@@ -196,6 +196,23 @@ function ProviderModels({
         such as current Claude models. A context window enables budget checks before a request is
         sent.
       </p>
+      {profile.adapter !== 'openai' ? (
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={profile.show_reasoning}
+            onChange={(event) => onChange({ show_reasoning: event.target.checked })}
+          />
+          Show the model&apos;s thinking
+        </label>
+      ) : null}
+      <p className="subtle">
+        {profile.adapter === 'anthropic'
+          ? 'Asks for summarized thinking, shown under Thinking in each turn. Needs a model with adaptive thinking (Claude 4.6 or later); older models reject the request.'
+          : profile.adapter === 'responses'
+            ? 'Asks for reasoning summaries, shown under Thinking in each turn. OpenAI may require a verified organization for them and otherwise rejects the request.'
+            : 'Chat Completions endpoints do not return the model’s reasoning through this adapter; use the Responses API or Anthropic to see it.'}
+      </p>
     </section>
   );
 }

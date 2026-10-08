@@ -117,6 +117,9 @@ def prepare_anthropic(
         body["temperature"] = config.temperature
     if config.reasoning_effort:
         body["output_config"] = {"effort": config.reasoning_effort}
+    if config.show_reasoning:
+        # Current models omit thinking text unless asked; summarized text is for display.
+        body["thinking"] = {"type": "adaptive", "display": "summarized"}
     if systems:
         body["system"] = systems
     if tools:

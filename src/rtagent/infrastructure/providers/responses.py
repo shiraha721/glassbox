@@ -73,7 +73,13 @@ def prepare_responses(
         # Within a Run, a response holding reasoning goes back exactly as received (minus
         # provider IDs, which unstored responses cannot resolve). Earlier turns are rebuilt.
         if message.blocks and message.source != "history":
-            items.extend(message.blocks)
+            # Reasoning without encrypted content (no effort set) cannot be resolved by an
+            # unstored request; it stays in the blocks only for its readable summary.
+            items.extend(
+                block
+                for block in message.blocks
+                if block.get("type") != "reasoning" or block.get("encrypted_content")
+            )
             continue
         if message.content or not message.tool_calls or message.attachments:
             items.append({"role": message.role, "content": _content(message)})
@@ -101,6 +107,8 @@ def prepare_responses(
         body["reasoning"] = {"effort": config.reasoning_effort}
         # Unstored responses keep reasoning only as encrypted items the next request echoes.
         body["include"] = ["reasoning.encrypted_content"]
+    if config.show_reasoning:
+        body.setdefault("reasoning", {})["summary"] = "auto"
     if tools:
         body["tools"] = [
             {

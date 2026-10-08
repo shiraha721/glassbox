@@ -1118,3 +1118,14 @@ test('an OpenAI Responses provider can be added in Settings', async ({ page }) =
     });
   }
 });
+
+test('reasoning returned by the model is shown under Thinking', async ({ page }) => {
+  await openWorkspace(page);
+  await startTask(page, '/think which file to read first');
+  await expect(page.getByTestId('run-status')).toHaveText('succeeded');
+  const thinking = page.locator('.conversation-turn').last().locator('details.reasoning');
+  await expect(thinking).not.toHaveAttribute('open', '');
+  await thinking.getByText('Thinking', { exact: true }).click();
+  await expect(thinking).toContainText('Simulated reasoning about: which file to read first');
+  await page.screenshot({ path: 'test-results/thinking.png' });
+});

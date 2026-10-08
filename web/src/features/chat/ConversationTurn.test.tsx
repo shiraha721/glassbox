@@ -44,6 +44,7 @@ const assistant = (calls: ReturnType<typeof call>[], content = '') => ({
   tool_call_id: null,
   blocks: [],
   attachments: [],
+  reasoning: '',
 });
 const result = (id: string, content: unknown) => ({
   role: 'tool' as const,
@@ -53,6 +54,7 @@ const result = (id: string, content: unknown) => ({
   tool_call_id: id,
   blocks: [],
   attachments: [],
+  reasoning: '',
 });
 
 function renderTurn(run: Run) {
@@ -179,5 +181,16 @@ describe('tool steps', () => {
     expect(screen.getByText('/review a.py')).toBeTruthy();
     expect(screen.getByText('Sent as')).toBeTruthy();
     expect(screen.getByText('Review a.py carefully.')).toBeTruthy();
+  });
+
+  it("shows the model's thinking in a collapsed section when it was returned", () => {
+    const { container } = renderTurn({
+      ...base,
+      messages: [{ ...assistant([], 'Done.'), reasoning: 'Check the **tests** first.' }],
+    });
+    const details = container.querySelector('details.reasoning') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary')?.textContent).toContain('Thinking');
+    expect(details.querySelector('strong')?.textContent).toBe('tests');
   });
 });

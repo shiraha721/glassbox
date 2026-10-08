@@ -2257,6 +2257,42 @@ export interface components {
             attachments: components["schemas"]["Attachment"][];
         };
         /**
+         * MessageView
+         * @description A message as the browser sees it: replay blocks removed, readable reasoning kept.
+         */
+        MessageView: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "system" | "user" | "assistant" | "tool";
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Source
+             * @default runtime
+             */
+            source: string;
+            /** Tool Calls */
+            tool_calls: components["schemas"]["ToolCall"][];
+            /** Tool Call Id */
+            tool_call_id: string | null;
+            /** Blocks */
+            blocks: {
+                [key: string]: unknown;
+            }[];
+            /** Attachments */
+            attachments: components["schemas"]["Attachment"][];
+            /**
+             * Reasoning
+             * @default
+             */
+            reasoning: string;
+        };
+        /**
          * ModelChoice
          * @description The model selected for a Run: a configured provider (or `simulated`) and options.
          */
@@ -2604,6 +2640,11 @@ export interface components {
             /** Context Window */
             context_window?: number | null;
             price?: components["schemas"]["ModelPrice-Input"] | null;
+            /**
+             * Show Reasoning
+             * @default false
+             */
+            show_reasoning: boolean;
         };
         /**
          * ProviderConfig
@@ -2648,6 +2689,11 @@ export interface components {
             /** Context Window */
             context_window: number | null;
             price: components["schemas"]["ModelPrice-Output"] | null;
+            /**
+             * Show Reasoning
+             * @default false
+             */
+            show_reasoning: boolean;
         };
         /**
          * ProviderProfile
@@ -2686,6 +2732,11 @@ export interface components {
             prices?: {
                 [key: string]: components["schemas"]["ModelPrice-Input"];
             };
+            /**
+             * Show Reasoning
+             * @default false
+             */
+            show_reasoning: boolean;
         };
         /**
          * ProviderProfile
@@ -2724,6 +2775,11 @@ export interface components {
             prices: {
                 [key: string]: components["schemas"]["ModelPrice-Output"];
             };
+            /**
+             * Show Reasoning
+             * @default false
+             */
+            show_reasoning: boolean;
         };
         /**
          * RecoveryDecision
@@ -2792,7 +2848,7 @@ export interface components {
             /** Stop Reason */
             stop_reason: string | null;
             /** Messages */
-            messages: components["schemas"]["Message"][];
+            messages: components["schemas"]["MessageView"][];
             /** Partial Output */
             partial_output: string;
             /** Latest Event Seq */

@@ -1351,6 +1351,20 @@ summary::-webkit-details-marker {
 .command-suggestions button:focus-visible {
   background: var(--surface-2);
 }
+.reasoning {
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.reasoning > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.reasoning > .markdown {
+  margin-top: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
 .command-expansion {
   margin-top: 4px;
   font-size: 13px;
@@ -1671,6 +1685,7 @@ summary::-webkit-details-marker {
 .block > summary,
 .context-file > summary,
 .run-files > summary,
+.reasoning > summary,
 .tool-schema > summary,
 .advanced > summary {
   display: flex;
@@ -1682,6 +1697,7 @@ summary::-webkit-details-marker {
 .evidence > summary::before,
 .block > summary::before,
 .run-files > summary::before,
+.reasoning > summary::before,
 .tool-schema > summary::before,
 .advanced > summary::before {
   content: '›';
@@ -1694,6 +1710,7 @@ summary::-webkit-details-marker {
 .evidence[open] > summary::before,
 .block[open] > summary::before,
 .run-files[open] > summary::before,
+.reasoning[open] > summary::before,
 .tool-schema[open] > summary::before,
 .advanced[open] > summary::before {
   transform: rotate(90deg);

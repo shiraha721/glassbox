@@ -171,6 +171,18 @@ async def fake_stream(
         return
     if current == "/error":
         raise AppError("provider_error", "Simulated provider failure.", 502)
+    # `/think` shows how returned reasoning is displayed; the block mimics a Messages one.
+    thinking = (
+        [
+            {
+                "type": "thinking",
+                "thinking": f"Simulated reasoning about: {current[7:].strip()}",
+                "signature": "simulated",
+            }
+        ]
+        if not results and current.lower().startswith("/think ")
+        else []
+    )
     if current.startswith("Earlier derived summary:\n") and not tools:
         text = "Simulated conversation summary. Original evidence is retained; no model service was called."
     elif results:
@@ -185,14 +197,14 @@ async def fake_stream(
             + f"- **Messages:** {len(messages)}\n- **Available tools:** {len(tools)}\n- **Task:** {current}\n"
             + (f"- **Attached images:** {len(images)}\n" if images else "")
             + "\n"
-            + "This is the **simulated model**. Try `/read README.md` to inspect a local file or `/echo hello` to exercise tool approval. Configure an OpenAI-compatible endpoint in Settings for model-generated analysis."
+            + "This is the **simulated model**. Try `/read README.md` to inspect a local file, `/echo hello` to exercise tool approval or `/think a question` to see displayed reasoning. Configure an OpenAI-compatible endpoint in Settings for model-generated analysis."
         )
     for chunk in re.findall(r"[\s\S]{1,40}", text):
         await asyncio.sleep(0.2 if current == "/slow" else 0.015)
         yield {"kind": "delta", "text": chunk}
     yield {
         "kind": "result",
-        "message": Message(role="assistant", content=text),
+        "message": Message(role="assistant", content=text, blocks=thinking),
         "usage": {"input_tokens": None, "output_tokens": None},
     }
 

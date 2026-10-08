@@ -181,6 +181,10 @@ class ProviderConfig(Contract):
     context_window: int | None = Field(default=None, ge=256)
     # Frozen with the Run so its cost stays reproducible after prices are edited.
     price: ModelPrice | None = None
+    # Ask for readable reasoning: summarized thinking (Messages) or reasoning summaries
+    # (Responses). Off by default: older Claude models and unverified OpenAI organizations
+    # reject the request.
+    show_reasoning: bool = False
 
     @field_validator("credential_ref")
     @classmethod
@@ -210,6 +214,7 @@ class ProviderProfile(Contract):
     context_window: int | None = Field(default=None, ge=256)
     # Per-model prices keyed by model ID; a model without an entry has an unknown cost.
     prices: dict[str, ModelPrice] = Field(default_factory=dict)
+    show_reasoning: bool = False
 
     @field_validator("credential_ref")
     @classmethod
@@ -493,6 +498,7 @@ def resolve_model(config: StudioConfig, choice: ModelChoice | None = None) -> Pr
         max_output_tokens=profile.max_output_tokens,
         context_window=profile.context_window,
         price=profile.prices.get(model),
+        show_reasoning=profile.show_reasoning,
     )
 
 
@@ -531,6 +537,28 @@ class Message(Contract):
     blocks: list[dict[str, Any]] = Field(default_factory=list)
     # Images sent with a user message (the task they were attached to).
     attachments: list[Attachment] = Field(default_factory=list, max_length=10)
+
+
+class MessageView(Message):
+    """A message as the browser sees it: replay blocks removed, readable reasoning kept."""
+
+    # Thinking or reasoning-summary text the provider returned, for display only.
+    reasoning: str = ""
+
+
+def reasoning_text(blocks: list[dict[str, Any]]) -> str:
+    """Readable reasoning in replay blocks: Messages thinking text, Responses summaries and
+    reasoning text. Signatures and encrypted content are never part of it."""
+    parts: list[str] = []
+    for block in blocks:
+        if block.get("type") == "thinking" and isinstance(block.get("thinking"), str):
+            parts.append(block["thinking"])
+        elif block.get("type") == "reasoning":
+            for key in ("summary", "content"):
+                for item in block.get(key) or []:
+                    if isinstance(item, dict) and isinstance(item.get("text"), str):
+                        parts.append(item["text"])
+    return "\n\n".join(part.strip() for part in parts if part.strip())
 
 
 class PlanItem(Contract):
@@ -1174,7 +1202,7 @@ class RunView(Contract):
     workspace_root: str
     status: str
     stop_reason: str | None
-    messages: list[Message]
+    messages: list[MessageView]
     partial_output: str
     latest_event_seq: int
     approval: dict[str, Any] | None

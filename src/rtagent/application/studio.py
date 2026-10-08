@@ -39,6 +39,7 @@ from rtagent.domain import (
     MemoryDocument,
     MemorySave,
     Message,
+    MessageView,
     ModelChoice,
     Preset,
     PresetPackage,
@@ -63,6 +64,7 @@ from rtagent.domain import (
     digest,
     latest_plan,
     net_changes,
+    reasoning_text,
     resolve_model,
     uid,
 )
@@ -895,10 +897,14 @@ class Studio:
                 ),
                 None,
             )
-            # Replay blocks (provider reasoning signatures) are evidence, not display data.
-            value["messages"] = [{**item, "blocks": []} for item in value["messages"]]
+            # Replay blocks (signatures, encrypted reasoning) stay on the server; only their
+            # readable reasoning text is shown.
+            value["messages"] = [
+                {**item, "blocks": [], "reasoning": reasoning_text(item.get("blocks") or [])}
+                for item in value["messages"]
+            ]
             value.update(
-                plan=latest_plan([Message.model_validate(item) for item in value["messages"]]),
+                plan=latest_plan([MessageView.model_validate(item) for item in value["messages"]]),
                 unknown_calls=[
                     {"id": call["id"], "kind": call["kind"], "data": redact(call["data"])}
                     for call in pending
