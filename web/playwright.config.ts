@@ -23,7 +23,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'uv run uvicorn rtagent.main:create_app --factory --host 127.0.0.1 --port 8765',
+    command: 'uv run uvicorn rtagent.interfaces.http.app:create_app --factory --host 127.0.0.1 --port 8765',
     cwd: root,
     url: 'http://127.0.0.1:8765/api/v1/health',
     reuseExistingServer: false,

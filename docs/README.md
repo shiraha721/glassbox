@@ -37,7 +37,7 @@ Open **http://127.0.0.1:8001**. Use `uv run rtagent serve --port 8080` for anoth
 
 Start-up applies database migrations. The studio keeps its data (conversations, settings, saved keys, memory, global Skills and commands, undo history, images) in a folder of your own, never in a project or in this checkout: `~/.local/share/rtagent` on Linux and WSL (`$XDG_DATA_HOME/rtagent` if that is set), `%LOCALAPPDATA%\rtagent` on Windows, `~/Library/Application Support/rtagent` on macOS. Set `STUDIO_DATA_DIR` to use another folder.
 
-Versions before 2026-10-08 kept this data in `var/` in the checkout. To move it, stop the studio, run `uv run python scripts/upgrade_data.py` once, and remove `STUDIO_DATA_DIR=var` from `.env` if it is there.
+Data saved by versions before 2026-10-09 needs a one-time upgrade: stop the studio and run `uv run python scripts/upgrade_data.py` (for `var/` in the checkout, where versions before 2026-10-08 kept it; name another folder as an argument). Until then, start-up stops with "Can't locate revision identified by '0010'". Add `--move` to also move the data from there to the folder above, then remove `STUDIO_DATA_DIR=var` from `.env` if it is there.
 
 ## Configure a model
 
@@ -277,6 +277,7 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 | **Undo file changes** skips a file | The file changed after the Run (a later Run, a command or you), so it is left alone. Use Git for those changes. |
 | "Model request failed: the connection to the provider closed before the response was complete" | The network or the provider dropped the connection mid-response; the other variants say the connection could not be opened or the provider did not answer in time. Run the task again (an interrupted Run offers **Retry**). Compaction already retried twice. |
 | A side panel covers the conversation | The window is narrower than 960 pixels; close the panel or widen the window. Wider windows keep the conversation beside the panel. |
+| "Can't locate revision identified by '0010'" at start-up | The data was saved before 2026-10-09. Stop the studio and run `uv run python scripts/upgrade_data.py` once; see [Install and start](#install-and-start). |
 | "… is outside this workspace (…)" from a file tool | The agent asked for a file in another folder. Add that folder as a project (**Projects → +**) and work there, or copy what it needs into this workspace. |
 | "The download redirected to …, which is not an allowed download host" | The download host sends files from another host. Add that host under **Settings → Sandbox → Allowed HTTPS download hosts** if you trust it. |
 | A Run is "interrupted" | The service restarted, or a call's outcome is unknown. Review each uncertain call and choose **Retry** or record a verified result before resuming. |

@@ -178,7 +178,7 @@ Built-in presets are seeded on start when missing; a stored preset, edited or no
 
 | Table | Contents |
 | --- | --- |
-| `settings` | One versioned settings aggregate: providers (endpoint, adapter, key name, model list, temperature, output and context limits, per-model prices, the thinking option), the default model, tool permissions, command rules, default sandbox mode, runtimes, download hosts (common registries by default; migration 0010 gives the same list to settings saved with none, and clears the fixed temperature 0.2 that versions before 2026-10-07 saved), MCP servers, automatic compaction, shell hooks, the web search service, limits. Stores credential *names* only. |
+| `settings` | One versioned settings aggregate: providers (endpoint, adapter, key name, model list, temperature, output and context limits, per-model prices, the thinking option), the default model, tool permissions, command rules, default sandbox mode, runtimes, download hosts (common registries by default), MCP servers, automatic compaction, shell hooks, the web search service, limits. Stores credential *names* only. |
 | `presets` | Versioned presets with embedded blocks. |
 | `projects` | Registered workspace folders. |
 | `conversation_folders` | Flat folders for organizing conversations. |
@@ -194,7 +194,7 @@ Built-in presets are seeded on start when missing; a stored preset, edited or no
 
 The data directory defaults to a per-user folder (`config.default_data_dir`: `$XDG_DATA_HOME/rtagent` or `~/.local/share/rtagent`, `%LOCALAPPDATA%\rtagent` on Windows), outside every project and the source checkout; `STUDIO_DATA_DIR` or an explicit `Settings(data_dir=…)` overrides it. Outside the database it holds `credentials.json` (keys saved from Settings), `skills/` (global Skills), `commands/` (global slash commands), `memory/<sha256 of the workspace root, 16 hex>/MEMORY.md` (each workspace's memory, with `workspace.txt` naming the root), `file-history/` (earlier versions of files that Runs changed, for undo) and `attachments/` (images attached to tasks, named by their SHA-256). All are hidden from file tools and commands like the rest of the data directory.
 
-Data that versions before 2026-10-08 kept in `var/` in the checkout is moved by the one-time `scripts/upgrade_data.py`, not by start-up.
+Data saved before 2026-10-09 is brought up to date by the one-time `scripts/upgrade_data.py`, not by start-up: it gives the database the version stamp of the merged migration and, with `--move`, moves data that versions before 2026-10-08 kept in `var/` in the checkout.
 
 Rules that keep this consistent:
 

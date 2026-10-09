@@ -4,7 +4,7 @@ The agent is available through HTTP, a CLI, newline JSON-RPC and Python embeddin
 
 ## Attach to the running service
 
-Start `uv run rtagent serve` (or `uv run python -m rtagent`; add `--port` for another port) and open http://127.0.0.1:8001. Client commands attach to that service over HTTP; they never open its databases. The older `python -m rtagent.main` entry remains supported.
+Start `uv run rtagent serve` (or `uv run python -m rtagent`; add `--port` for another port) and open http://127.0.0.1:8001. Client commands attach to that service over HTTP; they never open its databases.
 
 ```powershell
 uv run rtagent run "Inspect the project and report its entry point" --preset coding --wait --json
@@ -36,7 +36,7 @@ Use `retry` only after deciding repetition is appropriate. A model call with an 
 
 ```python
 import asyncio
-from rtagent.client import AgentClient
+from rtagent.interfaces.client import AgentClient
 from rtagent.domain import ModelChoice
 
 async def main() -> None:

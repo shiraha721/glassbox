@@ -12,17 +12,9 @@ def check_python() -> list[str]:
     errors = []
     package = ROOT / "src/rtagent"
     forbidden = {
-        "domain": (
-            "application",
-            "infrastructure",
-            "interfaces",
-            "harness",
-            "main",
-            "client",
-            "cli",
-        ),
-        "infrastructure": ("application", "interfaces", "harness", "main", "client", "cli"),
-        "application": ("interfaces", "main", "client", "cli", "harness"),
+        "domain": ("application", "infrastructure", "interfaces", "harness"),
+        "infrastructure": ("application", "interfaces", "harness"),
+        "application": ("interfaces", "harness"),
     }
     for path in package.rglob("*.py"):
         layer = path.relative_to(package).parts[0]

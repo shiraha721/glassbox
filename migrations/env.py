@@ -5,9 +5,9 @@ from rtagent.infrastructure.config import Settings
 
 config = context.config
 url = config.get_main_option("sqlalchemy.url")
-if url == "sqlite:///var/app.db":
+if url is None:  # the alembic command line: the database in the configured data folder
     settings = Settings()
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    settings.initialize()
     url = settings.database_url.replace("+aiosqlite", "")
 
 if context.is_offline_mode():
