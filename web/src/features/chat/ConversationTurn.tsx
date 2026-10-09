@@ -33,6 +33,7 @@ import { imageUrl } from '../composer/attachments';
 import { StatusBadge } from '../../shared/StatusBadge';
 import { modelLabel } from '../composer/choices';
 import { terminal, type Run, type ResumeRequest } from '../../api/client';
+import { usageUrl } from '../settings/providers';
 
 type Message = Run['messages'][number];
 type ToolCall = Message['tool_calls'][number];
@@ -258,6 +259,11 @@ export function RunTurn({
             <p role="alert" className="notice warning">
               <CircleAlert size={15} />
               <span>{run.error}</span>
+              {run.stop_reason === 'chatgpt_usage_limit' && (
+                <a className="button small" href={usageUrl} target="_blank" rel="noreferrer">
+                  Manage usage
+                </a>
+              )}
             </p>
           )}
           {run.status === 'waiting_approval' && run.approval && (

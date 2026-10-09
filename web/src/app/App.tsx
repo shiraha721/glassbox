@@ -58,6 +58,7 @@ import { AccessPicker } from '../features/composer/AccessPicker';
 import { useRunChoice } from '../features/composer/useRunChoice';
 import { effectiveConfig } from '../features/composer/choices';
 import type { SettingsPage } from '../features/settings/pages';
+import { usageUrl } from '../features/settings/providers';
 import { TaskInput } from '../features/composer/TaskInput';
 import { sendKeyLabel, useSendKey } from '../features/composer/sendKey';
 import { GitPanel } from '../features/workspace/GitPanel';
@@ -156,6 +157,9 @@ function Workspace({ data }: { data: Bootstrap }) {
     if (sessionKey) void cache.invalidateQueries({ queryKey: ['context', sessionKey] });
   }, [compactionState, sessionKey, cache]);
   const [choice, setChoice] = useRunChoice(data, session?.id || '', runs, runQuery.isSuccess);
+  // OpenAI asks apps to say when requests use a ChatGPT plan, with a way to manage its usage.
+  const usesPlan =
+    data.config.providers.find((item) => item.id === choice.model.provider_id)?.auth === 'chatgpt';
   // An unset model sends no choice, so the server explains what to configure.
   const runChoice = {
     model: choice.model.model ? choice.model : null,
@@ -764,6 +768,15 @@ function Workspace({ data }: { data: Bootstrap }) {
                   </div>
                 </div>
                 <div className="input-hint">
+                  {usesPlan && (
+                    <>
+                      <span className="plan-usage">Using ChatGPT plan</span> ·{' '}
+                      <a href={usageUrl} target="_blank" rel="noreferrer">
+                        Manage usage
+                      </a>{' '}
+                      ·{' '}
+                    </>
+                  )}
                   {sendKey === 'enter' ? (
                     <>
                       <kbd>Enter</kbd> to run · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line

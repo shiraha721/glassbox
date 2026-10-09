@@ -9,6 +9,7 @@ import {
   type ModelChoice,
 } from '../../api/client';
 import { Popover } from '../../shared/Popover';
+import { addModels, formatOf } from '../settings/providers';
 import { effortLabels, modelLabel } from './choices';
 
 /** Refresh every saved provider's model list from its /models endpoint and save the result. */
@@ -22,7 +23,7 @@ async function refreshModels(config: Config): Promise<string[]> {
           'POST',
           profile,
         );
-        return { ...profile, models: [...new Set([...profile.models, ...models])] };
+        return addModels(profile, models);
       } catch (caught) {
         failures.push(`${profile.name}: ${errorMessage(caught)}`);
         return profile;
@@ -52,9 +53,10 @@ export function ModelPicker({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const provider = data.config.providers.find((item) => item.id === choice.provider_id);
-  const levels = provider ? data.effort_levels[provider.adapter] || [] : [];
+  const levels = provider ? data.effort_levels[formatOf(provider, choice.model)] || [] : [];
   const select = (providerId: string, model: string) => {
-    const adapter = data.config.providers.find((item) => item.id === providerId)?.adapter;
+    const profile = data.config.providers.find((item) => item.id === providerId);
+    const adapter = profile && formatOf(profile, model);
     const keep = adapter && data.effort_levels[adapter]?.includes(choice.reasoning_effort || '');
     onChange({
       provider_id: providerId,

@@ -8,6 +8,15 @@ import {
   type ProviderProfile,
 } from '../../api/client';
 import { effortLabels } from '../composer/choices';
+import {
+  addModels,
+  formatLabels,
+  formatOf,
+  offered,
+  removeModel,
+  setModelFormat,
+  type Format,
+} from './providers';
 
 /** Number input that maps an empty field to null ("use the provider's default"). */
 function optionalNumber(value: string): number | null {
@@ -81,6 +90,62 @@ function PriceTable({
   );
 }
 
+/** The request format of each model, for a provider that offers more than one. */
+function FormatTable({
+  profile,
+  onChange,
+}: {
+  profile: ProviderProfile;
+  onChange: (patch: Partial<ProviderProfile>) => void;
+}) {
+  const choices = offered(profile);
+  return (
+    <details className="price-table model-formats">
+      <summary>Request format per model</summary>
+      {profile.models.length ? (
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Request format</th>
+            </tr>
+          </thead>
+          <tbody>
+            {profile.models.map((model) => (
+              <tr key={model}>
+                <th scope="row">{model}</th>
+                <td>
+                  <select
+                    aria-label={`Request format for ${model}`}
+                    value={formatOf(profile, model)}
+                    onChange={(event) =>
+                      onChange(setModelFormat(profile, model, event.target.value as Format))
+                    }
+                  >
+                    {choices.map(([format]) => (
+                      <option key={format} value={format}>
+                        {formatLabels[format]}
+                        {format === profile.adapter ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="subtle">Add models first.</p>
+      )}
+      <p className="subtle">
+        Gateways such as OpenRouter and OpenCode serve some models in only one format; models added
+        from a known service get the format it documents. Reasoning effort and thinking follow each
+        model&apos;s format.
+      </p>
+    </details>
+  );
+}
+
 /** One provider's known models, discovery and request options. */
 function ProviderModels({
   profile,
@@ -92,12 +157,14 @@ function ProviderModels({
   const [added, setAdded] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const formats = offered(profile).map(([format]) => format);
+  const plan = profile.auth === 'chatgpt';
   const refresh = async () => {
     setBusy(true);
     setNotice('');
     try {
       const { models } = await request<{ models: string[] }>('/providers/models', 'POST', profile);
-      onChange({ models: [...new Set([...profile.models, ...models])].sort() });
+      onChange(addModels(profile, models));
       setNotice(`Found ${models.length} models. Save settings to keep them.`);
     } catch (caught) {
       setNotice(errorMessage(caught));
@@ -107,7 +174,7 @@ function ProviderModels({
   };
   const add = () => {
     const model = added.trim();
-    if (model) onChange({ models: [...new Set([...profile.models, model])].sort() });
+    if (model) onChange(addModels(profile, [model]));
     setAdded('');
   };
   return (
@@ -130,7 +197,7 @@ function ProviderModels({
             {model}
             <button
               aria-label={`Remove model ${model}`}
-              onClick={() => onChange({ models: profile.models.filter((item) => item !== model) })}
+              onClick={() => onChange(removeModel(profile, model))}
             >
               <X size={12} />
             </button>
@@ -157,20 +224,23 @@ function ProviderModels({
           <Plus size={14} /> Add
         </button>
       </div>
-      <PriceTable profile={profile} onChange={onChange} />
+      {formats.length > 1 && <FormatTable profile={profile} onChange={onChange} />}
+      {!plan && <PriceTable profile={profile} onChange={onChange} />}
       <div className="form-grid thirds">
-        <label>
-          Temperature
-          <input
-            type="number"
-            step="0.1"
-            min="0"
-            max={profile.adapter === 'anthropic' ? 1 : 2}
-            placeholder="Provider default"
-            value={profile.temperature ?? ''}
-            onChange={(event) => onChange({ temperature: optionalNumber(event.target.value) })}
-          />
-        </label>
+        {!plan && (
+          <label>
+            Temperature
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max={profile.adapter === 'anthropic' ? 1 : 2}
+              placeholder="Provider default"
+              value={profile.temperature ?? ''}
+              onChange={(event) => onChange({ temperature: optionalNumber(event.target.value) })}
+            />
+          </label>
+        )}
         <label>
           Max output tokens
           <input
@@ -192,12 +262,13 @@ function ProviderModels({
         </label>
       </div>
       <p className="subtle">
-        Thinking counts toward the output limit. Leave temperature empty to send none, so each model
-        uses its own default; many reasoning models accept only 1, and current Claude models reject
-        any. A context window enables budget checks before a request is sent, the window bar in
-        Context, and compaction when a request fills it.
+        {plan
+          ? 'A ChatGPT plan sets the output limit and sampling itself, so neither is sent; max output tokens only reserves room for the answer in the context window. Plan usage has no per-token price.'
+          : 'Thinking counts toward the output limit. Leave temperature empty to send none, so each model uses its own default; many reasoning models accept only 1, and current Claude models reject any.'}{' '}
+        A context window enables budget checks before a request is sent, the window bar in Context,
+        and compaction when a request fills it.
       </p>
-      {profile.adapter !== 'openai' ? (
+      {formats.some((format) => format !== 'openai') ? (
         <label className="checkbox-label">
           <input
             type="checkbox"
@@ -208,11 +279,16 @@ function ProviderModels({
         </label>
       ) : null}
       <p className="subtle">
-        {profile.adapter === 'anthropic'
-          ? 'Asks for summarized thinking, shown under Thinking in each turn. Needs a model with adaptive thinking (Claude 4.6 or later); older models reject the request.'
-          : profile.adapter === 'responses'
-            ? 'Asks for reasoning summaries, shown under Thinking in each turn. OpenAI may require a verified organization for them and otherwise rejects the request.'
-            : 'Chat Completions endpoints do not return the model’s reasoning through this adapter; use the Responses API or Anthropic to see it.'}
+        {[
+          formats.includes('anthropic') &&
+            'With the Messages API this asks for summarized thinking, shown under Thinking in each turn; it needs a model with adaptive thinking (Claude 4.6 or later), and older models reject the request.',
+          formats.includes('responses') &&
+            'With the Responses API it asks for reasoning summaries, shown under Thinking in each turn; OpenAI may require a verified organization for them and otherwise rejects the request.',
+          formats.includes('openai') &&
+            'Chat Completions requests do not return the model’s reasoning through this adapter.',
+        ]
+          .filter(Boolean)
+          .join(' ')}
       </p>
     </section>
   );
@@ -231,6 +307,7 @@ export function ModelsPage({
   const current = draft.provider;
   const providerId = current.profile_id || SIMULATED;
   const profile = draft.providers.find((item) => item.id === providerId);
+  const levels = profile ? effortLevels[formatOf(profile, current.model)] || [] : [];
   const setDefault = (patch: Partial<Config['provider']>) =>
     onChange({ ...draft, provider: { ...current, ...patch } });
   return (
@@ -253,7 +330,7 @@ export function ModelsPage({
                   next
                     ? {
                         profile_id: next.id,
-                        adapter: next.adapter,
+                        adapter: formatOf(next, next.models[0] || ''),
                         model: next.models[0] || '',
                         reasoning_effort: null,
                       }
@@ -280,7 +357,17 @@ export function ModelsPage({
               aria-label="Default model"
               value={current.model}
               disabled={!profile}
-              onChange={(event) => setDefault({ model: event.target.value })}
+              onChange={(event) => {
+                const model = event.target.value;
+                const adapter = profile ? formatOf(profile, model) : current.adapter;
+                // An effort the new model's format does not accept falls back to the default.
+                const keep = effortLevels[adapter]?.includes(current.reasoning_effort || '');
+                setDefault({
+                  model,
+                  adapter,
+                  reasoning_effort: keep ? current.reasoning_effort : null,
+                });
+              }}
             >
               {!profile && <option value="simulated">Simulated model</option>}
               {profile && !profile.models.includes(current.model) && (
@@ -307,7 +394,7 @@ export function ModelsPage({
               }
             >
               <option value="">Default</option>
-              {(profile ? effortLevels[profile.adapter] || [] : []).map((level) => (
+              {levels.map((level) => (
                 <option key={level} value={level}>
                   {effortLabels[level]}
                 </option>

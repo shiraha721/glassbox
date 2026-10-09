@@ -24,6 +24,7 @@ export type SkillDocument = components['schemas']['SkillDocument'];
 export type ProviderProfile = components['schemas']['ProviderProfile-Output'];
 export type ModelChoice = components['schemas']['ModelChoice-Input'];
 export type CredentialStatus = components['schemas']['CredentialStatus'];
+export type ChatGPTStatus = components['schemas']['ChatGPTStatus'];
 export type WorkspaceSkills = components['schemas']['WorkspaceSkills'];
 export type Grant = components['schemas']['Grant-Output'];
 export type CommandRule = components['schemas']['CommandRule'];

@@ -3,6 +3,7 @@
 from .changes import net_changes
 from .evaluation import final_text, grade, summarize_variant
 from .models import (
+    CHATGPT_API,
     COMMON_DOWNLOAD_HOSTS,
     EFFORT_LEVELS,
     IMAGE_TYPES,
@@ -14,6 +15,7 @@ from .models import (
     AutoCompact,
     Block,
     CallView,
+    ChatGPTStatus,
     CommandInfo,
     CommandRule,
     CommandUse,
@@ -136,8 +138,10 @@ __all__ = [
     "summarize_variant",
     "WorkspaceSkills",
     "CredentialSave",
+    "ChatGPTStatus",
     "CredentialStatus",
     "EFFORT_LEVELS",
+    "CHATGPT_API",
     "IMAGE_TYPES",
     "ModelChoice",
     "ProviderProfile",

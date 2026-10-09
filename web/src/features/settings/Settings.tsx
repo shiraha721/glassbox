@@ -26,6 +26,7 @@ import { ContextPage } from './ContextPage';
 import { HooksPage } from './HooksPage';
 import { ComposerPage } from './ComposerPage';
 import type { SettingsPage } from './pages';
+import { withDefaultConnection } from './providers';
 
 const pages = [
   { id: 'providers', label: 'Providers', icon: KeyRound },
@@ -78,7 +79,7 @@ export function Settings({
   };
   useDialogFocus(dialogRef, true, close);
   const change = (next: Config) => {
-    setDraft(next);
+    setDraft(withDefaultConnection(next));
     setNotice('');
   };
   const save = async (discover = false) => {

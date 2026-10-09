@@ -286,12 +286,14 @@ class Runner:
             await self.mark_unknown(run_id)
             uncertain = bool(await self.repository.calls_with_status(run_id, ["outcome_unknown"]))
             if uncertain:
+                cause = f"{exc.message} " if isinstance(exc, AppError) else ""
                 await self.repository.emit(
                     run_id,
                     "run.interrupted",
                     {"reason": "outcome_unknown"},
                     status="interrupted",
-                    error="An interrupted call has an unknown outcome. Review the call before resuming.",
+                    error=cause
+                    + "An interrupted call has an unknown outcome. Review the call before resuming.",
                 )
             else:
                 reason = (
@@ -493,7 +495,7 @@ class Runner:
                 "prepared_request": prepared,
                 "wire_request_body": None,
                 "simulated": config.provider.adapter == "fake",
-                "transformations": transformations(config.provider.adapter),
+                "transformations": transformations(config.provider),
                 "attempts": (existing or {}).get("data", {}).get("attempts", 0) + 1,
                 "attempt_history": (existing or {}).get("data", {}).get("attempt_history", []),
             }
@@ -513,7 +515,6 @@ class Runner:
 
             started = time.monotonic()
             response = None
-            key = self.registry.credentials.resolve(config.provider.credential_ref)
             images = {
                 item.hash: item for message in compiled.messages for item in message.attachments
             }
@@ -524,6 +525,7 @@ class Runner:
                 else None
             )
             try:
+                key = await self.registry.credentials.provider_key(config.provider)
                 async for event in generate(
                     config.provider, compiled, snapshot["tools"], prepared, on_wire, key
                 ):
@@ -536,6 +538,17 @@ class Runner:
                             event["usage"], config.provider.price, config.provider.adapter
                         )
                         data["response_metadata"] = event.get("metadata", {})
+            except AppError as exc:
+                # A request that never left, or that the provider answered with an error, has
+                # failed: the Run fails with the provider's reason. A connection lost after the
+                # request was sent leaves the outcome unknown (the model may have run and been
+                # charged), so the call waits for an explicit Retry.
+                data["error"] = {"code": exc.code, "message": exc.message}
+                transient = isinstance(exc.details, dict) and exc.details.get("transient")
+                uncertain = transient and data["wire_request_body"] is not None
+                status = "executing" if uncertain else "failed"
+                await self.repository.save_call(call_id, run_id, "model", status, data)
+                raise
             finally:
                 attachment_data.reset(token)
             if response is None:

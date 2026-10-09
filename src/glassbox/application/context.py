@@ -189,7 +189,7 @@ async def reduce_context(
                     "prepared_request": prepared,
                     "wire_request_body": None,
                     "simulated": config.provider.adapter == "fake",
-                    "transformations": transformations(config.provider.adapter),
+                    "transformations": transformations(config.provider),
                     "offset": offset,
                     "source_bytes": len(chunk.encode()),
                     "input_hash": compiled.input_hash,
@@ -206,7 +206,7 @@ async def reduce_context(
                     await repository.save_compaction(identifier, data)
 
                 result = None
-                key = credentials.resolve(config.provider.credential_ref)
+                key = await credentials.provider_key(config.provider)
                 for attempt in range(len(RETRY_DELAYS) + 1):
                     try:
                         async for event in generate(

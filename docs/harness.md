@@ -189,11 +189,13 @@ Glassbox owns package use cases for HTTP and embedding. Explicit user Skill impo
 
 ## Provider support
 
-Providers are configured in **Settings → Providers** (or seeded from `.env`) and addressed by ID. Each adapter is explicit; there is no fallback between them:
+Providers are configured in **Settings → Providers** (or seeded from `.env`) and addressed by ID. A provider lists the request formats its service accepts, each with a base URL (`adapter` and `base_url` for the default, `endpoints` for the others), and `model_formats` assigns models a format other than the default; a model choice resolves to one format and endpoint, frozen in the Run. Each adapter is explicit; there is no fallback between them:
 
 - **OpenAI-compatible** streaming Chat Completions, with `reasoning_effort` low, medium or high.
 - **OpenAI Responses** (`adapter: "responses"`), with `reasoning.effort` and `store: false`. Encrypted reasoning items are echoed back within a Run and dropped from later turns. Refusals, filtered or truncated output and failed responses are reported explicitly.
 - **Anthropic Messages**, with `output_config.effort` low through max. Leading canonical system blocks become ordered top-level system text blocks; assistant calls become `tool_use`, paired results become user `tool_result` blocks. Two prompt-cache breakpoints are added and listed as a transformation. Thinking blocks are replayed unchanged within a Run and dropped from later turns (see [Architecture → Providers](architecture.md#providers)). Interleaved system blocks, incomplete streams and unsupported server-tool content fail explicitly; a classifier refusal is reported as `provider_refusal`.
+
+A provider with `auth: "chatgpt"` uses the Responses adapter on the user's ChatGPT plan, signed in through `POST /api/v1/chatgpt/{provider}/sign-in` and the browser (see [Architecture → Providers](architecture.md#providers)); clients cannot sign in without a browser, but Runs started from the CLI, JSON-RPC or `AgentClient` use a provider that is already signed in.
 
 A provider's `show_reasoning` option asks Messages for summarized thinking and Responses for reasoning summaries; Run views return the readable text as `reasoning` on each message, never signatures or encrypted content. `.env` seeds only the `openai` and `anthropic` providers; add a Responses provider in Settings or through `PUT /config`.
 

@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from glassbox.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall
+from glassbox.infrastructure.providers import USER_AGENT, portable_id
 from glassbox.infrastructure.providers.attachments import BASE64, fill_attachments
 from glassbox.infrastructure.providers.errors import (
     error_message,
@@ -45,14 +46,15 @@ def prepare_anthropic(
                 "tool_protocol", "Pair every pending tool_use before another conversation message."
             )
         if item.role == "tool":
-            if item.tool_call_id not in pending:
+            identifier = portable_id(item.tool_call_id or "", item.source)
+            if identifier not in pending:
                 raise AppError(
                     "tool_protocol", "Tool result must match a pending assistant tool_use."
                 )
-            pending.remove(item.tool_call_id)
+            pending.remove(identifier)
             block = {
                 "type": "tool_result",
-                "tool_use_id": item.tool_call_id,
+                "tool_use_id": identifier,
                 "content": item.content,
             }
             if (
@@ -80,13 +82,14 @@ def prepare_anthropic(
             for attachment in item.attachments
         ] + blocks
         for call in item.tool_calls:
-            if not call.id or call.id in pending:
+            identifier = portable_id(call.id, item.source)
+            if not call.id or identifier in pending:
                 raise AppError(
                     "tool_protocol", "Tool-use IDs must be present and unique within their batch."
                 )
-            pending.add(call.id)
+            pending.add(identifier)
             blocks.append(
-                {"type": "tool_use", "id": call.id, "name": call.name, "input": call.args}
+                {"type": "tool_use", "id": identifier, "name": call.name, "input": call.args}
             )
         # Within a Run, thinking blocks go back exactly as received (the API requires them
         # before tool results). Earlier turns are sent without them: their signatures bind
@@ -169,7 +172,7 @@ async def stream_anthropic(
         await on_wire(body)
         fill_attachments(request)
 
-    headers = {"anthropic-version": "2023-06-01"}
+    headers = {"anthropic-version": "2023-06-01", "User-Agent": USER_AGENT}
     if key:
         headers["x-api-key"] = key
     blocks, stopped = {}, set()

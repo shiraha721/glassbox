@@ -6,7 +6,9 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from anyio import CancelScope
-from fastapi import APIRouter, Header, Query, Request, Response
+from fastapi import APIRouter, Header
+from fastapi import Path as PathParameter
+from fastapi import Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from glassbox.domain import (
@@ -15,6 +17,7 @@ from glassbox.domain import (
     AppError,
     ApprovalDecision,
     Attachment,
+    ChatGPTStatus,
     CommandInfo,
     CompactionView,
     CompactRequest,
@@ -71,6 +74,7 @@ from glassbox.domain import (
 )
 from glassbox.domain.lifecycle import TERMINAL
 from glassbox.infrastructure.attachments import IMAGE_LIMIT
+from glassbox.infrastructure.providers.chatgpt import CALLBACK_PATH
 from glassbox.infrastructure.sandbox.processes import process_view
 from glassbox.infrastructure.tracing import redact
 
@@ -184,6 +188,21 @@ class ModelList(Contract):
     models: list[str]
 
 
+class SignInStart(Contract):
+    """The ChatGPT page that continues a sign-in in the browser."""
+
+    url: str
+
+
+class SignOutResult(Contract):
+    """Whether OpenAI confirmed revoking a sign-in; its tokens are removed here either way."""
+
+    revoked: bool
+
+
+ProviderId = Annotated[str, PathParameter(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")]
+
+
 def credential_name(name: str) -> str:
     """Accept only environment-variable-style key names in credential routes."""
     try:
@@ -247,6 +266,29 @@ async def save_credential(name: str, body: CredentialSave, request: Request) -> 
 async def delete_credential(name: str, request: Request) -> CredentialStatus:
     """Forget a stored key; an environment variable of the same name still applies."""
     return await request.app.state.glassbox.delete_credential(credential_name(name))
+
+
+@router.post("/chatgpt/{provider_id}/sign-in", response_model=SignInStart)
+async def chatgpt_sign_in(provider_id: ProviderId, request: Request) -> SignInStart:
+    """Start Sign in with ChatGPT for a provider.
+
+    ChatGPT sends the browser back to this server's callback on 127.0.0.1, at the port the
+    browser reached it on, where the sign-in completes."""
+    port = request.url.port or (443 if request.url.scheme == "https" else 80)
+    redirect = f"http://127.0.0.1:{port}{CALLBACK_PATH}"
+    return SignInStart(url=await request.app.state.glassbox.chatgpt.start(provider_id, redirect))
+
+
+@router.get("/chatgpt/{provider_id}", response_model=ChatGPTStatus)
+async def chatgpt_status(provider_id: ProviderId, request: Request) -> ChatGPTStatus:
+    """Report whether a provider is signed in to ChatGPT, without any token."""
+    return await request.app.state.glassbox.chatgpt.status(provider_id)
+
+
+@router.delete("/chatgpt/{provider_id}", response_model=SignOutResult)
+async def chatgpt_sign_out(provider_id: ProviderId, request: Request) -> SignOutResult:
+    """Sign a provider out of ChatGPT: remove its tokens and revoke them at OpenAI."""
+    return SignOutResult(revoked=await request.app.state.glassbox.chatgpt.sign_out(provider_id))
 
 
 @router.post("/providers/models", response_model=ModelList)

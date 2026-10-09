@@ -1,13 +1,20 @@
 """API keys entered in Settings, kept on the server and never returned to clients."""
 
+import asyncio
 import json
 import os
 import threading
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from glassbox.domain import CredentialStatus, credential_reference
+from glassbox.domain import (
+    CredentialStatus,
+    ProviderConfig,
+    ProviderProfile,
+    credential_reference,
+)
 from glassbox.infrastructure.config import resolve_secret
+from glassbox.infrastructure.providers.chatgpt import ChatGPTSignIn
 
 
 class CredentialStore:
@@ -19,9 +26,21 @@ class CredentialStore:
     server: status reports only the source and the last four characters."""
 
     def __init__(self, path: Path | None) -> None:
-        """Use the given file, or only the environment when no path is configured."""
+        """Use the given file, or only the environment when no path is configured.
+
+        ChatGPT sign-ins live beside it in `chatgpt.json`."""
         self.path = path
         self.lock = threading.Lock()
+        self.chatgpt = ChatGPTSignIn(path.with_name("chatgpt.json") if path else None)
+
+    async def provider_key(self, provider: ProviderConfig | ProviderProfile) -> str:
+        """The secret a provider's requests carry: its key, or a ChatGPT sign-in's token."""
+        if provider.auth == "chatgpt":
+            identifier = (
+                provider.profile_id if isinstance(provider, ProviderConfig) else provider.id
+            )
+            return await self.chatgpt.access_token(identifier or "")
+        return await asyncio.to_thread(self.resolve, provider.credential_ref)
 
     def _load(self) -> dict[str, str]:
         if self.path is None or not self.path.exists():

@@ -11,10 +11,19 @@ from typing import Any
 
 import httpx
 
-from glassbox.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall
+from glassbox.domain import (
+    CHATGPT_API,
+    AppError,
+    CompiledPrompt,
+    Message,
+    ProviderConfig,
+    ToolCall,
+)
+from glassbox.infrastructure.providers import USER_AGENT, portable_id
 from glassbox.infrastructure.providers.attachments import DATA_URL, fill_attachments
 from glassbox.infrastructure.providers.errors import (
     error_message,
+    plan_failure,
     provider_failure,
     transport_failure,
     truncated_output,
@@ -40,11 +49,21 @@ def _content(message: Message) -> str | list[dict[str, Any]]:
 def prepare_responses(
     config: ProviderConfig, compiled: CompiledPrompt, tools: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Serialize canonical messages as Responses input items with unchanged roles and call IDs."""
+    """Serialize canonical messages as Responses input items with unchanged roles and call IDs.
+
+    Requests on a ChatGPT plan follow that route's rules: it rejects system message items, an
+    output token limit and a temperature, so system messages go with the developer role (the
+    same authority for these models) and no limit is sent."""
     if not config.model.strip():
         raise AppError(
             "provider_not_configured",
             "No model is selected. Choose one below the message box or in Settings → Models.",
+        )
+    plan = config.auth == "chatgpt"
+    if plan and config.temperature is not None:
+        raise AppError(
+            "provider_temperature",
+            "A ChatGPT plan does not accept a temperature. Clear it in Settings → Models.",
         )
     items: list[dict[str, Any]] = []
     pending: set[str] = set()
@@ -54,23 +73,25 @@ def prepare_responses(
                 "tool_protocol", "Pair every pending function call before another message."
             )
         if message.role == "tool":
-            if message.tool_call_id not in pending:
+            identifier = portable_id(message.tool_call_id or "", message.source)
+            if identifier not in pending:
                 raise AppError("tool_protocol", "Tool result must match a pending function call.")
-            pending.remove(message.tool_call_id)
+            pending.remove(identifier)
             items.append(
                 {
                     "type": "function_call_output",
-                    "call_id": message.tool_call_id,
+                    "call_id": identifier,
                     "output": message.content,
                 }
             )
             continue
         for call in message.tool_calls:
-            if not call.id or call.id in pending:
+            identifier = portable_id(call.id, message.source)
+            if not call.id or identifier in pending:
                 raise AppError(
                     "tool_protocol", "Function call IDs must be present and unique in a batch."
                 )
-            pending.add(call.id)
+            pending.add(identifier)
         # Within a Run, a response holding reasoning goes back exactly as received (minus
         # provider IDs, which unstored responses cannot resolve). Earlier turns are rebuilt.
         if message.blocks and message.source != "history":
@@ -83,11 +104,12 @@ def prepare_responses(
             )
             continue
         if message.content or not message.tool_calls or message.attachments:
-            items.append({"role": message.role, "content": _content(message)})
+            role = "developer" if plan and message.role == "system" else message.role
+            items.append({"role": role, "content": _content(message)})
         items.extend(
             {
                 "type": "function_call",
-                "call_id": call.id,
+                "call_id": portable_id(call.id, message.source),
                 "name": call.name,
                 "arguments": json.dumps(call.args, ensure_ascii=False),
             }
@@ -95,13 +117,10 @@ def prepare_responses(
         )
     if pending:
         raise AppError("tool_protocol", "Unpaired function calls cannot be sent to a model.")
-    body: dict[str, Any] = {
-        "model": config.model,
-        "input": items,
-        "max_output_tokens": config.max_output_tokens,
-        "stream": True,
-        "store": False,
-    }
+    body: dict[str, Any] = {"model": config.model, "input": items}
+    if not plan:
+        body["max_output_tokens"] = config.max_output_tokens
+    body.update(stream=True, store=False)
     if config.temperature is not None:
         body["temperature"] = config.temperature
     if config.reasoning_effort:
@@ -145,7 +164,13 @@ async def stream_responses(
         await on_wire(body)
         fill_attachments(request)
 
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    plan = config.auth == "chatgpt"
+    if plan and config.base_url.rstrip("/") != CHATGPT_API:
+        # A sign-in's token is issued for the OpenAI API and must never reach another host.
+        raise AppError("provider_url", f"A ChatGPT plan is used only at {CHATGPT_API}.")
+    headers = {"User-Agent": USER_AGENT}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
     final: dict[str, Any] | None = None
     size = 0
     try:
@@ -158,10 +183,12 @@ async def stream_responses(
                 if response.status_code != 200:
                     body = (await response.aread())[:4096]
                     try:
-                        detail = error_message(json.loads(body))
+                        parsed = json.loads(body)
                     except ValueError:
-                        detail = body.decode("utf-8", errors="replace")
-                    raise provider_failure(detail, key, response.status_code)
+                        parsed = body.decode("utf-8", errors="replace")
+                    if plan and (failure := plan_failure(parsed, response.status_code)):
+                        raise failure
+                    raise provider_failure(error_message(parsed), key, response.status_code)
                 async for event in sse_events(response):
                     kind = event.get("type")
                     if kind == "response.output_text.delta":
@@ -176,11 +203,13 @@ async def stream_responses(
                         final = event.get("response")
                         break
                     elif kind == "response.failed":
-                        failed = event.get("response") or {}
-                        raise provider_failure(
-                            error_message({"error": failed.get("error")}) or "response failed", key
-                        )
+                        failed = {"error": (event.get("response") or {}).get("error")}
+                        if plan and (failure := plan_failure(failed, None)):
+                            raise failure
+                        raise provider_failure(error_message(failed) or "response failed", key)
                     elif kind == "error":
+                        if plan and (failure := plan_failure(event, None)):
+                            raise failure
                         raise provider_failure(error_message(event) or "streaming error", key)
     except AppError:
         raise

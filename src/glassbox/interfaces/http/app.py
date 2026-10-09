@@ -1,5 +1,8 @@
 """FastAPI composition root and local browser access boundary."""
 
+import base64
+import hashlib
+import html
 import logging
 import secrets
 import traceback
@@ -9,7 +12,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -19,6 +22,7 @@ from glassbox.domain.hooks import Hooks
 from glassbox.harness import Harness
 from glassbox.infrastructure.config import Settings
 from glassbox.infrastructure.desktop.folders import FolderPicker
+from glassbox.infrastructure.providers.chatgpt import CALLBACK_PATH, USAGE_URL
 from glassbox.interfaces.http.api import router
 
 logger = logging.getLogger(__name__)
@@ -36,6 +40,53 @@ def error_response(error: AppError, request_id: str | None = None) -> JSONRespon
             }
         },
         status_code=error.status,
+    )
+
+
+# The sign-in page's only script: drop the one-time code from the address bar, and let the
+# button close the tab ChatGPT returned to, or open Glassbox in it where closing is refused.
+SIGN_IN_SCRIPT = (
+    'history.replaceState(null, "", location.pathname);'
+    'document.getElementById("done").addEventListener("click", () => {'
+    'window.close(); setTimeout(() => location.assign("/"), 300); });'
+)
+SIGN_IN_POLICY = (
+    "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'; script-src 'sha256-"
+    + base64.b64encode(hashlib.sha256(SIGN_IN_SCRIPT.encode()).digest()).decode()
+    + "'"
+)
+
+
+def sign_in_page(title: str, message: str, status: int = 200, usage: bool = False) -> HTMLResponse:
+    """The page that finishes Sign in with ChatGPT in its browser tab."""
+    link = (
+        f'<p><a href="{USAGE_URL}" target="_blank" rel="noreferrer">Manage usage</a> '
+        "in ChatGPT shows what Glassbox has used and lets you limit it.</p>"
+        if usage
+        else ""
+    )
+    body = (
+        '<!doctype html><html lang="en"><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{html.escape(title)} · Glassbox</title><style>"
+        # The colors are the design tokens of web/src/style.css; change them together.
+        "body{font:15px/1.6 system-ui,sans-serif;max-width:30rem;margin:16vh auto;padding:0 24px;"
+        "background:#f6f7f9;color:#1b2130}h1{font-size:22px}button{font:inherit;padding:7px 16px;"
+        "border:0;border-radius:8px;background:#4f46e5;color:#fff;cursor:pointer}a{color:#4338ca}"
+        "@media (prefers-color-scheme:dark){body{background:#0f1115;color:#e7e9ee}"
+        "button{background:#7b73ff}a{color:#aaa5ff}}</style>"
+        f"<h1>{html.escape(title)}</h1><p>{html.escape(message)}</p>{link}"
+        f'<button id="done" type="button">Got it</button><script>{SIGN_IN_SCRIPT}</script></html>'
+    )
+    return HTMLResponse(
+        body,
+        status_code=status,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": SIGN_IN_POLICY,
+            "Referrer-Policy": "no-referrer",
+        },
     )
 
 
@@ -145,6 +196,37 @@ def create_app(
     app.add_middleware(LocalAccessMiddleware, allowed_origins=settings.allowed_origins)
 
     app.include_router(router)
+
+    @app.get(CALLBACK_PATH, include_in_schema=False)
+    async def chatgpt_callback(request: Request) -> HTMLResponse:
+        """Finish Sign in with ChatGPT in the browser tab that ChatGPT returned to."""
+        query = {name: request.query_params.getlist(name) for name in request.query_params}
+        try:
+            done = await request.app.state.glassbox.chatgpt.complete(query)
+        except AppError as error:
+            return sign_in_page("Sign-in did not complete", error.message, error.status)
+        account = f" as {done.email}" if done.email else ""
+        if not done.plan_usage:
+            return sign_in_page(
+                "ChatGPT plan not allowed",
+                f"You are signed in{account}, but using your ChatGPT plan was not allowed, so "
+                "this provider cannot send requests. In Glassbox, choose Continue with ChatGPT "
+                "again and allow it.",
+            )
+        if done.registered:
+            return sign_in_page(
+                "You're using your ChatGPT plan",
+                f"Signed in{account}. Requests from this provider now use your ChatGPT plan and "
+                "count toward its usage limits. Glassbox gets no access to your ChatGPT "
+                "conversations. You can close this tab.",
+                usage=True,
+            )
+        return sign_in_page(
+            "Signed in to ChatGPT",
+            f"Signed in{account}. You can close this tab and return to Glassbox.",
+            usage=True,
+        )
+
     static_root = Path(__file__).resolve().parents[4] / "web" / "dist"
 
     @app.get("/{path:path}", include_in_schema=False)

@@ -268,6 +268,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chatgpt/{provider_id}/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Chatgpt Sign In
+         * @description Start Sign in with ChatGPT for a provider.
+         *
+         *     ChatGPT sends the browser back to this server's callback on 127.0.0.1, at the port the
+         *     browser reached it on, where the sign-in completes.
+         */
+        post: operations["chatgpt_sign_in_api_v1_chatgpt__provider_id__sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chatgpt/{provider_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Chatgpt Status
+         * @description Report whether a provider is signed in to ChatGPT, without any token.
+         */
+        get: operations["chatgpt_status_api_v1_chatgpt__provider_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Chatgpt Sign Out
+         * @description Sign a provider out of ChatGPT: remove its tokens and revoke them at OpenAI.
+         */
+        delete: operations["chatgpt_sign_out_api_v1_chatgpt__provider_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers/models": {
         parameters: {
             query?: never;
@@ -1391,6 +1438,21 @@ export interface components {
             };
             /** Result */
             result: unknown;
+        };
+        /**
+         * ChatGPTStatus
+         * @description A provider's ChatGPT sign-in as Settings shows it; its tokens never leave the server.
+         */
+        ChatGPTStatus: {
+            /** Signed In */
+            signed_in: boolean;
+            /** Email */
+            email: string | null;
+            /**
+             * Plan Usage
+             * @default false
+             */
+            plan_usage: boolean;
         };
         /**
          * CommandInfo
@@ -2770,6 +2832,12 @@ export interface components {
              * @default OPENAI_API_KEY
              */
             credential_ref: string;
+            /**
+             * Auth
+             * @default key
+             * @enum {string}
+             */
+            auth: "key" | "chatgpt";
             /** Reasoning Effort */
             reasoning_effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Temperature */
@@ -2819,6 +2887,12 @@ export interface components {
              * @default OPENAI_API_KEY
              */
             credential_ref: string;
+            /**
+             * Auth
+             * @default key
+             * @enum {string}
+             */
+            auth: "key" | "chatgpt";
             /** Reasoning Effort */
             reasoning_effort: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Temperature */
@@ -2839,7 +2913,11 @@ export interface components {
         };
         /**
          * ProviderProfile
-         * @description A configured model endpoint: connection, key reference, known models and options.
+         * @description A configured model service: its endpoints, key reference, known models and options.
+         *
+         *     A service may accept several request formats, each at its own base URL. Models use
+         *     `adapter` at `base_url` unless `model_formats` assigns them another format the service
+         *     offers in `endpoints`.
          */
         "ProviderProfile-Input": {
             /** Id */
@@ -2854,6 +2932,22 @@ export interface components {
             adapter: "openai" | "responses" | "anthropic";
             /** Base Url */
             base_url: string;
+            /** Endpoints */
+            endpoints?: {
+                [key: string]: string;
+            };
+            /** Model Formats */
+            model_formats?: {
+                [key: string]: "openai" | "responses" | "anthropic";
+            };
+            /**
+             * Auth
+             * @default key
+             * @enum {string}
+             */
+            auth: "key" | "chatgpt";
+            /** Service */
+            service?: string | null;
             /**
              * Credential Ref
              * @default
@@ -2882,7 +2976,11 @@ export interface components {
         };
         /**
          * ProviderProfile
-         * @description A configured model endpoint: connection, key reference, known models and options.
+         * @description A configured model service: its endpoints, key reference, known models and options.
+         *
+         *     A service may accept several request formats, each at its own base URL. Models use
+         *     `adapter` at `base_url` unless `model_formats` assigns them another format the service
+         *     offers in `endpoints`.
          */
         "ProviderProfile-Output": {
             /** Id */
@@ -2897,6 +2995,22 @@ export interface components {
             adapter: "openai" | "responses" | "anthropic";
             /** Base Url */
             base_url: string;
+            /** Endpoints */
+            endpoints: {
+                [key: string]: string;
+            };
+            /** Model Formats */
+            model_formats: {
+                [key: string]: "openai" | "responses" | "anthropic";
+            };
+            /**
+             * Auth
+             * @default key
+             * @enum {string}
+             */
+            auth: "key" | "chatgpt";
+            /** Service */
+            service: string | null;
             /**
              * Credential Ref
              * @default
@@ -3319,6 +3433,22 @@ export interface components {
              * @default 10
              */
             timeout: number;
+        };
+        /**
+         * SignInStart
+         * @description The ChatGPT page that continues a sign-in in the browser.
+         */
+        SignInStart: {
+            /** Url */
+            url: string;
+        };
+        /**
+         * SignOutResult
+         * @description Whether OpenAI confirmed revoking a sign-in; its tokens are removed here either way.
+         */
+        SignOutResult: {
+            /** Revoked */
+            revoked: boolean;
         };
         /**
          * SkillDocument
@@ -4507,6 +4637,207 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    chatgpt_sign_in_api_v1_chatgpt__provider_id__sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInStart"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    chatgpt_status_api_v1_chatgpt__provider_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatGPTStatus"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    chatgpt_sign_out_api_v1_chatgpt__provider_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignOutResult"];
                 };
             };
             /** @description Forbidden */

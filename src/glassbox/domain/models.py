@@ -117,6 +117,9 @@ class Preset(Contract):
 
 
 ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
+# The request formats Glassbox speaks: Chat Completions ("openai"), the OpenAI Responses API
+# and Anthropic Messages.
+RequestFormat = Literal["openai", "responses", "anthropic"]
 # Effort levels each request format accepts. Chat Completions takes reasoning_effort, the
 # Responses API reasoning.effort, and the Messages API output_config.effort. Unsupported
 # levels are rejected, never rewritten.
@@ -125,6 +128,11 @@ EFFORT_LEVELS: dict[str, tuple[str, ...]] = {
     "responses": ("low", "medium", "high"),
     "anthropic": ("low", "medium", "high", "xhigh", "max"),
 }
+# How a provider's requests authenticate: with a key named by `credential_ref`, or with a
+# ChatGPT sign-in (OpenAI's Sign in with ChatGPT), whose tokens are issued for CHATGPT_API
+# and never sent anywhere else.
+ProviderAuth = Literal["key", "chatgpt"]
+CHATGPT_API = "https://api.openai.com/v1"
 # The pseudo provider ID that selects the offline simulated model.
 SIMULATED = "simulated"
 # The native command tool of this operating system; settings name the shell they permit.
@@ -173,6 +181,7 @@ class ProviderConfig(Contract):
     model: str = ""
     base_url: str = "https://api.openai.com/v1"
     credential_ref: str = "OPENAI_API_KEY"
+    auth: ProviderAuth = "key"
     reasoning_effort: ReasoningEffort | None = None
     # None leaves sampling to the provider; current Claude models reject the parameter.
     temperature: float | None = Field(default=None, ge=0, le=2)
@@ -198,15 +207,39 @@ class ProviderConfig(Contract):
         """Reject credentials embedded in a serialized provider URL."""
         return endpoint_url(value)
 
+    @model_validator(mode="after")
+    def chatgpt_endpoint(self) -> "ProviderConfig":
+        """Bind a ChatGPT sign-in to its provider and to the one API its tokens are for."""
+        if self.auth == "chatgpt" and (
+            self.adapter != "responses"
+            or self.base_url.rstrip("/") != CHATGPT_API
+            or not self.profile_id
+        ):
+            raise ValueError(
+                f"A ChatGPT sign-in names its provider and uses the Responses API at {CHATGPT_API}."
+            )
+        return self
+
 
 class ProviderProfile(Contract):
-    """A configured model endpoint: connection, key reference, known models and options."""
+    """A configured model service: its endpoints, key reference, known models and options.
+
+    A service may accept several request formats, each at its own base URL. Models use
+    `adapter` at `base_url` unless `model_formats` assigns them another format the service
+    offers in `endpoints`."""
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")
     name: str = Field(min_length=1, max_length=60)
-    # Request format: Chat Completions ("openai"), the OpenAI Responses API, or Messages.
-    adapter: Literal["openai", "responses", "anthropic"] = "openai"
+    # The default request format: Chat Completions ("openai"), Responses, or Messages.
+    adapter: RequestFormat = "openai"
     base_url: str = Field(min_length=1)
+    # The base URLs of the other request formats the service accepts.
+    endpoints: dict[RequestFormat, str] = Field(default_factory=dict)
+    # Models called with one of those other formats, by model ID.
+    model_formats: dict[str, RequestFormat] = Field(default_factory=dict, max_length=500)
+    auth: ProviderAuth = "key"
+    # The known service Settings added this provider as, for its key link and format hints.
+    service: str | None = Field(default=None, max_length=40)
     credential_ref: str = ""
     models: list[str] = Field(default_factory=list, max_length=500)
     temperature: float | None = Field(default=None, ge=0, le=2)
@@ -235,6 +268,43 @@ class ProviderProfile(Contract):
         if any(not item.strip() or len(item) > 200 for item in value):
             raise ValueError("Model IDs must be nonempty and at most 200 characters.")
         return sorted(set(item.strip() for item in value))
+
+    @field_validator("endpoints")
+    @classmethod
+    def safe_endpoints(cls, value: dict[str, str]) -> dict[str, str]:
+        """Apply the base URL rules to every format's endpoint."""
+        for url in value.values():
+            if not url:
+                raise ValueError("Leave out a request format the service does not offer.")
+            endpoint_url(url)
+        return value
+
+    @model_validator(mode="after")
+    def offered_formats(self) -> "ProviderProfile":
+        """Assign models only formats the service offers; a ChatGPT sign-in offers one."""
+        if self.adapter in self.endpoints:
+            raise ValueError(
+                f"The default format {self.adapter} uses base_url; endpoints lists the others."
+            )
+        for model, value in self.model_formats.items():
+            if value != self.adapter and value not in self.endpoints:
+                raise ValueError(f"Model {model} uses {value}, which {self.name} does not offer.")
+        if self.auth == "chatgpt" and (
+            self.adapter != "responses"
+            or self.base_url.rstrip("/") != CHATGPT_API
+            or self.endpoints
+            or self.model_formats
+        ):
+            raise ValueError(f"A ChatGPT sign-in uses only the Responses API at {CHATGPT_API}.")
+        return self
+
+    def format_of(self, model: str) -> RequestFormat:
+        """The request format a model of this provider is called with."""
+        return self.model_formats.get(model, self.adapter)
+
+    def endpoint(self, value: RequestFormat) -> str:
+        """The base URL of one of the provider's request formats."""
+        return self.base_url if value == self.adapter else self.endpoints[value]
 
 
 class ModelChoice(Contract):
@@ -519,16 +589,18 @@ def resolve_model(config: GlassboxConfig, choice: ModelChoice | None = None) -> 
     profile = next((item for item in config.providers if item.id == provider_id), None)
     if profile is None:
         raise AppError("provider_unknown", f"Provider {provider_id} is not configured.")
-    if effort and effort not in EFFORT_LEVELS[profile.adapter]:
+    request_format = profile.format_of(model)
+    if effort and effort not in EFFORT_LEVELS[request_format]:
         raise AppError(
             "reasoning_effort", f"{profile.name} does not accept reasoning effort {effort}."
         )
     return ProviderConfig(
         profile_id=profile.id,
-        adapter=profile.adapter,
+        adapter=request_format,
         model=model,
-        base_url=profile.base_url,
+        base_url=profile.endpoint(request_format),
         credential_ref=profile.credential_ref,
+        auth=profile.auth,
         reasoning_effort=effort,
         temperature=profile.temperature,
         max_output_tokens=profile.max_output_tokens,
@@ -773,6 +845,15 @@ class CredentialSave(Contract):
     """A key entered in Settings; it is stored on the server and never returned."""
 
     value: str = Field(min_length=1, max_length=8192)
+
+
+class ChatGPTStatus(Contract):
+    """A provider's ChatGPT sign-in as Settings shows it; its tokens never leave the server."""
+
+    signed_in: bool
+    email: str | None = None
+    # Whether requests may use the ChatGPT plan: the sign-in granted chatgpt.tokens.use.direct.
+    plan_usage: bool = False
 
 
 class SandboxStatus(Contract):

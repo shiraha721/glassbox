@@ -76,6 +76,7 @@ from glassbox.infrastructure.attachments import AttachmentStore
 from glassbox.infrastructure.packages import export_skill, import_preset, import_skill
 from glassbox.infrastructure.providers.catalog import list_models
 from glassbox.infrastructure.providers.chat import prepare, transformations
+from glassbox.infrastructure.providers.chatgpt import ChatGPTSignIn
 from glassbox.infrastructure.storage import Repository
 from glassbox.infrastructure.tools import ToolRegistry
 from glassbox.infrastructure.tracing import redact
@@ -697,9 +698,14 @@ class Glassbox:
         """Delete a global skill the user has seen; bundled skills cannot be deleted."""
         await asyncio.to_thread(self.registry.files.delete_global_skill, name, expected_hash)
 
+    @property
+    def chatgpt(self) -> ChatGPTSignIn:
+        """ChatGPT sign-ins; their tokens stay on this server."""
+        return self.registry.credentials.chatgpt
+
     async def list_models(self, profile: ProviderProfile) -> list[str]:
         """Ask a provider which models it serves, using its server-side credential."""
-        key = await asyncio.to_thread(self.registry.credentials.resolve, profile.credential_ref)
+        key = await self.registry.credentials.provider_key(profile)
         return await list_models(profile, key)
 
     async def credential_status(self, names: list[str]) -> list[CredentialStatus]:
@@ -788,7 +794,7 @@ class Glassbox:
                 compiled=compiled,
                 prepared_request=prepared,
                 tools=tools,
-                transformations=transformations(config.provider.adapter),
+                transformations=transformations(config.provider),
                 command=CommandUse.model_validate(command) if command else None,
             ),
             workspace_context,
@@ -1141,6 +1147,11 @@ class Glassbox:
         saved = await self.repository.save_config(value)
         if saved.mcp_servers != previous.mcp_servers:
             self.registry.reset()
+        # A ChatGPT sign-in belongs to its provider: removing the provider signs it out.
+        kept = {profile.id for profile in saved.providers if profile.auth == "chatgpt"}
+        for profile in previous.providers:
+            if profile.auth == "chatgpt" and profile.id not in kept:
+                await self.chatgpt.forget(profile.id)
         return saved
 
     async def delete_session(self, session_id: str) -> None:

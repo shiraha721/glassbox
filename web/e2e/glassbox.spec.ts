@@ -438,7 +438,9 @@ test('providers and models feed the model picker, and keys are write-only', asyn
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
   const provider = settings.getByRole('region', { name: 'Provider OpenAI-compatible' });
-  await provider.getByLabel('Base URL', { exact: true }).fill('http://127.0.0.1:11434/v1');
+  await provider
+    .getByLabel('Chat Completions base URL', { exact: true })
+    .fill('http://127.0.0.1:11434/v1');
   const pages = settings.getByRole('navigation', { name: 'Settings pages' });
   await pages.getByRole('button', { name: 'Models', exact: true }).click();
   await settings.getByLabel('Add model to OpenAI-compatible').fill('local-contract-model');
@@ -1269,26 +1271,139 @@ test('an image attached in the composer is sent with the task', async ({ page })
   await expect(turn.locator('.agent-activity')).toContainText('Attached images: 1');
 });
 
-test('an OpenAI Responses provider can be added in Settings', async ({ page }) => {
+test('a known service is added with its formats, and models get the format they need', async ({
+  page,
+}) => {
   await openWorkspace(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
-  await settings.getByRole('button', { name: 'Add OpenAI Responses', exact: true }).click();
-  const card = settings.getByRole('region', { name: 'Provider OpenAI Responses' });
-  await expect(card.getByText('Responses API', { exact: true })).toBeVisible();
+  await settings
+    .getByRole('region', { name: 'Add a provider' })
+    .getByRole('button', { name: /^OpenRouter/ })
+    .click();
+  const card = settings.getByRole('region', { name: 'Provider OpenRouter' });
+  await expect(card.getByLabel('Chat Completions base URL')).toHaveValue(
+    'https://openrouter.ai/api/v1',
+  );
+  await expect(card.getByLabel('Use Chat Completions by default')).toBeChecked();
+  await expect(card.getByLabel('Messages API base URL')).toHaveValue(
+    'https://openrouter.ai/api/v1',
+  );
+  await expect(card.getByRole('link', { name: 'Get a key from OpenRouter' })).toBeVisible();
+  await page.screenshot({ path: 'test-results/providers.png' });
+  const pages = settings.getByRole('navigation', { name: 'Settings pages' });
+  await pages.getByRole('button', { name: 'Models', exact: true }).click();
+  const models = settings.getByRole('region', { name: 'Models for OpenRouter' });
+  for (const model of ['anthropic/claude-sonnet-5', 'qwen/qwen3-coder']) {
+    await models.getByLabel('Add model to OpenRouter').fill(model);
+    await models.getByRole('button', { name: 'Add', exact: true }).click();
+  }
+  await models.getByText('Request format per model').click();
+  await expect(models.getByLabel('Request format for anthropic/claude-sonnet-5')).toHaveValue(
+    'anthropic',
+  );
+  await models.getByLabel('Request format for qwen/qwen3-coder').selectOption('responses');
   await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
   await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
   const saved = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
   try {
-    expect(saved.providers.find((item: { id: string }) => item.id === 'responses')).toMatchObject({
-      adapter: 'responses',
-      credential_ref: 'RESPONSES_API_KEY',
+    expect(saved.providers.find((item: { id: string }) => item.id === 'openrouter')).toMatchObject({
+      service: 'openrouter',
+      adapter: 'openai',
+      credential_ref: 'OPENROUTER_API_KEY',
+      model_formats: { 'anthropic/claude-sonnet-5': 'anthropic', 'qwen/qwen3-coder': 'responses' },
     });
+    // The picker offers Messages API effort levels for the Claude model.
+    await settings.getByLabel('Close settings').click();
+    await page.getByRole('button', { name: 'Model', exact: true }).click();
+    await page.getByRole('button', { name: 'anthropic/claude-sonnet-5', exact: true }).click();
+    await page.getByRole('button', { name: 'Model', exact: true }).click();
+    await expect(
+      page.getByRole('group', { name: 'Reasoning effort' }).getByRole('button', { name: 'Max' }),
+    ).toBeVisible();
   } finally {
     await page.request.put('/api/v1/config', {
       data: {
         ...saved,
-        providers: saved.providers.filter((item: { id: string }) => item.id !== 'responses'),
+        providers: saved.providers.filter((item: { id: string }) => item.id !== 'openrouter'),
+      },
+    });
+  }
+});
+
+test('a ChatGPT plan provider signs in through ChatGPT and is labelled in the composer', async ({
+  page,
+}) => {
+  await openWorkspace(page);
+  // The sign-in page itself is ChatGPT's; the test only checks how Glassbox opens it.
+  await page
+    .context()
+    .route('https://auth.openai.com/**', (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<title>ChatGPT sign-in</title>' }),
+    );
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings
+    .getByRole('region', { name: 'Add a provider' })
+    .getByRole('button', { name: /^ChatGPT plan/ })
+    .click();
+  const card = settings.getByRole('region', { name: 'Provider ChatGPT plan' });
+  await expect(card.getByText('Not signed in')).toBeVisible();
+  await expect(card.getByLabel('Chat Completions base URL')).toHaveCount(0);
+  const popup = page.waitForEvent('popup');
+  await card.getByRole('button', { name: 'Continue with ChatGPT' }).click();
+  const signIn = new URL((await popup).url());
+  expect(signIn.origin + signIn.pathname).toBe('https://auth.openai.com/api/accounts/authorize');
+  expect(signIn.searchParams.get('client_id')).toBe('dynamic_agent_client');
+  expect(signIn.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:8765/auth/callback');
+  await expect(card.getByRole('status')).toContainText('Finish the sign-in in the new tab');
+  await page.screenshot({ path: 'test-results/chatgpt-sign-in.png' });
+  const pages = settings.getByRole('navigation', { name: 'Settings pages' });
+  await pages.getByRole('button', { name: 'Models', exact: true }).click();
+  const models = settings.getByRole('region', { name: 'Models for ChatGPT plan' });
+  await expect(models.getByLabel('Temperature')).toHaveCount(0);
+  await models.getByLabel('Add model to ChatGPT plan').fill('gpt-plan-model');
+  await models.getByRole('button', { name: 'Add', exact: true }).click();
+  // The default model can move to the plan and away from it again.
+  await settings.getByLabel('Default provider').selectOption('chatgpt');
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  const onPlan = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
+  expect(onPlan.provider).toMatchObject({ profile_id: 'chatgpt', auth: 'chatgpt' });
+  await settings.getByLabel('Default provider').selectOption('simulated');
+  await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect(settings.getByText('Settings saved. New runs use these settings.')).toBeVisible();
+  const saved = (await (await page.request.get('/api/v1/bootstrap')).json()).config;
+  expect(saved.provider).toMatchObject({ profile_id: 'simulated', auth: 'key' });
+  try {
+    expect(saved.providers.find((item: { id: string }) => item.id === 'chatgpt')).toMatchObject({
+      auth: 'chatgpt',
+      adapter: 'responses',
+      base_url: 'https://api.openai.com/v1',
+    });
+    await settings.getByLabel('Close settings').click();
+    await expect(page.getByText('Using ChatGPT plan')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Model', exact: true }).click();
+    await page.getByRole('button', { name: 'gpt-plan-model', exact: true }).click();
+    await expect(page.locator('.input-hint')).toContainText('Using ChatGPT plan');
+    await expect(
+      page.locator('.input-hint').getByRole('link', { name: 'Manage usage' }),
+    ).toHaveAttribute('href', 'https://chatgpt.com/settings/usage');
+    // Without a sign-in, a Run says how to sign in instead of reaching OpenAI.
+    await startTask(page, 'Hello from the plan');
+    await expect(page.getByTestId('run-status')).toHaveText('failed');
+    await expect(page.getByRole('alert').last()).toContainText('Continue with ChatGPT');
+  } finally {
+    await page.request.put('/api/v1/config', {
+      data: {
+        ...saved,
+        provider: {
+          ...saved.provider,
+          profile_id: 'simulated',
+          adapter: 'fake',
+          model: 'simulated',
+        },
+        providers: saved.providers.filter((item: { id: string }) => item.id !== 'chatgpt'),
       },
     });
   }

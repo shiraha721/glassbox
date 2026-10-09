@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 
 from glassbox.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall, uid
+from glassbox.infrastructure.providers import USER_AGENT, portable_id
 from glassbox.infrastructure.providers.attachments import DATA_URL, fill_attachments
 from glassbox.infrastructure.providers.errors import sdk_failure, truncated_output
 from glassbox.infrastructure.providers.messages import prepare_anthropic, stream_anthropic
@@ -43,7 +44,12 @@ def langchain_messages(messages: list[Message]) -> list:
                 AIMessage(
                     content=message.content,
                     tool_calls=[
-                        {"id": call.id, "name": call.name, "args": call.args, "type": "tool_call"}
+                        {
+                            "id": portable_id(call.id, message.source),
+                            "name": call.name,
+                            "args": call.args,
+                            "type": "tool_call",
+                        }
                         for call in message.tool_calls
                     ],
                 )
@@ -51,7 +57,12 @@ def langchain_messages(messages: list[Message]) -> list:
         else:
             if not message.tool_call_id:
                 raise AppError("tool_protocol", "Tool results require a tool_call_id.")
-            result.append(ToolMessage(content=message.content, tool_call_id=message.tool_call_id))
+            result.append(
+                ToolMessage(
+                    content=message.content,
+                    tool_call_id=portable_id(message.tool_call_id, message.source),
+                )
+            )
     return result
 
 
@@ -85,6 +96,7 @@ def model(config: ProviderConfig, key: str, client: httpx.AsyncClient | None = N
         timeout=90,
         use_responses_api=False,
         stream_usage=True,
+        default_headers={"User-Agent": USER_AGENT},
         http_async_client=client,
     )
 
@@ -209,10 +221,18 @@ async def fake_stream(
     }
 
 
-def transformations(adapter: str) -> list[str]:
+# Earlier turns may have been answered through another request format (see portable_id).
+PORTABLE_HISTORY = (
+    "Tool-call IDs from earlier turns that are not 1-40 letters, digits, '_' or '-' replaced "
+    "by stable hashes, the same for each call and its result"
+)
+
+
+def transformations(provider: ProviderConfig) -> list[str]:
     """Name adapter serialization changes beside the preserved canonical source mapping."""
+    adapter = provider.adapter
     if adapter == "openai":
-        return ["LangChain Chat Completions serialization"]
+        return ["LangChain Chat Completions serialization", PORTABLE_HISTORY]
     if adapter == "anthropic":
         return [
             "Leading system blocks extracted into Messages system array in original order",
@@ -221,6 +241,7 @@ def transformations(adapter: str) -> list[str]:
             "Consecutive user/assistant messages may be combined by the provider",
             "Prompt-cache breakpoints (cache_control) on the last system block and the last "
             "message block",
+            PORTABLE_HISTORY,
         ]
     if adapter == "responses":
         return [
@@ -230,6 +251,16 @@ def transformations(adapter: str) -> list[str]:
             "Tool results serialized as function_call_output items",
             "Responses not stored by the provider (store: false); with an effort set, encrypted "
             "reasoning items are requested and echoed back within the Run",
+            PORTABLE_HISTORY,
+            *(
+                [
+                    "ChatGPT plan: system messages sent with the developer role and no "
+                    "max_output_tokens, which this route rejects; the bearer token is the "
+                    "sign-in's access token"
+                ]
+                if provider.auth == "chatgpt"
+                else []
+            ),
         ]
     return []
 

@@ -43,9 +43,25 @@ Data saved by versions before 2026-10-09 needs a one-time upgrade: stop Glassbox
 
 The left sidebar's **Settings** holds global configuration; the controls under the message box choose the model and workspace access for each Run.
 
-1. **Settings → Providers** lists the endpoints Glassbox can call: OpenAI-compatible (streaming Chat Completions with tool calls), the OpenAI Responses API, and Anthropic Messages. Add one with **Add OpenAI-compatible**, **Add OpenAI Responses** or **Add Anthropic**, set its base URL, paste the API key and press **Save key**. A local endpoint without a key works too.
-2. **Settings → Models** lists each provider's models. **Refresh models** asks the provider for its model list (`GET /models`); a model ID can also be added by hand. Each provider also sets temperature, max output tokens and context window, and **Prices** takes each model's input, output and cache prices in US dollars per million tokens. The **Default model** applies to new conversations and to the CLI and API.
-3. The **model button** under the message box picks the model for the next Run, sets its **reasoning effort** (Low/Medium/High for OpenAI models; up to Extra high and Max for Anthropic), refreshes all model lists, or opens **Manage models…**. A conversation reopens with the model and access its last Run used.
+1. **Settings → Providers** lists the model services Glassbox can call. **Add a provider** offers the services below with their endpoints filled in, and an **OpenAI-compatible**, **Responses API** or **Anthropic-compatible** endpoint for any other service or a local server. Paste the API key and press **Save key** (**Get a key from …** opens the service's key page), or for the ChatGPT plan choose **Continue with ChatGPT**. A local endpoint without a key works too.
+2. **Settings → Models** lists each provider's models. **Refresh models** asks the provider for its model list (`GET /models`); a model ID can also be added by hand. Where a provider accepts several request formats, **Request format per model** sets each model's format. Each provider also sets temperature, max output tokens and context window, and **Prices** takes each model's input, output and cache prices in US dollars per million tokens. The **Default model** applies to new conversations and to the CLI and API.
+3. The **model button** under the message box picks the model for the next Run, from any provider, sets its **reasoning effort** (Low/Medium/High for Chat Completions and Responses models; up to Extra high and Max for Messages models), refreshes all model lists, or opens **Manage models…**. A conversation reopens with the model and access its last Run used.
+
+**Request formats.** Glassbox speaks three request formats: Chat Completions (streaming, with tool calls), the OpenAI Responses API and Anthropic Messages. A provider lists the base URL of each format its service accepts; requests go to that URL followed by `/chat/completions`, `/responses` or `/messages`. One format is the provider's default, and **Request format per model** gives a model another one. Models added from OpenRouter and OpenCode get the format their service documents for them. The known services:
+
+| Service | Request formats (default first) | Key variable | Notes |
+| --- | --- | --- | --- |
+| ChatGPT plan | Responses | none: **Continue with ChatGPT** | See **ChatGPT plan** below. |
+| OpenAI | Responses, Chat Completions | `OPENAI_API_KEY` | |
+| Anthropic | Messages | `ANTHROPIC_API_KEY` | |
+| OpenRouter | Chat Completions, Responses, Messages | `OPENROUTER_API_KEY` | Claude models (`anthropic/…`) use Messages, which keeps their thinking between tool calls. |
+| DeepSeek | Chat Completions, Messages | `DEEPSEEK_API_KEY` | Messages at `https://api.deepseek.com/anthropic/v1`. |
+| ModelScope | Chat Completions, Messages | `MODELSCOPE_API_KEY` | The key is a ModelScope access token. |
+| OpenCode Zen, OpenCode Go | Chat Completions, Responses, Messages | `OPENCODE_API_KEY` | Each model is served in one format: Claude, MiniMax (Go) and most Qwen models through Messages, GPT, Grok and Muse through Responses, the rest through Chat Completions. Gemini models on Zen use Google's own API, which Glassbox does not speak. |
+
+The model can change from one Run to the next, across providers and formats. The next Run receives the earlier turns as text and tool calls without provider-specific reasoning, and a tool-call ID that the new format would reject (Kimi's `functions.read_text:0`, for example, in the Messages API) is replaced by a stable hash, listed among the request's transformations.
+
+**ChatGPT plan.** A ChatGPT plan provider sends requests on your ChatGPT plan instead of API credit, through OpenAI's Sign in with ChatGPT, which OpenAI offers to apps that run on your own computer. Add **ChatGPT plan**, choose **Continue with ChatGPT**, and sign in and allow plan usage in the tab that opens; ChatGPT then returns that tab to Glassbox on `http://127.0.0.1:<port>/auth/callback`, which finishes the sign-in, and Settings shows the account. Refresh the provider's models, and choose one under the message box: the line below it then says **Using ChatGPT plan**, with **Manage usage** to see and limit what Glassbox uses in ChatGPT. Requests count toward the plan's limits; when one is reached, the Run fails with a **Manage usage** link. Glassbox gets no access to your ChatGPT conversations. The sign-in stays on this computer (`chatgpt.json` in the data directory), is renewed as needed and is never sent to the browser; **Sign out**, or removing the provider, removes it and revokes it at OpenAI. A provider stays with the account it first signed in with; for another account, add another ChatGPT plan provider. These requests go only to OpenAI's Responses API, without a temperature or output limit, which this route does not accept. There is no equivalent for a Claude Pro or Max subscription: Anthropic's [terms](https://code.claude.com/docs/en/legal-and-compliance) do not allow third-party applications to offer Claude.ai sign-in or use those plans, so Claude models need an API key (from the Claude Console, or through a service above).
 
 Keys are stored on this computer in the data directory (`credentials.json`; on Linux readable only by your account, on Windows protected by the folder's permissions like `.env`) and are never sent back to the browser; Settings shows only where a key comes from and its last four characters. Without a saved key, the server reads the environment variable named under **Key variable name** (for example `OPENAI_API_KEY`), from the process environment or `.env`. **Remove saved key** falls back to that variable.
 
@@ -66,7 +82,7 @@ Each Run records the provider, model, effort and access it used, so its snapshot
 
 The **Responses API** provider talks to OpenAI's `/v1/responses` endpoint, which current OpenAI reasoning models are built for. Responses are not stored by OpenAI (`store: false`). With a reasoning effort chosen, the Run keeps the model's encrypted reasoning between its own tool calls, like Claude's thinking blocks; later turns receive the conversation without it.
 
-If a request fails, the error states the provider's reason and HTTP status (with any credential removed), or what happened to the connection: it could not be opened, it closed before the response was complete, or the provider did not answer in time. A Run never retries a model request by itself; an interrupted Run waits for you to choose **Retry** (see [Troubleshooting](#troubleshooting)). Compaction requests are the exception, since they change nothing but cost (see [Context and compaction](#context-and-compaction)). A missing model is a configuration error rather than a silent switch to simulation.
+If a request fails, the error states the provider's reason and HTTP status (with any credential removed), or what happened to the connection: it could not be opened, it closed before the response was complete, or the provider did not answer in time. A request the provider refused fails the Run with that reason. A Run never retries a model request by itself: when the connection was lost after the request was sent, the Run is interrupted and waits for you to choose **Retry** (see [Troubleshooting](#troubleshooting)). Compaction requests are the exception, since they change nothing but cost (see [Context and compaction](#context-and-compaction)). A missing model is a configuration error rather than a silent switch to simulation.
 
 For offline development, choose **Simulated model** in the model picker or set `GLASSBOX_PROVIDER=fake`. It answers with canned text but runs real tools: `/read README.md`, `/echo hello` (which requires approval), `/tool bash {"command":"ls"}` (Linux) or `/tool powershell {"command":"Get-Location"}` (Windows), and `/slow` to try **Stop**.
 
@@ -263,6 +279,11 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 | --- | --- |
 | "No model is selected…" when running | Choose a model under the message box. If the list is empty, add the provider's models in **Settings → Models**. |
 | "Model request failed (HTTP 401): …" | The provider rejected the key, or none was found. **Settings → Providers** shows where the key comes from; paste and save it there. |
+| A gateway such as OpenCode answers "Model … is not supported" or HTTP 404 for one model | The model needs another request format. Set it under **Settings → Models → Request format per model**; the service's documentation names each model's endpoint. |
+| A ModelScope request ends with "the connection to the provider closed before the response was complete" at once | ModelScope's Messages endpoint closes the stream instead of reporting an invalid access token. Check the token under **Settings → Providers**. |
+| "This provider uses a ChatGPT plan. Sign in…" or "The ChatGPT sign-in has expired…" | Choose **Continue with ChatGPT** in **Settings → Providers**. A sign-in ends when it is disconnected in ChatGPT or unused for 30 days. |
+| "The ChatGPT plan's usage limit for Glassbox is reached…" | Open **Manage usage** to see the plan's and Glassbox's limits in ChatGPT, wait for them to reset, or choose another model. |
+| The ChatGPT tab shows "ChatGPT plan not allowed" | Plan usage was declined at sign-in. Choose **Continue with ChatGPT** again and allow it. |
 | "… does not accept reasoning effort …" | The selected effort is not supported by that provider's API. Pick another level or Default. |
 | A model rejects temperature, or needs it to be 1 | Leave **Temperature** empty in **Settings → Models** so none is sent. |
 | "The model reached its N-token output limit…" | A tool call (often a large file write) was cut off. Raise **Max output tokens**. |
@@ -284,11 +305,11 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 
 ## Status and roadmap
 
-As of 2026-10-08:
+As of 2026-10-09:
 
-- Stages 1–4 below are implemented, stage 6 in part (prompt evaluations), and the agent features row. Real-model acceptance ran on Windows ([records](history/README.md)); the Linux sandbox is covered by automated tests against real bubblewrap, but a live-model Linux acceptance and checks against Anthropic's and OpenAI's hosted APIs have not been run. The Messages and Responses adapters, thinking replay and display, reasoning effort, prompt caching and images are tested against mocked HTTP transports and local protocol fixtures.
+- Stages 1–4 below are implemented, stage 6 in part (prompt evaluations), and the agent features row. Real-model acceptance ran on Windows ([records](history/README.md)); the Linux sandbox is covered by automated tests against real bubblewrap, but a live-model Linux acceptance and checks against Anthropic's and OpenAI's hosted APIs have not been run. The Messages and Responses adapters, thinking replay and display, reasoning effort, prompt caching and images are tested against mocked HTTP transports and local protocol fixtures. The known services' endpoints were checked up to authentication with invalid keys, and the ChatGPT sign-in against fake servers plus OpenAI's real signing keys and token errors; a Run on a signed-in ChatGPT plan has not been tried.
 - Not implemented: full terminal emulation (PTY/ConPTY), command network access, disk quotas, stateful MCP sessions, specialized reverse-engineering integrations, undo of changes made by commands, approvals inside sub-agents, live streaming of model thinking.
-- Not planned: signing in with a ChatGPT or Claude subscription, IDE extensions, a terminal UI.
+- Not planned: signing in with a Claude subscription (Anthropic's terms do not allow it; ChatGPT plans are supported), IDE extensions, a terminal UI.
 
 | Stage | Scope | Status |
 | --- | --- | --- |
