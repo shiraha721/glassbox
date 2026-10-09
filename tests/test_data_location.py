@@ -1,18 +1,18 @@
-"""Studio data lives in a per-user folder, never in the project or the source checkout."""
+"""Glassbox's data lives in a per-user folder, never in the project or the source checkout."""
 
 import sys
 
 import pytest
 
-from rtagent.domain import AppError
-from rtagent.infrastructure.config import default_data_dir
-from rtagent.infrastructure.workspace.files import Workspace
+from glassbox.domain import AppError
+from glassbox.infrastructure.config import default_data_dir
+from glassbox.infrastructure.workspace.files import Workspace
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="XDG locations apply on Linux and WSL")
 def test_the_default_folder_follows_the_xdg_data_home(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    assert default_data_dir() == tmp_path / "rtagent"
+    assert default_data_dir() == tmp_path / "glassbox"
     monkeypatch.setenv("XDG_DATA_HOME", "relative/path")
     assert default_data_dir().parent.name == "share"
 

@@ -1344,7 +1344,7 @@ export interface components {
          * @description Typed initial workspace state for the browser.
          */
         Bootstrap: {
-            config: components["schemas"]["StudioConfig-Output"];
+            config: components["schemas"]["GlassboxConfig-Output"];
             /** Presets */
             presets: components["schemas"]["Preset-Output"][];
             /** Sessions */
@@ -2126,6 +2126,118 @@ export interface components {
             truncated: boolean;
         };
         /**
+         * GlassboxConfig
+         * @description Version provider, tool permissions, connections, and execution limits together.
+         */
+        "GlassboxConfig-Input": {
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /** Providers */
+            providers?: components["schemas"]["ProviderProfile-Input"][];
+            provider?: components["schemas"]["ProviderConfig-Input"];
+            /** Tools */
+            tools?: {
+                [key: string]: "allow" | "ask" | "deny";
+            };
+            /**
+             * Sandbox Mode
+             * @default workspace-write
+             * @enum {string}
+             */
+            sandbox_mode: "workspace-write" | "read-only";
+            /** Toolchain Roots */
+            toolchain_roots?: string[];
+            /** Network Hosts */
+            network_hosts?: string[];
+            /** Command Rules */
+            command_rules?: components["schemas"]["CommandRule"][];
+            /** Mcp Servers */
+            mcp_servers?: components["schemas"]["MCPServer-Input"][];
+            auto_compact?: components["schemas"]["AutoCompact-Input"];
+            /** Hooks */
+            hooks?: components["schemas"]["ShellHook-Input"][];
+            search?: components["schemas"]["SearchSettings-Input"];
+            /**
+             * Max Steps
+             * @default 20
+             */
+            max_steps: number;
+            /**
+             * Max Tool Calls
+             * @default 40
+             */
+            max_tool_calls: number;
+            /**
+             * Tool Timeout
+             * @default 60
+             */
+            tool_timeout: number;
+            /**
+             * Run Timeout
+             * @default 600
+             */
+            run_timeout: number;
+        };
+        /**
+         * GlassboxConfig
+         * @description Version provider, tool permissions, connections, and execution limits together.
+         */
+        "GlassboxConfig-Output": {
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /** Providers */
+            providers: components["schemas"]["ProviderProfile-Output"][];
+            provider: components["schemas"]["ProviderConfig-Output"];
+            /** Tools */
+            tools: {
+                [key: string]: "allow" | "ask" | "deny";
+            };
+            /**
+             * Sandbox Mode
+             * @default workspace-write
+             * @enum {string}
+             */
+            sandbox_mode: "workspace-write" | "read-only";
+            /** Toolchain Roots */
+            toolchain_roots: string[];
+            /** Network Hosts */
+            network_hosts: string[];
+            /** Command Rules */
+            command_rules: components["schemas"]["CommandRule"][];
+            /** Mcp Servers */
+            mcp_servers: components["schemas"]["MCPServer-Output"][];
+            auto_compact: components["schemas"]["AutoCompact-Output"];
+            /** Hooks */
+            hooks: components["schemas"]["ShellHook-Output"][];
+            search: components["schemas"]["SearchSettings-Output"];
+            /**
+             * Max Steps
+             * @default 20
+             */
+            max_steps: number;
+            /**
+             * Max Tool Calls
+             * @default 40
+             */
+            max_tool_calls: number;
+            /**
+             * Tool Timeout
+             * @default 60
+             */
+            tool_timeout: number;
+            /**
+             * Run Timeout
+             * @default 600
+             */
+            run_timeout: number;
+        };
+        /**
          * Grant
          * @description A user's standing approval for one tool in one conversation.
          *
@@ -2442,10 +2554,10 @@ export interface components {
         "PresetPackage-Input": {
             /**
              * Format
-             * @default rtagent.preset.v1
+             * @default glassbox.preset.v1
              * @constant
              */
-            format: "rtagent.preset.v1";
+            format: "glassbox.preset.v1";
             preset: components["schemas"]["Preset-Input"];
         };
         /**
@@ -2455,10 +2567,10 @@ export interface components {
         "PresetPackage-Output": {
             /**
              * Format
-             * @default rtagent.preset.v1
+             * @default glassbox.preset.v1
              * @constant
              */
-            format: "rtagent.preset.v1";
+            format: "glassbox.preset.v1";
             preset: components["schemas"]["Preset-Output"];
         };
         /**
@@ -3261,10 +3373,10 @@ export interface components {
         "SkillPackage-Input": {
             /**
              * Format
-             * @default rtagent.skill.v1
+             * @default glassbox.skill.v1
              * @constant
              */
-            format: "rtagent.skill.v1";
+            format: "glassbox.skill.v1";
             /** Name */
             name: string;
             /** Files */
@@ -3279,10 +3391,10 @@ export interface components {
         "SkillPackage-Output": {
             /**
              * Format
-             * @default rtagent.skill.v1
+             * @default glassbox.skill.v1
              * @constant
              */
-            format: "rtagent.skill.v1";
+            format: "glassbox.skill.v1";
             /** Name */
             name: string;
             /** Files */
@@ -3315,118 +3427,6 @@ export interface components {
             input_hash: string;
             /** Expected Session Revision */
             expected_session_revision: number;
-        };
-        /**
-         * StudioConfig
-         * @description Version provider, tool permissions, connections, and execution limits together.
-         */
-        "StudioConfig-Input": {
-            /**
-             * Revision
-             * @default 0
-             */
-            revision: number;
-            /** Providers */
-            providers?: components["schemas"]["ProviderProfile-Input"][];
-            provider?: components["schemas"]["ProviderConfig-Input"];
-            /** Tools */
-            tools?: {
-                [key: string]: "allow" | "ask" | "deny";
-            };
-            /**
-             * Sandbox Mode
-             * @default workspace-write
-             * @enum {string}
-             */
-            sandbox_mode: "workspace-write" | "read-only";
-            /** Toolchain Roots */
-            toolchain_roots?: string[];
-            /** Network Hosts */
-            network_hosts?: string[];
-            /** Command Rules */
-            command_rules?: components["schemas"]["CommandRule"][];
-            /** Mcp Servers */
-            mcp_servers?: components["schemas"]["MCPServer-Input"][];
-            auto_compact?: components["schemas"]["AutoCompact-Input"];
-            /** Hooks */
-            hooks?: components["schemas"]["ShellHook-Input"][];
-            search?: components["schemas"]["SearchSettings-Input"];
-            /**
-             * Max Steps
-             * @default 20
-             */
-            max_steps: number;
-            /**
-             * Max Tool Calls
-             * @default 40
-             */
-            max_tool_calls: number;
-            /**
-             * Tool Timeout
-             * @default 60
-             */
-            tool_timeout: number;
-            /**
-             * Run Timeout
-             * @default 600
-             */
-            run_timeout: number;
-        };
-        /**
-         * StudioConfig
-         * @description Version provider, tool permissions, connections, and execution limits together.
-         */
-        "StudioConfig-Output": {
-            /**
-             * Revision
-             * @default 0
-             */
-            revision: number;
-            /** Providers */
-            providers: components["schemas"]["ProviderProfile-Output"][];
-            provider: components["schemas"]["ProviderConfig-Output"];
-            /** Tools */
-            tools: {
-                [key: string]: "allow" | "ask" | "deny";
-            };
-            /**
-             * Sandbox Mode
-             * @default workspace-write
-             * @enum {string}
-             */
-            sandbox_mode: "workspace-write" | "read-only";
-            /** Toolchain Roots */
-            toolchain_roots: string[];
-            /** Network Hosts */
-            network_hosts: string[];
-            /** Command Rules */
-            command_rules: components["schemas"]["CommandRule"][];
-            /** Mcp Servers */
-            mcp_servers: components["schemas"]["MCPServer-Output"][];
-            auto_compact: components["schemas"]["AutoCompact-Output"];
-            /** Hooks */
-            hooks: components["schemas"]["ShellHook-Output"][];
-            search: components["schemas"]["SearchSettings-Output"];
-            /**
-             * Max Steps
-             * @default 20
-             */
-            max_steps: number;
-            /**
-             * Max Tool Calls
-             * @default 40
-             */
-            max_tool_calls: number;
-            /**
-             * Tool Timeout
-             * @default 60
-             */
-            tool_timeout: number;
-            /**
-             * Run Timeout
-             * @default 600
-             */
-            run_timeout: number;
         };
         /**
          * TaskPlan
@@ -4902,7 +4902,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StudioConfig-Input"];
+                "application/json": components["schemas"]["GlassboxConfig-Input"];
             };
         };
         responses: {
@@ -4912,7 +4912,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StudioConfig-Output"];
+                    "application/json": components["schemas"]["GlassboxConfig-Output"];
                 };
             };
             /** @description Forbidden */

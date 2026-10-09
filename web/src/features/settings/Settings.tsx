@@ -222,7 +222,7 @@ export function Settings({
                     Specific Python or Node installation folders, exposed read-only to commands
                     (mounted on Linux, copied on Windows; original permissions never change). For a
                     virtual environment, add the interpreter folder named in its pyvenv.cfg. Python
-                    also finds packages in .rtagent/packages; pip stays offline.
+                    also finds packages in .glassbox/packages; pip stays offline.
                   </p>
                   <label>
                     Allowed HTTPS download hosts · one exact hostname per line

@@ -1,21 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <!-- The studio's mark: a command prompt held inside a shield, for an agent that runs commands
-       only within its sandbox. The colors match the accent of web/src/style.css in each scheme. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 32 32">
+  <!-- Glassbox's mark: a glass cube seen from above. Its front edge and the back edge seen
+       through the glass meet in a command prompt. The left face shades into the accent of
+       web/src/style.css in each color scheme; change them together. -->
   <style>
-    .shield { fill: #4f46e5; stroke: #4f46e5; }
-    .facet { fill: #4338ca; }
+    #top .a { stop-color: #dfe3ff; } #top .b { stop-color: #c3cbfd; }
+    #left .a { stop-color: #6f6cf5; } #left .b { stop-color: #4f46e5; }
+    #right .a { stop-color: #4b44d6; } #right .b { stop-color: #3a32b4; }
     @media (prefers-color-scheme: dark) {
-      .shield { fill: #7b73ff; stroke: #7b73ff; }
-      .facet { fill: #675ef2; }
+      #top .a { stop-color: #ecebff; } #top .b { stop-color: #cfccff; }
+      #left .a { stop-color: #9893ff; } #left .b { stop-color: #7b73ff; }
+      #right .a { stop-color: #6a62f4; } #right .b { stop-color: #554cdf; }
     }
   </style>
   <defs>
-    <path id="outline" stroke-width="2" stroke-linejoin="round"
-      d="M16 2.5 28 6.2v9c0 7-5 12-12 14.6C9 27.2 4 22.2 4 15.2v-9z" />
-    <mask id="inside"><use href="#outline" fill="#fff" stroke="#fff" /></mask>
+    <linearGradient id="top" x2="0" y2="1"><stop class="a" offset="0" /><stop class="b" offset="1" /></linearGradient>
+    <linearGradient id="left" x2="0" y2="1"><stop class="a" offset="0" /><stop class="b" offset="1" /></linearGradient>
+    <linearGradient id="right" x2="0" y2="1"><stop class="a" offset="0" /><stop class="b" offset="1" /></linearGradient>
+    <!-- The cube's outline with softened corners. -->
+    <clipPath id="cube">
+      <path d="M14.61 4.2Q16 3.4 17.39 4.2L25.53 8.9Q26.91 9.7 26.91 11.3V20.7Q26.91 22.3 25.53 23.1L17.39 27.8Q16 28.6 14.61 27.8L6.47 23.1Q5.09 22.3 5.09 20.7V11.3Q5.09 9.7 6.47 8.9Z" />
+    </clipPath>
   </defs>
-  <use href="#outline" class="shield" />
-  <rect class="facet" x="16" width="16" height="32" mask="url(#inside)" />
-  <path fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
-    d="m10.5 10.5 4.5 4.5-4.5 4.5M17.5 19.5h4.5" />
+  <g clip-path="url(#cube)">
+    <path fill="url(#top)" d="M16 3.4 26.91 9.7 16 16 5.09 9.7Z" />
+    <path fill="url(#left)" d="M5.09 9.7 16 16V28.6L5.09 22.3Z" />
+    <path fill="url(#right)" d="M16 16 26.91 9.7V22.3L16 28.6Z" />
+    <!-- The hidden back edges, faint through the glass. -->
+    <path fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9" d="M16 3.4V16L26.91 22.3M16 16 5.09 22.3" />
+    <!-- The prompt: along the front edge to the top face, and back along a hidden edge. -->
+    <path fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" d="M9.23 12.09 16 16 9.23 19.91" />
+  </g>
 </svg>

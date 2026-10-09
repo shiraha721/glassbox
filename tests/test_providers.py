@@ -3,18 +3,18 @@ import json
 import httpx
 import pytest
 
-from rtagent.domain import (
+from glassbox.domain import (
     AppError,
     Block,
+    GlassboxConfig,
     Message,
     Preset,
     ProviderConfig,
     ProviderProfile,
-    StudioConfig,
 )
-from rtagent.domain.prompts import compile_prompt
-from rtagent.infrastructure.providers.catalog import list_models
-from rtagent.infrastructure.providers.chat import generate, prepare
+from glassbox.domain.prompts import compile_prompt
+from glassbox.infrastructure.providers.catalog import list_models
+from glassbox.infrastructure.providers.chat import generate, prepare
 
 # Adapters share the httpx module, so every mock must subclass the real client class.
 ORIGINAL_CLIENT = httpx.AsyncClient
@@ -25,7 +25,7 @@ async def test_openai_preview_matches_captured_outbound_request(monkeypatch):
         adapter="openai", model="contract-model", base_url="http://127.0.0.1:12345/v1"
     )
     compiled = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=provider), [], "Hello", {}, []
+        Preset(name="Empty"), GlassboxConfig(provider=provider), [], "Hello", {}, []
     )
     prepared = prepare(provider, compiled, [])
     captured = []
@@ -67,7 +67,7 @@ async def test_openai_preview_matches_captured_outbound_request(monkeypatch):
         def __init__(self, **kwargs):
             super().__init__(transport=httpx.MockTransport(transport), **kwargs)
 
-    monkeypatch.setattr("rtagent.infrastructure.providers.chat.httpx.AsyncClient", TestClient)
+    monkeypatch.setattr("glassbox.infrastructure.providers.chat.httpx.AsyncClient", TestClient)
 
     async def on_wire(body):
         captured.append(body)
@@ -85,7 +85,7 @@ def mock_client(monkeypatch, module: str, handler) -> None:
         def __init__(self, **kwargs):
             super().__init__(transport=httpx.MockTransport(handler), **kwargs)
 
-    monkeypatch.setattr(f"rtagent.infrastructure.providers.{module}.httpx.AsyncClient", TestClient)
+    monkeypatch.setattr(f"glassbox.infrastructure.providers.{module}.httpx.AsyncClient", TestClient)
 
 
 async def test_provider_errors_keep_the_reason_but_not_the_credential(monkeypatch):
@@ -97,7 +97,7 @@ async def test_provider_errors_keep_the_reason_but_not_the_credential(monkeypatc
         credential_ref="TEST_PROVIDER_KEY",
     )
     compiled = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=provider), [], "Hello", {}, []
+        Preset(name="Empty"), GlassboxConfig(provider=provider), [], "Hello", {}, []
     )
     prepared = prepare(provider, compiled, [])
     message = f"Incorrect API key provided: {secret}"
@@ -143,7 +143,7 @@ async def test_messages_thinking_blocks_are_kept_and_replayed_within_the_run(mon
         reasoning_effort="high",
     )
     compiled = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=provider), [], "Read a.py", {}, []
+        Preset(name="Empty"), GlassboxConfig(provider=provider), [], "Read a.py", {}, []
     )
     prepared = prepare(provider, compiled, [])
     assert prepared["output_config"] == {"effort": "high"} and "temperature" not in prepared
@@ -207,7 +207,7 @@ async def test_messages_thinking_blocks_are_kept_and_replayed_within_the_run(mon
     result = Message(role="tool", content="print(1)", tool_call_id="toolu_1")
     following = compile_prompt(
         Preset(name="Empty"),
-        StudioConfig(provider=provider),
+        GlassboxConfig(provider=provider),
         [],
         "Read a.py",
         {},
@@ -231,7 +231,7 @@ async def test_messages_thinking_blocks_are_kept_and_replayed_within_the_run(mon
         result.model_copy(update={"source": "history"}),
     ]
     later = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=provider), history, "Next", {}, []
+        Preset(name="Empty"), GlassboxConfig(provider=provider), history, "Next", {}, []
     )
     assert prepare(provider, later, [])["messages"][1]["content"] == [message.blocks[1]]
 
@@ -242,7 +242,7 @@ async def test_messages_refusals_are_reported_as_declined(monkeypatch):
         adapter="anthropic", model="claude-opus-5-5", base_url="http://127.0.0.1:12345/v1"
     )
     compiled = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=provider), [], "Analyze", {}, []
+        Preset(name="Empty"), GlassboxConfig(provider=provider), [], "Analyze", {}, []
     )
     stream = sse(
         {"type": "message_start", "message": {"id": "m1", "model": "x", "usage": {}}},
@@ -323,7 +323,7 @@ def test_messages_cache_the_system_prompt_and_the_newest_message():
             Block(name="two", template="More rules.", order=1),
         ],
     )
-    compiled = compile_prompt(preset, StudioConfig(provider=provider), [], "Task", {}, [])
+    compiled = compile_prompt(preset, GlassboxConfig(provider=provider), [], "Task", {}, [])
     body = prepare(provider, compiled, [])
     assert [("cache_control" in block) for block in body["system"]] == [False, True]
     assert body["messages"] == [

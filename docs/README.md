@@ -1,6 +1,6 @@
-# Security Agent Studio
+# Glassbox
 
-A local agent workspace for coding, debugging, reverse engineering, CTF challenges and other authorized security work. You give a task; one tool-using agent works in a project folder, runs commands in an OS sandbox without network access, and records the exact model input, every request and every tool result so you can inspect what happened.
+A local agent workspace for coding, debugging, reverse engineering, CTF challenges and other authorized security work. You give a task; one tool-using agent works in a project folder, runs commands in an OS sandbox without network access, and records the exact model input, every request and every tool result so you can inspect what happened. Hence the name: a box the agent cannot leave, made of glass so you see everything it does.
 
 What makes it different from a plain chat agent:
 
@@ -9,7 +9,7 @@ What makes it different from a plain chat agent:
 - **Explicit authority.** Tools are allowed, require approval, or are disabled in Settings. Prompts, files, memory and model output can never change those permissions.
 - **Real isolation.** Commands run in bubblewrap namespaces on Linux or an AppContainer on Windows, never as unrestricted host processes.
 
-Contents: [Install](#install-and-start) · [Configure a model](#configure-a-model) · [Use the studio](#use-the-studio) · [Projects, memory and Skills](#projects-memory-and-skills) · [Isolation and permissions](#isolation-and-permissions) · [Troubleshooting](#troubleshooting) · [Status and roadmap](#status-and-roadmap)
+Contents: [Install](#install-and-start) · [Configure a model](#configure-a-model) · [Use Glassbox](#use-glassbox) · [Projects, memory and Skills](#projects-memory-and-skills) · [Isolation and permissions](#isolation-and-permissions) · [Troubleshooting](#troubleshooting) · [Status and roadmap](#status-and-roadmap)
 
 Further reading: [Architecture](architecture.md) for how it works, [Development guide](development.md) for contributing, [Harness interfaces](harness.md) for the CLI, JSON-RPC and Python APIs, and the [2026-10-06 review](review.md) for the latest assessment.
 
@@ -30,20 +30,20 @@ uv sync --dev --locked
 npm --prefix web ci
 npm --prefix web run build
 cp .env.example .env          # optional; PowerShell: Copy-Item .env.example .env
-uv run rtagent serve          # or: uv run python -m rtagent
+uv run glassbox serve          # or: uv run python -m glassbox
 ```
 
-Open **http://127.0.0.1:8001**. Use `uv run rtagent serve --port 8080` for another port. The service listens on loopback only and has no login; it is a single-user local tool, not a server to expose on a network.
+Open **http://127.0.0.1:8001**. Use `uv run glassbox serve --port 8080` for another port. The service listens on loopback only and has no login; it is a single-user local tool, not a server to expose on a network.
 
-Start-up applies database migrations. The studio keeps its data (conversations, settings, saved keys, memory, global Skills and commands, undo history, images) in a folder of your own, never in a project or in this checkout: `~/.local/share/rtagent` on Linux and WSL (`$XDG_DATA_HOME/rtagent` if that is set), `%LOCALAPPDATA%\rtagent` on Windows, `~/Library/Application Support/rtagent` on macOS. Set `STUDIO_DATA_DIR` to use another folder.
+Start-up applies database migrations. Glassbox keeps its data (conversations, settings, saved keys, memory, global Skills and commands, undo history, images) in a folder of your own, never in a project or in this checkout: `~/.local/share/glassbox` on Linux and WSL (`$XDG_DATA_HOME/glassbox` if that is set), `%LOCALAPPDATA%\glassbox` on Windows, `~/Library/Application Support/glassbox` on macOS. Set `GLASSBOX_DATA_DIR` to use another folder.
 
-Data saved by versions before 2026-10-09 needs a one-time upgrade: stop the studio and run `uv run python scripts/upgrade_data.py` (for `var/` in the checkout, where versions before 2026-10-08 kept it; name another folder as an argument). Until then, start-up stops with "Can't locate revision identified by '0010'". Add `--move` to also move the data from there to the folder above, then remove `STUDIO_DATA_DIR=var` from `.env` if it is there.
+Data saved by versions before 2026-10-09 needs a one-time upgrade: stop Glassbox and run `uv run python scripts/upgrade_data.py` (for `var/` in the checkout, where versions before 2026-10-08 kept it; name another folder as an argument). Until then, start-up stops with "Can't locate revision identified by '0010'". Add `--move` to also move the data from there to the folder above, then remove `GLASSBOX_DATA_DIR=var` from `.env` if it is there.
 
 ## Configure a model
 
 The left sidebar's **Settings** holds global configuration; the controls under the message box choose the model and workspace access for each Run.
 
-1. **Settings → Providers** lists the endpoints the studio can call: OpenAI-compatible (streaming Chat Completions with tool calls), the OpenAI Responses API, and Anthropic Messages. Add one with **Add OpenAI-compatible**, **Add OpenAI Responses** or **Add Anthropic**, set its base URL, paste the API key and press **Save key**. A local endpoint without a key works too.
+1. **Settings → Providers** lists the endpoints Glassbox can call: OpenAI-compatible (streaming Chat Completions with tool calls), the OpenAI Responses API, and Anthropic Messages. Add one with **Add OpenAI-compatible**, **Add OpenAI Responses** or **Add Anthropic**, set its base URL, paste the API key and press **Save key**. A local endpoint without a key works too.
 2. **Settings → Models** lists each provider's models. **Refresh models** asks the provider for its model list (`GET /models`); a model ID can also be added by hand. Each provider also sets temperature, max output tokens and context window, and **Prices** takes each model's input, output and cache prices in US dollars per million tokens. The **Default model** applies to new conversations and to the CLI and API.
 3. The **model button** under the message box picks the model for the next Run, sets its **reasoning effort** (Low/Medium/High for OpenAI models; up to Extra high and Max for Anthropic), refreshes all model lists, or opens **Manage models…**. A conversation reopens with the model and access its last Run used.
 
@@ -52,7 +52,7 @@ Keys are stored on this computer in the data directory (`credentials.json`; on L
 `.env` can also seed providers at start-up, which is convenient for scripts:
 
 ```dotenv
-STUDIO_PROVIDER=openai             # or anthropic, or fake for the simulated model
+GLASSBOX_PROVIDER=openai             # or anthropic, or fake for the simulated model
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-5
 OPENAI_API_KEY=sk-...
@@ -68,9 +68,9 @@ The **Responses API** provider talks to OpenAI's `/v1/responses` endpoint, which
 
 If a request fails, the error states the provider's reason and HTTP status (with any credential removed), or what happened to the connection: it could not be opened, it closed before the response was complete, or the provider did not answer in time. A Run never retries a model request by itself; an interrupted Run waits for you to choose **Retry** (see [Troubleshooting](#troubleshooting)). Compaction requests are the exception, since they change nothing but cost (see [Context and compaction](#context-and-compaction)). A missing model is a configuration error rather than a silent switch to simulation.
 
-For offline development, choose **Simulated model** in the model picker or set `STUDIO_PROVIDER=fake`. It answers with canned text but runs real tools: `/read README.md`, `/echo hello` (which requires approval), `/tool bash {"command":"ls"}` (Linux) or `/tool powershell {"command":"Get-Location"}` (Windows), and `/slow` to try **Stop**.
+For offline development, choose **Simulated model** in the model picker or set `GLASSBOX_PROVIDER=fake`. It answers with canned text but runs real tools: `/read README.md`, `/echo hello` (which requires approval), `/tool bash {"command":"ls"}` (Linux) or `/tool powershell {"command":"Get-Location"}` (Windows), and `/slow` to try **Stop**.
 
-## Use the studio
+## Use Glassbox
 
 ### Run a task
 
@@ -86,9 +86,9 @@ Type a task in the message box and press **Enter** or **Run**; **Shift+Enter** s
 
 Presets change how the agent works, not what it is allowed to do. Mention `$skill-name` in a task to load a Skill (see below): typing `$` at the start of a word lists the workspace's Skills. Typing `/` at the start of the task lists custom commands. In either list the arrow keys choose, **Enter** or **Tab** inserts the name and **Esc** closes the list.
 
-**Images** can go with a task: paste them into the message box, drop them on it, or use the image button beside the preset. PNG, JPEG, GIF and WebP images up to 5 MiB each are accepted, at most ten per task; the turn shows them with your message, and later turns of the conversation keep them in context. The model must accept images (most current Claude and GPT models do); a text-only model rejects the request with the provider's explanation. Images are stored once in the studio's data directory (`attachments/`) and stay there when a conversation is deleted.
+**Images** can go with a task: paste them into the message box, drop them on it, or use the image button beside the preset. PNG, JPEG, GIF and WebP images up to 5 MiB each are accepted, at most ten per task; the turn shows them with your message, and later turns of the conversation keep them in context. The model must accept images (most current Claude and GPT models do); a text-only model rejects the request with the provider's explanation. Images are stored once in Glassbox's data directory (`attachments/`) and stay there when a conversation is deleted.
 
-**Custom commands** are prompts you reuse. Save a Markdown file as `.agents/commands/<name>.md` in the workspace (or in `commands/` in the studio's data directory, for every project) and type `/name arguments` as the task. Typing `/` lists the available commands with their descriptions. In the template, `$ARGUMENTS` stands for everything after the name and `$1` to `$9` for single words; arguments given to a template without placeholders are added at the end. Optional frontmatter sets what the list shows:
+**Custom commands** are prompts you reuse. Save a Markdown file as `.agents/commands/<name>.md` in the workspace (or in `commands/` in Glassbox's data directory, for every project) and type `/name arguments` as the task. Typing `/` lists the available commands with their descriptions. In the template, `$ARGUMENTS` stands for everything after the name and `$1` to `$9` for single words; arguments given to a template without placeholders are added at the end. Optional frontmatter sets what the list shows:
 
 ```markdown
 ---
@@ -128,7 +128,7 @@ With prices set, each Run's cost appears in **Inspector → Run trace**, **Conte
 
 **Inspector → Prompt preview** compiles the current draft whenever it is open, without running anything: final message sequence, block activation, prepared request and the tool schemas the model would receive. It updates as you edit and never blocks **Run**; **Preview** beside **Run** is a shortcut that opens it. While a Run is active the preview waits for it to end.
 
-**Changes** shows the workspace's uncommitted Git changes: branch and upstream (with commits ahead ↑ and behind ↓), each changed file with its status letters, and a file's diff against the last commit when you select it. **Review changes** switches to the Code review preset and puts a review task with the whole diff (up to about 90,000 characters) in the message box for you to check and send, because the agent itself cannot run Git. The studio runs Git on this computer read-only, with your Git configuration but with repository-provided programs (hooks, fsmonitor, external diff and textconv drivers) disabled. Private files such as `.env` are listed but their content is never shown or included.
+**Changes** shows the workspace's uncommitted Git changes: branch and upstream (with commits ahead ↑ and behind ↓), each changed file with its status letters, and a file's diff against the last commit when you select it. **Review changes** switches to the Code review preset and puts a review task with the whole diff (up to about 90,000 characters) in the message box for you to check and send, because the agent itself cannot run Git. Glassbox runs Git on this computer read-only, with your Git configuration but with repository-provided programs (hooks, fsmonitor, external diff and textconv drivers) disabled. Private files such as `.env` are listed but their content is never shown or included.
 
 ### Edit prompts
 
@@ -176,12 +176,12 @@ A **project** is a registered folder. **Projects → + (Add project) → Choose 
 
 Under WSL, a folder chosen in Explorer is translated to its Linux path: `\\wsl.localhost\<distro>\home\you\app` becomes `/home/you/app`, and `C:\work\app` becomes `/mnt/c/work/app`. Prefer folders inside the distribution; Windows drives are much slower to read from WSL. Folders in another distribution or on a network share cannot be used.
 
-Each conversation belongs to one project, or to the default workspace (`STUDIO_WORKSPACE_ROOT`, the current directory by default). Selecting a project starts a new conversation there; an idle conversation can be moved with **Change workspace**. Each Run records the folder it used.
+Each conversation belongs to one project, or to the default workspace (`GLASSBOX_WORKSPACE_ROOT`, the current directory by default). Selecting a project starts a new conversation there; an idle conversation can be moved with **Change workspace**. Each Run records the folder it used.
 
 At the start of each Run, the agent receives:
 
 - **Instructions:** the first non-empty `AGENTS.override.md` or `AGENTS.md` at the project root. The `read_instructions` tool loads the chain for deeper directories, where deeper files take precedence.
-- **Memory:** notes kept per workspace, editable in **Workspace → Memory** and through the agent's `read_memory`/`save_memory` tools. It is plain Markdown; there is no hidden summarization. Memory is studio data, stored in the data folder (`memory/<id>/MEMORY.md`, with `workspace.txt` naming the folder it belongs to), not in the project. Commands cannot read it, and **Undo file changes** does not cover it.
+- **Memory:** notes kept per workspace, editable in **Workspace → Memory** and through the agent's `read_memory`/`save_memory` tools. It is plain Markdown; there is no hidden summarization. Memory is Glassbox's data, stored in its data folder (`memory/<id>/MEMORY.md`, with `workspace.txt` naming the folder it belongs to), not in the project. Commands cannot read it, and **Undo file changes** does not cover it.
 - **Skill catalog:** the name and description of each Skill. The agent loads a Skill's full text with `load_skill` when it matches the task, or you select it in **Workspace → Skills** or mention `$name`.
 
 Skills are folders with a `SKILL.md`:
@@ -215,9 +215,9 @@ The native tools are: `list_files`, `search_files`, `search_text`, `read_text`, 
 
 ### File tools
 
-File tools take paths relative to the workspace. An absolute path is accepted only when it points inside the workspace, by its real location or as `/workspace/…` (where Linux commands see it); anything else, `..` and links are refused, with the workspace root in the message. File tools never touch credentials (`.env`, `.env.*` except `.env.example`, `access-token`), Git metadata, databases (`.db`, `.sqlite`, `.sqlite3`), the studio's data directory, or dependency folders (`.venv`, `node_modules`, `__pycache__`). Replacing a file requires the hash from the last read, so a concurrent change is detected instead of overwritten; the error tells the model whether the file already existed, changed since it was read, or disappeared, and how to continue. `apply_patch` validates every file before changing any; each file is replaced atomically, but a multi-file patch is not a transaction, and a failure reports which files were already changed.
+File tools take paths relative to the workspace. An absolute path is accepted only when it points inside the workspace, by its real location or as `/workspace/…` (where Linux commands see it); anything else, `..` and links are refused, with the workspace root in the message. File tools never touch credentials (`.env`, `.env.*` except `.env.example`, `access-token`), Git metadata, databases (`.db`, `.sqlite`, `.sqlite3`), Glassbox's data directory, or dependency folders (`.venv`, `node_modules`, `__pycache__`). Replacing a file requires the hash from the last read, so a concurrent change is detected instead of overwritten; the error tells the model whether the file already existed, changed since it was read, or disappeared, and how to continue. `apply_patch` validates every file before changing any; each file is replaced atomically, but a multi-file patch is not a transaction, and a failure reports which files were already changed.
 
-A turn whose file tools changed files lists them under **Changed N files**. **Undo file changes** puts each file back as it was before that run, including removing files it created and restoring files it deleted, but only while the file is still as the run left it: a file changed since, by a later run, a command or you, is left alone and named. Changes made by shell commands and background processes are not tracked and cannot be undone this way; use Git for those. The earlier versions are kept in the studio's data directory (`file-history/`), also after the conversation is deleted.
+A turn whose file tools changed files lists them under **Changed N files**. **Undo file changes** puts each file back as it was before that run, including removing files it created and restoring files it deleted, but only while the file is still as the run left it: a file changed since, by a later run, a command or you, is left alone and named. Changes made by shell commands and background processes are not tracked and cannot be undone this way; use Git for those. The earlier versions are kept in Glassbox's data directory (`file-history/`), also after the conversation is deleted.
 
 ### Commands
 
@@ -238,10 +238,10 @@ On Linux, dependency folders such as `.venv` and `node_modules` stay visible so 
 
 ### Web, downloads and MCP
 
-`web_search` asks the search service chosen in **Settings → Tools → Web search**: the Brave Search API or Tavily (with an API key saved there, or set as an environment variable, like provider keys) or a SearXNG instance you run (its URL). It returns titles, URLs and snippets, and is offered to the model only once a service is set. `read_url` reads a public HTTPS page as text: HTML is converted to plain text and cut at 48,000 characters, up to 3 redirects are followed, each to a public address, and nothing is saved. Both run in the studio, not in the sandbox, and send what the model wrote (a query or a URL) off this computer, which is why they ask first by default. Settings saved before these tools existed show them as disabled; set their permission in **Settings → Tools** to use them.
+`web_search` asks the search service chosen in **Settings → Tools → Web search**: the Brave Search API or Tavily (with an API key saved there, or set as an environment variable, like provider keys) or a SearXNG instance you run (its URL). It returns titles, URLs and snippets, and is offered to the model only once a service is set. `read_url` reads a public HTTPS page as text: HTML is converted to plain text and cut at 48,000 characters, up to 3 redirects are followed, each to a public address, and nothing is saved. Both run in Glassbox, not in the sandbox, and send what the model wrote (a query or a URL) off this computer, which is why they ask first by default. Settings saved before these tools existed show them as disabled; set their permission in **Settings → Tools** to use them.
 
 
-`fetch_url` downloads a public HTTPS file (up to 16 MiB, optionally checked against a SHA-256) from hosts listed in **Settings → Sandbox → Allowed HTTPS download hosts**, and asks before each download unless you change its permission. New installations list GitHub, npm, PyPI, Hugging Face, Google downloads (`dl.google.com`, `storage.googleapis.com`), crates.io, Go modules and Maven Central, with the hosts they redirect downloads to. Settings that had no hosts get the same list once when the studio updates, and **Add common hosts** adds it to any list. Redirects are followed only to listed hosts (at most five), each checked like the first request. It refuses proxies, credentials in URLs and private or local addresses, and writes only new files. It does not give commands network access.
+`fetch_url` downloads a public HTTPS file (up to 16 MiB, optionally checked against a SHA-256) from hosts listed in **Settings → Sandbox → Allowed HTTPS download hosts**, and asks before each download unless you change its permission. New installations list GitHub, npm, PyPI, Hugging Face, Google downloads (`dl.google.com`, `storage.googleapis.com`), crates.io, Go modules and Maven Central, with the hosts they redirect downloads to. Settings that had no hosts get the same list once when Glassbox updates, and **Add common hosts** adds it to any list. Redirects are followed only to listed hosts (at most five), each checked like the first request. It refuses proxies, credentials in URLs and private or local addresses, and writes only new files. It does not give commands network access.
 
 MCP servers (stdio commands or Streamable HTTP URLs) are configured in **Settings → MCP servers** and run **outside** the sandbox, with their own permissions. **Save & discover** lists each server's tools on the same page, where you set their permissions; after a restart they are discovered again automatically the first time they are needed.
 
@@ -255,7 +255,7 @@ MCP servers (stdio commands or Streamable HTTP URLs) are configured in **Setting
 | After a tool runs | Recorded with the call; never changes the run. |
 | When a run ends | Recorded as an event on the run; never changes it. |
 
-Hooks run **outside** the sandbox, on this computer with your permissions, using the system shell and only basic environment variables (`PATH`, `HOME`, the display session), so keys saved in the studio never reach them. Tool arguments come from the model: treat them as untrusted data and never paste them into a command line. Do not put keys in a hook command; commands are saved with the settings and in each run. A run keeps the hooks saved when it started. Processes a hook leaves holding its output are stopped a second after it exits.
+Hooks run **outside** the sandbox, on this computer with your permissions, using the system shell and only basic environment variables (`PATH`, `HOME`, the display session), so keys saved in Glassbox never reach them. Tool arguments come from the model: treat them as untrusted data and never paste them into a command line. Do not put keys in a hook command; commands are saved with the settings and in each run. A run keeps the hooks saved when it started. Processes a hook leaves holding its output are stopped a second after it exits.
 
 ## Troubleshooting
 
@@ -277,7 +277,7 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 | **Undo file changes** skips a file | The file changed after the Run (a later Run, a command or you), so it is left alone. Use Git for those changes. |
 | "Model request failed: the connection to the provider closed before the response was complete" | The network or the provider dropped the connection mid-response; the other variants say the connection could not be opened or the provider did not answer in time. Run the task again (an interrupted Run offers **Retry**). Compaction already retried twice. |
 | A side panel covers the conversation | The window is narrower than 960 pixels; close the panel or widen the window. Wider windows keep the conversation beside the panel. |
-| "Can't locate revision identified by '0010'" at start-up | The data was saved before 2026-10-09. Stop the studio and run `uv run python scripts/upgrade_data.py` once; see [Install and start](#install-and-start). |
+| "Can't locate revision identified by '0010'" at start-up | The data was saved before 2026-10-09. Stop Glassbox and run `uv run python scripts/upgrade_data.py` once; see [Install and start](#install-and-start). |
 | "… is outside this workspace (…)" from a file tool | The agent asked for a file in another folder. Add that folder as a project (**Projects → +**) and work there, or copy what it needs into this workspace. |
 | "The download redirected to …, which is not an allowed download host" | The download host sends files from another host. Add that host under **Settings → Sandbox → Allowed HTTPS download hosts** if you trust it. |
 | A Run is "interrupted" | The service restarted, or a call's outcome is unknown. Review each uncertain call and choose **Retry** or record a verified result before resuming. |

@@ -8,11 +8,11 @@ import pytest
 from test_api import wait_state
 from test_providers import mock_client, sse
 
-from rtagent.domain import AppError, Attachment, Message, Preset, ProviderConfig, StudioConfig
-from rtagent.domain.prompts import compile_prompt
-from rtagent.infrastructure.attachments import AttachmentStore
-from rtagent.infrastructure.providers.attachments import attachment_data
-from rtagent.infrastructure.providers.chat import generate, prepare
+from glassbox.domain import AppError, Attachment, GlassboxConfig, Message, Preset, ProviderConfig
+from glassbox.domain.prompts import compile_prompt
+from glassbox.infrastructure.attachments import AttachmentStore
+from glassbox.infrastructure.providers.attachments import attachment_data
+from glassbox.infrastructure.providers.chat import generate, prepare
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 GIF = b"GIF89a" + b"\x01" * 10
@@ -38,7 +38,7 @@ def test_the_store_keeps_known_image_types_once(tmp_path):
 def compiled_with_image(provider: ProviderConfig, image: Attachment):
     return compile_prompt(
         Preset(name="Empty"),
-        StudioConfig(provider=provider),
+        GlassboxConfig(provider=provider),
         [],
         "What is in this picture?",
         {},
@@ -134,9 +134,9 @@ async def test_requests_carry_references_until_they_are_sent(monkeypatch, tmp_pa
     assert encoded not in json.dumps(recorded)
 
 
-async def test_an_attached_image_reaches_the_run_and_its_history(studio_client):
+async def test_an_attached_image_reaches_the_run_and_its_history(glassbox_client):
     """Upload, run with the image, and keep it on the user message in history."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     upload = await client.post(
         "/api/v1/attachments", content=GIF, headers={"Content-Type": "image/gif"}
     )
@@ -175,9 +175,9 @@ async def test_an_attached_image_reaches_the_run_and_its_history(studio_client):
     assert failed.status_code == 404
 
 
-async def test_the_runner_supplies_image_data_only_to_its_model_call(studio_client, monkeypatch):
+async def test_the_runner_supplies_image_data_only_to_its_model_call(glassbox_client, monkeypatch):
     """The data for the request's own images is available while the request is sent."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     image = (await client.post("/api/v1/attachments", content=PNG)).json()
     seen = []
 
@@ -186,7 +186,7 @@ async def test_the_runner_supplies_image_data_only_to_its_model_call(studio_clie
         seen.append((attachment_data.get(), compiled.messages[-1].attachments))
         yield {"kind": "result", "message": Message(role="assistant", content="ok"), "usage": {}}
 
-    monkeypatch.setattr("rtagent.application.runner.generate", model)
+    monkeypatch.setattr("glassbox.application.runner.generate", model)
     bootstrap = (await client.get("/api/v1/bootstrap")).json()
     session = (await client.post("/api/v1/sessions", json={})).json()
     response = await client.post(

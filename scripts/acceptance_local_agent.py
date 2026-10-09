@@ -12,10 +12,10 @@ from uuid import uuid4
 import httpx
 import uvicorn
 
-from rtagent.domain import ProviderConfig, StudioConfig
-from rtagent.infrastructure.config import Settings
-from rtagent.infrastructure.credentials import CredentialStore
-from rtagent.interfaces.http.app import create_app
+from glassbox.domain import GlassboxConfig, ProviderConfig
+from glassbox.infrastructure.config import Settings
+from glassbox.infrastructure.credentials import CredentialStore
+from glassbox.interfaces.http.app import create_app
 
 FIXTURES = {
     "AGENTS.md": """# Acceptance workspace
@@ -194,9 +194,9 @@ async def run_task(
 
 async def verify_invoice(server: uvicorn.Server, project_id: str) -> None:
     """Independently verify behavior in AppContainer instead of trusting the model's claims."""
-    studio = server.config.app.state.studio
-    config = await studio.repository.config()
-    registry = await studio.workspace_registry(project_id)
+    glassbox = server.config.app.state.glassbox
+    config = await glassbox.repository.config()
+    registry = await glassbox.workspace_registry(project_id)
     result = json.loads(
         await registry.execute(
             registry.catalog["powershell"],
@@ -288,7 +288,7 @@ async def main() -> None:
         help="Allow real model requests using the running application's provider.",
     )
     parser.add_argument(
-        "--studio-url",
+        "--glassbox-url",
         default="http://127.0.0.1:8001",
         help="Read current provider settings from this local service.",
     )
@@ -298,7 +298,7 @@ async def main() -> None:
             "This Windows acceptance requires --live; offline sandbox checks use smoke_workspace.py."
         )
     async with httpx.AsyncClient(trust_env=False, timeout=20) as source:
-        response = await source.get(args.studio_url.rstrip("/") + "/api/v1/bootstrap")
+        response = await source.get(args.glassbox_url.rstrip("/") + "/api/v1/bootstrap")
         response.raise_for_status()
         provider = ProviderConfig.model_validate(response.json()["config"]["provider"])
     if (
@@ -333,7 +333,7 @@ async def main() -> None:
             base_url="http://127.0.0.1:8768/api/v1", trust_env=False, timeout=45
         ) as client:
             state = await api(client, "GET", "/bootstrap")
-            config = StudioConfig.model_validate(state["config"])
+            config = GlassboxConfig.model_validate(state["config"])
             # An explicit connection, independent of the isolated service's providers.
             config.provider = provider.model_copy(
                 update={

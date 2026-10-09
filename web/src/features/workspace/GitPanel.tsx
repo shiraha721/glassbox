@@ -14,7 +14,7 @@ function code(file: GitStatus['files'][number]): string {
   return file.kind === 'untracked' ? '??' : `${file.index}${file.worktree}`.replaceAll('.', ' ');
 }
 
-/** The workspace's uncommitted changes, read by the studio (the agent cannot run Git). */
+/** The workspace's uncommitted changes, read by Glassbox (the agent cannot run Git). */
 export function GitPanel({
   projectId,
   onClose,

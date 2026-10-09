@@ -10,8 +10,8 @@ from uuid import uuid4
 import httpx
 import uvicorn
 
-from rtagent.infrastructure.config import Settings
-from rtagent.interfaces.http.app import create_app
+from glassbox.infrastructure.config import Settings
+from glassbox.interfaces.http.app import create_app
 
 
 async def exercise(client: httpx.AsyncClient, roots: list[Path]) -> None:
@@ -92,8 +92,8 @@ async def exercise(client: httpx.AsyncClient, roots: list[Path]) -> None:
         )
         skill = await api("GET", f'/workspace/skills/project-check?project_id={project["id"]}')
         assert f"project-{index}" in skill["content"]
-        # Memory is studio data: it is kept per workspace outside the project folder.
-        assert not (roots[index] / ".rtagent").exists()
+        # Memory is Glassbox's data: it is kept per workspace outside the project folder.
+        assert not (roots[index] / ".glassbox").exists()
         saved = await api("GET", f'/workspace?project_id={project["id"]}')
         assert saved["memory"]["content"] == f"memory-{index}"
         draft = await api(
@@ -199,7 +199,7 @@ async def main() -> None:
                 base_url="http://127.0.0.1:8769/api/v1", trust_env=False, timeout=30
             ) as client:
                 await exercise(client, workspaces[1:])
-            assert not (workspaces[0] / ".rtagent").exists()
+            assert not (workspaces[0] / ".glassbox").exists()
         finally:
             server.should_exit = True
             await serving

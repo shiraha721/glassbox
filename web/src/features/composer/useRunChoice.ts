@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SIMULATED, type Bootstrap, type Run, type RunChoice } from '../../api/client';
 
-const storageKey = 'studio.choice';
+const storageKey = 'glassbox.choice';
 
 /** The saved default model and workspace policy, used until the user picks something else. */
 function defaultChoice(config: Bootstrap['config']): RunChoice {

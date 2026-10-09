@@ -8,8 +8,8 @@ from uuid import uuid4
 import httpx
 import uvicorn
 
-from rtagent.infrastructure.config import Settings
-from rtagent.interfaces.http.app import create_app
+from glassbox.infrastructure.config import Settings
+from glassbox.interfaces.http.app import create_app
 
 
 async def exercise(client: httpx.AsyncClient) -> None:

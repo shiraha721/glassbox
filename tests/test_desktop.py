@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from rtagent.infrastructure.desktop import folders
-from rtagent.infrastructure.desktop.folders import UNREACHABLE, DialogCommand, FolderPicker
+from glassbox.infrastructure.desktop import folders
+from glassbox.infrastructure.desktop.folders import UNREACHABLE, DialogCommand, FolderPicker
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="WSL paths exist only on Linux.")
 
@@ -25,8 +25,8 @@ def test_wsl_uses_the_windows_dialog_with_a_translated_initial_folder(monkeypatc
     assert script == Path(folders.__file__).with_name("wsl_dialog.ps1").read_text(encoding="utf-8")
     # The path travels as a translated environment variable, never inside the script text.
     assert command.env is not None
-    assert command.env["RTAGENT_DIALOG_INITIAL"] == "/home/user/it's here"
-    assert command.env["WSLENV"] == "RTAGENT_DIALOG_INITIAL/p:WT_SESSION"
+    assert command.env["GLASSBOX_DIALOG_INITIAL"] == "/home/user/it's here"
+    assert command.env["WSLENV"] == "GLASSBOX_DIALOG_INITIAL/p:WT_SESSION"
 
 
 def fake_dialog(exit_code: int, output: str = "") -> DialogCommand:

@@ -4,14 +4,14 @@ import json
 import pytest
 from sqlalchemy import func, select
 
-from rtagent.infrastructure.storage import previews
+from glassbox.infrastructure.storage import previews
 
 
-async def test_draft_inspection_is_live_and_does_not_persist(studio_client):
+async def test_draft_inspection_is_live_and_does_not_persist(glassbox_client):
     """Inspect unsaved input, variables, and file context without creating execution records."""
-    client, app = studio_client
-    studio = app.state.studio
-    studio.registry.files.write("AGENTS.md", "Keep the project small.")
+    client, app = glassbox_client
+    glassbox = app.state.glassbox
+    glassbox.registry.files.write("AGENTS.md", "Keep the project small.")
     bootstrap = (await client.get("/api/v1/bootstrap")).json()
     preset = bootstrap["presets"][0]
     draft = {**preset, "blocks": [dict(block) for block in preset["blocks"]]}
@@ -43,7 +43,7 @@ async def test_draft_inspection_is_live_and_does_not_persist(studio_client):
     assert (await client.post("/api/v1/prompts/inspect", json=body)).status_code == 422
     current = (await client.get("/api/v1/bootstrap")).json()
     assert current["presets"] == bootstrap["presets"] and not current["sessions"]
-    async with studio.repository.engine.connect() as connection:
+    async with glassbox.repository.engine.connect() as connection:
         assert (
             await connection.execute(select(func.count()).select_from(previews))
         ).scalar_one() == 0
@@ -88,8 +88,8 @@ async def wait_state(client, run_id, expected):
     pytest.fail(f"Run did not reach {expected}: {run}")
 
 
-async def test_preview_run_trace_and_idempotency(studio_client):
-    client, app = studio_client
+async def test_preview_run_trace_and_idempotency(glassbox_client):
+    client, app = glassbox_client
     run, body, session_id, preview = await start(client)
     duplicate = await client.post(
         "/api/v1/runs", json=body, headers={"Idempotency-Key": session_id}
@@ -103,15 +103,15 @@ async def test_preview_run_trace_and_idempotency(studio_client):
     session = (await client.get(f"/api/v1/sessions/{session_id}")).json()
     assert session["revision"] == 1 and session["active_run_id"] is None
     assert sum(message["role"] == "user" for message in session["messages"]) == 1
-    assert await app.state.studio.repository.read_events(run["id"], 0)
+    assert await app.state.glassbox.repository.read_events(run["id"], 0)
     events = await client.get(f"/api/v1/runs/{run['id']}/events?after=1")
     ids = [int(line[4:]) for line in events.text.splitlines() if line.startswith("id: ")]
     assert ids == sorted(set(ids)) and min(ids) > 1
     assert (await client.get(f"/api/v1/runs/{run['id']}/events?after=99999")).status_code == 410
 
 
-async def test_native_file_tool_returns_to_model(studio_client):
-    client, _app = studio_client
+async def test_native_file_tool_returns_to_model(glassbox_client):
+    client, _app = glassbox_client
     run, *_ = await start(client, "/read README.md")
     completed = await wait_state(client, run["id"], {"succeeded"})
     messages = completed["messages"]
@@ -122,10 +122,10 @@ async def test_native_file_tool_returns_to_model(studio_client):
     assert len([call for call in trace if call["kind"] == "model"]) == 2
 
 
-async def test_direct_run_retries_and_frozen_memory(studio_client):
+async def test_direct_run_retries_and_frozen_memory(glassbox_client):
     """Direct submissions stay idempotent and memory edits cannot alter an active Run."""
-    client, app = studio_client
-    memory = app.state.studio.registry.files.memory()
+    client, app = glassbox_client
+    memory = app.state.glassbox.registry.files.memory()
     saved = (
         await client.put(
             "/api/v1/workspace/memory",
@@ -172,11 +172,11 @@ async def test_direct_run_retries_and_frozen_memory(studio_client):
 
 
 @pytest.mark.parametrize("decision", ["approve", "reject"])
-async def test_approval_stops_before_execution(studio_client, decision):
-    client, app = studio_client
+async def test_approval_stops_before_execution(glassbox_client, decision):
+    client, app = glassbox_client
     run, *_ = await start(client, "/echo hello")
     waiting = await wait_state(client, run["id"], {"waiting_approval"})
-    trace = await app.state.studio.repository.trace(run["id"])
+    trace = await app.state.glassbox.repository.trace(run["id"])
     assert not any(call["kind"] == "tool" and call["status"] == "succeeded" for call in trace)
     response = await client.post(
         f"/api/v1/runs/{run['id']}/approvals/{waiting['approval']['id']}",
@@ -194,8 +194,8 @@ async def test_approval_stops_before_execution(studio_client, decision):
     )
 
 
-async def test_cancel_and_redacted_export(studio_client):
-    client, _app = studio_client
+async def test_cancel_and_redacted_export(glassbox_client):
+    client, _app = glassbox_client
     run, *_ = await start(client, "/slow")
     await wait_state(client, run["id"], {"running"})
     response = await client.post(f"/api/v1/runs/{run['id']}/cancel")
@@ -209,8 +209,8 @@ async def test_cancel_and_redacted_export(studio_client):
     assert exported.json()["redacted"] is True
 
 
-async def test_access_boundary_and_stale_preview(studio_client):
-    client, _app = studio_client
+async def test_access_boundary_and_stale_preview(glassbox_client):
+    client, _app = glassbox_client
     assert (
         await client.put("/api/v1/config", json={}, headers={"Origin": "https://untrusted.example"})
     ).status_code == 403
@@ -247,20 +247,20 @@ async def test_access_boundary_and_stale_preview(studio_client):
     assert (await client.get(f"/api/v1/runs/{run['id']}")).status_code == 404
 
 
-async def test_approval_checkpoint_survives_runner_restart(studio_client):
-    from rtagent.application.runner import Runner
+async def test_approval_checkpoint_survives_runner_restart(glassbox_client):
+    from glassbox.application.runner import Runner
 
-    client, app = studio_client
+    client, app = glassbox_client
     run, *_ = await start(client, "/echo durable")
     waiting = await wait_state(client, run["id"], {"waiting_approval"})
-    old = app.state.studio.runner
+    old = app.state.glassbox.runner
     task = old.tasks.get(run["id"])
     if task:
         await task
     await old.close()
     replacement = Runner(old.repository, old.registry, old.checkpoint_path)
     await replacement.open()
-    app.state.studio.runner = replacement
+    app.state.glassbox.runner = replacement
     try:
         response = await client.post(
             f"/api/v1/runs/{run['id']}/approvals/{waiting['approval']['id']}",
@@ -273,8 +273,8 @@ async def test_approval_checkpoint_survives_runner_restart(studio_client):
         await replacement.close()
 
 
-async def test_bootstrap_lists_summaries_and_runs_own_their_snapshot(studio_client):
-    client, app = studio_client
+async def test_bootstrap_lists_summaries_and_runs_own_their_snapshot(glassbox_client):
+    client, app = glassbox_client
     run, _body, session_id, _preview = await start(client, "/read README.md")
     await wait_state(client, run["id"], {"succeeded"})
     [summary] = (await client.get("/api/v1/bootstrap")).json()["sessions"]
@@ -282,7 +282,7 @@ async def test_bootstrap_lists_summaries_and_runs_own_their_snapshot(studio_clie
     assert "messages" not in summary and summary["message_count"] == 4
     session = (await client.get(f"/api/v1/sessions/{session_id}")).json()
     assert len(session["messages"]) == session["message_count"] == 4
-    async with app.state.studio.repository.engine.connect() as connection:
+    async with app.state.glassbox.repository.engine.connect() as connection:
         assert (
             await connection.execute(select(func.count()).select_from(previews))
         ).scalar_one() == 0
@@ -290,8 +290,8 @@ async def test_bootstrap_lists_summaries_and_runs_own_their_snapshot(studio_clie
     assert [call["kind"] for call in trace] == ["model", "tool", "model"]
 
 
-async def test_runs_in_different_conversations_execute_concurrently(studio_client):
-    client, _app = studio_client
+async def test_runs_in_different_conversations_execute_concurrently(glassbox_client):
+    client, _app = glassbox_client
     first, *_ = await start(client, "/slow")
     second, *_ = await start(client, "/slow")
     both = []
@@ -328,8 +328,8 @@ async def direct_run(client, text, **choices):
     return response.json()
 
 
-async def test_run_choices_set_model_and_workspace_access(studio_client):
-    client, _app = studio_client
+async def test_run_choices_set_model_and_workspace_access(glassbox_client):
+    client, _app = glassbox_client
     simulated = {"provider_id": "simulated", "model": "simulated"}
     asked = await direct_run(client, "/read README.md", model=simulated, access="ask")
     # Reading is not a change, so ask mode leaves it allowed.
@@ -370,12 +370,12 @@ async def test_run_choices_set_model_and_workspace_access(studio_client):
     assert response.status_code == 422 and response.json()["error"]["code"] == "provider_mismatch"
 
 
-async def test_credentials_are_write_only(studio_client):
-    client, _app = studio_client
+async def test_credentials_are_write_only(glassbox_client):
+    client, _app = glassbox_client
     secret = "sk-browser-entered-0123456789"
-    saved = await client.put("/api/v1/credentials/STUDIO_UI_KEY", json={"value": secret})
-    assert saved.json() == {"name": "STUDIO_UI_KEY", "source": "stored", "hint": "6789"}
-    listed = await client.get("/api/v1/credentials", params={"name": "STUDIO_UI_KEY"})
+    saved = await client.put("/api/v1/credentials/GLASSBOX_UI_KEY", json={"value": secret})
+    assert saved.json() == {"name": "GLASSBOX_UI_KEY", "source": "stored", "hint": "6789"}
+    listed = await client.get("/api/v1/credentials", params={"name": "GLASSBOX_UI_KEY"})
     assert secret not in listed.text and listed.json()[0]["source"] == "stored"
     boot = (await client.get("/api/v1/bootstrap")).json()
     assert secret not in json.dumps(boot)
@@ -383,12 +383,12 @@ async def test_credentials_are_write_only(studio_client):
     assert (
         await client.put("/api/v1/credentials/not-a-name", json={"value": "x"})
     ).status_code == 422
-    removed = await client.delete("/api/v1/credentials/STUDIO_UI_KEY")
+    removed = await client.delete("/api/v1/credentials/GLASSBOX_UI_KEY")
     assert removed.json()["source"] == "missing"
 
 
-async def test_global_skills_are_shared_by_projects(studio_client, tmp_path):
-    client, _app = studio_client
+async def test_global_skills_are_shared_by_projects(glassbox_client, tmp_path):
+    client, _app = glassbox_client
     skill = {
         "name": "house-style",
         "description": "Shared review rules.",
@@ -408,7 +408,7 @@ async def test_global_skills_are_shared_by_projects(studio_client, tmp_path):
         f"/api/v1/workspace/skills?project_id={project['id']}", json=conflict
     )
     assert response.status_code == 409 and "global skill" in response.text
-    # A project folder created outside the studio is reported, not silently shadowed.
+    # A project folder created outside Glassbox is reported, not silently shadowed.
     (other / ".agents/skills/house-style").mkdir(parents=True)
     (other / ".agents/skills/house-style/SKILL.md").write_text(
         "---\nname: house-style\ndescription: Copy.\n---\n\nBody.\n"
@@ -426,8 +426,8 @@ async def test_global_skills_are_shared_by_projects(studio_client, tmp_path):
     ).status_code == 404
 
 
-async def test_projects_create_a_missing_folder_only_when_asked(studio_client, tmp_path):
-    client, _app = studio_client
+async def test_projects_create_a_missing_folder_only_when_asked(glassbox_client, tmp_path):
+    client, _app = glassbox_client
     target = tmp_path / "new" / "project"
     body = {"name": "New", "workspace_root": str(target)}
     missing = await client.post("/api/v1/projects", json=body)

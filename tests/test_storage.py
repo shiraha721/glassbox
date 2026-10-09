@@ -1,7 +1,7 @@
 import pytest
 
-from rtagent.domain import AppError
-from rtagent.infrastructure.storage import Repository
+from glassbox.domain import AppError
+from glassbox.infrastructure.storage import Repository
 
 
 async def test_migration_persistence_and_revision_conflict(tmp_path):

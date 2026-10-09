@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from rtagent.domain import AppError, MCPServer, StudioConfig
-from rtagent.infrastructure.sandbox.command_io import OutputBuffer
-from rtagent.infrastructure.tools import ToolRegistry
-from rtagent.infrastructure.workspace.files import Workspace
+from glassbox.domain import AppError, GlassboxConfig, MCPServer
+from glassbox.infrastructure.sandbox.command_io import OutputBuffer
+from glassbox.infrastructure.tools import ToolRegistry
+from glassbox.infrastructure.workspace.files import Workspace
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mcp_server.py"
 
@@ -39,13 +39,13 @@ def test_file_tool_boundaries(tmp_path):
 @pytest.mark.parametrize("transport", ["stdio", "streamable_http"])
 async def test_mcp_discovery_and_execution(tmp_path, monkeypatch, transport):
     """Exercise the SDK handshake, discovery, and invocation over both transports."""
-    monkeypatch.setenv("STUDIO_FIXTURE_SECRET", "synthetic-only")
+    monkeypatch.setenv("GLASSBOX_FIXTURE_SECRET", "synthetic-only")
     monkeypatch.setenv("UNRELATED_TEST_KEY", "must-not-be-forwarded")
     server = MCPServer(
         name="Fixture",
         command=sys.executable,
         args=[str(FIXTURE.resolve())],
-        env={"FIXTURE_SECRET": "STUDIO_FIXTURE_SECRET"},
+        env={"FIXTURE_SECRET": "GLASSBOX_FIXTURE_SECRET"},
     )
     process = None
     try:
@@ -76,7 +76,7 @@ async def test_mcp_discovery_and_execution(tmp_path, monkeypatch, transport):
             server = server.model_copy(
                 update={"transport": transport, "url": f"http://127.0.0.1:{port}/mcp"}
             )
-        config = StudioConfig(mcp_servers=[server])
+        config = GlassboxConfig(mcp_servers=[server])
         registry = ToolRegistry(tmp_path)
         catalog = await registry.discover(config)
         assert registry.errors == {}
@@ -102,7 +102,7 @@ async def test_changed_mcp_schema_is_rejected(tmp_path, monkeypatch):
         args=[str(FIXTURE.resolve())],
         env={"FIXTURE_SCHEMA": "TEST_MCP_SCHEMA"},
     )
-    config = StudioConfig(mcp_servers=[server])
+    config = GlassboxConfig(mcp_servers=[server])
     registry = ToolRegistry(tmp_path)
     catalog = await registry.discover(config)
     tool = next(item for item in catalog if item.original_name == "fixture_echo")
@@ -136,7 +136,7 @@ def test_partial_patch_reports_completed_files(tmp_path, monkeypatch):
 async def test_read_only_patch_denied_before_effect(tmp_path):
     """Even a caller holding the native schema cannot bypass read-only execution policy."""
     registry = ToolRegistry(tmp_path)
-    config = StudioConfig(sandbox_mode="read-only")
+    config = GlassboxConfig(sandbox_mode="read-only")
     with pytest.raises(AppError) as error:
         await registry.execute(
             registry.catalog["apply_patch"],

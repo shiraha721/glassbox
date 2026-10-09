@@ -2,7 +2,7 @@
 
 from test_api import start, wait_state
 
-from rtagent.domain import Message, ToolCall, digest, net_changes
+from glassbox.domain import Message, ToolCall, digest, net_changes
 
 
 def test_net_changes_fold_a_runs_receipts_per_path():
@@ -17,9 +17,11 @@ def test_net_changes_fold_a_runs_receipts_per_path():
     assert net_changes(entries) == {"a.txt": (None, "a2"), "c.txt": ("c0", None)}
 
 
-async def test_undo_restores_files_still_as_the_run_left_them(studio_client, monkeypatch, tmp_path):
+async def test_undo_restores_files_still_as_the_run_left_them(
+    glassbox_client, monkeypatch, tmp_path
+):
     """Created, edited and deleted files go back byte for byte; a file edited since is kept."""
-    client, app = studio_client
+    client, app = glassbox_client
     workspace = tmp_path / "workspace"
     # CRLF bytes prove the restore is byte-exact rather than re-encoded text.
     (workspace / "old.txt").write_bytes(b"keep\r\nme\r\n")
@@ -54,7 +56,7 @@ async def test_undo_restores_files_still_as_the_run_left_them(studio_client, mon
             )
         yield {"kind": "result", "message": message, "usage": {}}
 
-    monkeypatch.setattr("rtagent.application.runner.generate", editing_model)
+    monkeypatch.setattr("glassbox.application.runner.generate", editing_model)
     run, *_ = await start(client, "Change some files")
     completed = await wait_state(client, run["id"], {"succeeded"})
     assert completed["changed_files"] == ["notes.txt", "README.md", "old.txt"]
@@ -78,7 +80,7 @@ async def test_undo_restores_files_still_as_the_run_left_them(studio_client, mon
     states = {item["path"]: item["state"] for item in result["files"]}
     assert states == {"notes.txt": "changed", "README.md": "reverted", "old.txt": "reverted"}
     # The undo is recorded on the Run, and repeating it changes nothing.
-    events = await app.state.studio.repository.read_events(run["id"], 0)
+    events = await app.state.glassbox.repository.read_events(run["id"], 0)
     assert events[-1]["type"] == "files.reverted"
     assert events[-1]["payload"]["restored"] == ["README.md", "old.txt"]
     again = (await client.post(f"/api/v1/runs/{run['id']}/files/revert")).json()
@@ -87,9 +89,9 @@ async def test_undo_restores_files_still_as_the_run_left_them(studio_client, mon
     assert not any("file-history" in str(path) for path in workspace.rglob("*"))
 
 
-async def test_a_run_without_file_tools_has_nothing_to_undo(studio_client):
+async def test_a_run_without_file_tools_has_nothing_to_undo(glassbox_client):
     """Runs that only talk report no changed files."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     run, *_ = await start(client)
     completed = await wait_state(client, run["id"], {"succeeded"})
     assert completed["changed_files"] == []

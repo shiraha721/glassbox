@@ -5,9 +5,9 @@ import asyncio
 import pytest
 from test_api import start, wait_state
 
-from rtagent.application.context import context_usage, session_usage
-from rtagent.application.runner import Runner
-from rtagent.domain import Message, ToolCall
+from glassbox.application.context import context_usage, session_usage
+from glassbox.application.runner import Runner
+from glassbox.domain import Message, ToolCall
 
 
 def test_context_usage_counts_cached_prompt_tokens_per_adapter():
@@ -36,9 +36,9 @@ def test_context_usage_counts_cached_prompt_tokens_per_adapter():
     assert context_usage({"adapter": "fake", "input_tokens": None}, "sim").prompt_tokens is None
 
 
-async def test_context_reports_the_latest_request_usage(studio_client, monkeypatch):
+async def test_context_reports_the_latest_request_usage(glassbox_client, monkeypatch):
     """The context view surfaces the provider's accounting for the most recent model request."""
-    client, _app = studio_client
+    client, _app = glassbox_client
 
     async def scripted_model(_config, _compiled, _tools, _prepared, on_wire, _key=""):
         await on_wire(None)
@@ -48,7 +48,7 @@ async def test_context_reports_the_latest_request_usage(studio_client, monkeypat
             "usage": {"input_tokens": 321, "output_tokens": 45, "cache_read_input_tokens": 200},
         }
 
-    monkeypatch.setattr("rtagent.application.runner.generate", scripted_model)
+    monkeypatch.setattr("glassbox.application.runner.generate", scripted_model)
     run, _body, session_id, _preview = await start(client)
     await wait_state(client, run["id"], {"succeeded"})
     usage = (await client.get(f"/api/v1/sessions/{session_id}/context")).json()["live_usage"]
@@ -95,9 +95,9 @@ def test_session_usage_totals_every_reported_request():
     assert session_usage([])[0].cache_hit_rate is None
 
 
-async def test_context_totals_cover_every_request(studio_client, monkeypatch):
+async def test_context_totals_cover_every_request(glassbox_client, monkeypatch):
     """Each model request of a Run adds to the conversation totals, not just the latest one."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     replies = iter(
         [
             (
@@ -119,7 +119,7 @@ async def test_context_totals_cover_every_request(studio_client, monkeypatch):
         message, usage = next(replies)
         yield {"kind": "result", "message": message, "usage": usage}
 
-    monkeypatch.setattr("rtagent.application.runner.generate", scripted_model)
+    monkeypatch.setattr("glassbox.application.runner.generate", scripted_model)
     run, _body, session_id, _preview = await start(client)
     await wait_state(client, run["id"], {"succeeded"})
     context = (await client.get(f"/api/v1/sessions/{session_id}/context")).json()
@@ -142,17 +142,17 @@ async def allow_echo(client, **limits):
 
 async def replace_runner(app):
     """Reopen the same durable stores with a fresh graph and task owner."""
-    old = app.state.studio.runner
+    old = app.state.glassbox.runner
     await old.close()
     replacement = Runner(old.repository, old.registry, old.checkpoint_path)
     await replacement.open()
-    app.state.studio.runner = replacement
+    app.state.glassbox.runner = replacement
     return replacement
 
 
-async def test_multiple_calls_keep_ids_and_complete_before_next_model(studio_client, monkeypatch):
+async def test_multiple_calls_keep_ids_and_complete_before_next_model(glassbox_client, monkeypatch):
     """A batch must return one ordered result for every original model call ID."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     await allow_echo(client)
 
     async def scripted_model(_config, compiled, _tools, _prepared, on_wire, _key=""):
@@ -176,7 +176,7 @@ async def test_multiple_calls_keep_ids_and_complete_before_next_model(studio_cli
             "usage": {"input_tokens": 7, "output_tokens": 2},
         }
 
-    monkeypatch.setattr("rtagent.application.runner.generate", scripted_model)
+    monkeypatch.setattr("glassbox.application.runner.generate", scripted_model)
     run, *_ = await start(client, "Use both tools")
     completed = await wait_state(client, run["id"], {"succeeded"})
     assert [message["role"] for message in completed["messages"]] == [
@@ -188,9 +188,9 @@ async def test_multiple_calls_keep_ids_and_complete_before_next_model(studio_cli
     assert completed["usage"]["input_tokens"] == 14
 
 
-async def test_unknown_effect_requires_explicit_result_before_resume(studio_client, monkeypatch):
+async def test_unknown_effect_requires_explicit_result_before_resume(glassbox_client, monkeypatch):
     """A shutdown after dispatch cannot silently execute the same effect again."""
-    client, app = studio_client
+    client, app = glassbox_client
     await allow_echo(client)
     entered = asyncio.Event()
     executions = 0
@@ -201,7 +201,7 @@ async def test_unknown_effect_requires_explicit_result_before_resume(studio_clie
         entered.set()
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(app.state.studio.registry, "execute", uncertain_execute)
+    monkeypatch.setattr(app.state.glassbox.registry, "execute", uncertain_execute)
     run, *_ = await start(client, "/echo external effect")
     await asyncio.wait_for(entered.wait(), 3)
     replacement = await replace_runner(app)
@@ -224,19 +224,19 @@ async def test_unknown_effect_requires_explicit_result_before_resume(studio_clie
         assert any(
             message["content"] == "Externally verified result" for message in completed["messages"]
         )
-        call = await app.state.studio.repository.call(call_id)
+        call = await app.state.glassbox.repository.call(call_id)
         assert call["data"]["attempt_history"][0]["status"] == "outcome_unknown"
     finally:
         await replacement.close()
 
 
-async def test_receipt_survives_interruption_before_checkpoint(studio_client, monkeypatch):
+async def test_receipt_survives_interruption_before_checkpoint(glassbox_client, monkeypatch):
     """Replaying a node after its receipt is durable must not repeat the tool."""
-    client, app = studio_client
+    client, app = glassbox_client
     await allow_echo(client)
-    repository = app.state.studio.repository
+    repository = app.state.glassbox.repository
     original_emit = repository.emit
-    original_execute = app.state.studio.registry.execute
+    original_execute = app.state.glassbox.registry.execute
     executions = 0
     interrupted_once = False
     at_receipt = asyncio.Event()
@@ -255,7 +255,7 @@ async def test_receipt_survives_interruption_before_checkpoint(studio_client, mo
         return await original_emit(run_id, event_type, payload, **changes)
 
     monkeypatch.setattr(repository, "emit", interrupted_emit)
-    monkeypatch.setattr(app.state.studio.registry, "execute", counted_execute)
+    monkeypatch.setattr(app.state.glassbox.registry, "execute", counted_execute)
     run, *_ = await start(client, "/echo durable receipt")
     await asyncio.wait_for(at_receipt.wait(), 3)
     replacement = await replace_runner(app)
@@ -269,16 +269,16 @@ async def test_receipt_survives_interruption_before_checkpoint(studio_client, mo
         await replacement.close()
 
 
-async def test_tool_timeout_is_uncertain_and_can_be_cancelled(studio_client, monkeypatch):
+async def test_tool_timeout_is_uncertain_and_can_be_cancelled(glassbox_client, monkeypatch):
     """A timeout stops execution without pretending an external call was rolled back."""
-    client, app = studio_client
+    client, app = glassbox_client
     await allow_echo(client, tool_timeout=0.1)
 
     async def slow_execute(*_args):
         await asyncio.sleep(10)
         return "late"
 
-    monkeypatch.setattr(app.state.studio.registry, "execute", slow_execute)
+    monkeypatch.setattr(app.state.glassbox.registry, "execute", slow_execute)
     run, *_ = await start(client, "/echo timeout")
     interrupted = await wait_state(client, run["id"], {"interrupted"})
     assert len(interrupted["unknown_calls"]) == 1
@@ -288,9 +288,9 @@ async def test_tool_timeout_is_uncertain_and_can_be_cancelled(studio_client, mon
 @pytest.mark.parametrize(
     "limits,reason", [({"max_steps": 1}, "max_steps"), ({"max_tool_calls": 1}, "max_tool_calls")]
 )
-async def test_attempt_limits_stop_the_loop(studio_client, monkeypatch, limits, reason):
+async def test_attempt_limits_stop_the_loop(glassbox_client, monkeypatch, limits, reason):
     """A provider requesting tools forever cannot escape either attempt budget."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     await allow_echo(client, **limits)
 
     async def looping_model(_config, _compiled, _tools, _prepared, on_wire, _key=""):
@@ -304,15 +304,15 @@ async def test_attempt_limits_stop_the_loop(studio_client, monkeypatch, limits, 
             "usage": {"input_tokens": None, "output_tokens": None},
         }
 
-    monkeypatch.setattr("rtagent.application.runner.generate", looping_model)
+    monkeypatch.setattr("glassbox.application.runner.generate", looping_model)
     run, *_ = await start(client)
     stopped = await wait_state(client, run["id"], {"failed"})
     assert stopped["stop_reason"] == reason
 
 
-async def test_runs_are_priced_from_the_frozen_model_price(studio_client, monkeypatch):
+async def test_runs_are_priced_from_the_frozen_model_price(glassbox_client, monkeypatch):
     """A Run's cost uses the price frozen in its snapshot; the context view sums the conversation."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     config = (await client.get("/api/v1/bootstrap")).json()["config"]
     config["providers"][0]["prices"] = {"gpt-x": {"input": 2, "output": 8, "cache_read": 0.5}}
     config["provider"] = {**config["provider"], "profile_id": "openai", "adapter": "openai"}
@@ -328,7 +328,7 @@ async def test_runs_are_priced_from_the_frozen_model_price(studio_client, monkey
             "usage": {"input_tokens": 1000, "output_tokens": 500, "cache_read_input_tokens": 800},
         }
 
-    monkeypatch.setattr("rtagent.application.runner.generate", priced_model)
+    monkeypatch.setattr("glassbox.application.runner.generate", priced_model)
     run, _body, session_id, _preview = await start(client)
     completed = await wait_state(client, run["id"], {"succeeded"})
     # 200 uncached x $2 + 800 cached x $0.5 + 500 output x $8, per million tokens.

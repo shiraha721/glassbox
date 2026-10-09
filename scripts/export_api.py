@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from rtagent.domain import RunEvent
-from rtagent.interfaces.http.app import create_app
+from glassbox.domain import RunEvent
+from glassbox.interfaces.http.app import create_app
 
 schema = create_app().openapi()
 schema["components"]["schemas"]["RunEvent"] = RunEvent.model_json_schema()

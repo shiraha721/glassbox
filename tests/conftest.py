@@ -3,12 +3,12 @@
 import httpx
 import pytest
 
-from rtagent.infrastructure.config import Settings
-from rtagent.interfaces.http.app import create_app
+from glassbox.infrastructure.config import Settings
+from glassbox.interfaces.http.app import create_app
 
 
 @pytest.fixture
-async def studio_client(tmp_path):
+async def glassbox_client(tmp_path):
     """Start the local app with temporary storage and direct HTTP access."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()

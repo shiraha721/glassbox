@@ -9,9 +9,9 @@ import pytest
 from test_api import start, wait_state
 from test_runtime import allow_echo
 
-from rtagent.domain import Message, ShellHook, ToolCall
-from rtagent.domain.hooks import matching_hooks
-from rtagent.infrastructure.shell_hooks import run_hook
+from glassbox.domain import Message, ShellHook, ToolCall
+from glassbox.domain.hooks import matching_hooks
+from glassbox.infrastructure.shell_hooks import run_hook
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the hook commands use a POSIX shell")
 
@@ -29,14 +29,14 @@ def test_hooks_match_by_event_and_tool_glob():
 
 async def test_a_hook_reads_stdin_with_a_minimal_environment(tmp_path, monkeypatch):
     """Service secrets in the environment never reach a hook; event data arrives on stdin."""
-    monkeypatch.setenv("RTAGENT_TEST_SECRET", "do-not-pass")
+    monkeypatch.setenv("GLASSBOX_TEST_SECRET", "do-not-pass")
     hook = ShellHook(event="after_tool", command='cat; echo; env; echo "to stderr" >&2')
     outcome = await run_hook(hook, {"event": "after_tool", "value": "λ"}, tmp_path)
     assert outcome.succeeded and outcome.error is None
     first, environment = outcome.stdout.split("\n", 1)
     assert json.loads(first) == {"event": "after_tool", "value": "λ"}
-    assert "RTAGENT_HOOK_EVENT=after_tool" in environment
-    assert "RTAGENT_TEST_SECRET" not in environment
+    assert "GLASSBOX_HOOK_EVENT=after_tool" in environment
+    assert "GLASSBOX_TEST_SECRET" not in environment
     assert outcome.stderr == "to stderr\n"
 
 
@@ -71,12 +71,12 @@ def echo_then_finish():
 
 
 async def test_before_tool_hooks_can_block_and_other_hooks_observe(
-    studio_client, monkeypatch, tmp_path
+    glassbox_client, monkeypatch, tmp_path
 ):
     """Exit 2 blocks with the hook's reason; after_tool and run_end hooks see the outcome."""
-    client, app = studio_client
+    client, app = glassbox_client
     workspace = tmp_path / "workspace"
-    monkeypatch.setattr("rtagent.application.runner.generate", echo_then_finish())
+    monkeypatch.setattr("glassbox.application.runner.generate", echo_then_finish())
     blocking = {
         "event": "before_tool",
         "tools": "echo",
@@ -90,7 +90,7 @@ async def test_before_tool_hooks_can_block_and_other_hooks_observe(
     seen = json.loads((workspace / "before.json").read_text())
     assert seen["tool"] == {"name": "echo", "args": {"text": "hooked"}}
     assert seen["run_id"] == run["id"] and seen["workspace_root"] == str(workspace)
-    receipt = await app.state.studio.repository.call(f"{run['id']}:tool:0000:0000")
+    receipt = await app.state.glassbox.repository.call(f"{run['id']}:tool:0000:0000")
     assert receipt["data"]["hooks"][0]["exit_code"] == 2
     assert "after_tool" not in json.dumps(receipt["data"]["hooks"])
 
@@ -109,7 +109,7 @@ async def test_before_tool_hooks_can_block_and_other_hooks_observe(
     async with asyncio.timeout(5):
         while not (workspace / "end.json").exists():
             await asyncio.sleep(0.05)
-        while (events := await app.state.studio.repository.read_events(run["id"], 0))[-1][
+        while (events := await app.state.glassbox.repository.read_events(run["id"], 0))[-1][
             "type"
         ] != "hook.ran":
             await asyncio.sleep(0.05)
@@ -118,18 +118,18 @@ async def test_before_tool_hooks_can_block_and_other_hooks_observe(
     assert events[-1]["payload"]["exit_code"] == 0
 
 
-async def test_a_failing_before_tool_hook_blocks_the_call(studio_client, monkeypatch):
+async def test_a_failing_before_tool_hook_blocks_the_call(glassbox_client, monkeypatch):
     """A hook that crashes or times out fails closed: the tool is not dispatched."""
-    client, app = studio_client
-    monkeypatch.setattr("rtagent.application.runner.generate", echo_then_finish())
+    client, app = glassbox_client
+    monkeypatch.setattr("glassbox.application.runner.generate", echo_then_finish())
     executed = []
-    original = app.state.studio.registry.execute
+    original = app.state.glassbox.registry.execute
 
     async def counted(*args):
         executed.append(args)
         return await original(*args)
 
-    monkeypatch.setattr(app.state.studio.registry, "execute", counted)
+    monkeypatch.setattr(app.state.glassbox.registry, "execute", counted)
     await allow_echo(client, hooks=[{"event": "before_tool", "command": "exit 1"}])
     run, *_ = await start(client, "Use echo")
     completed = await wait_state(client, run["id"], {"succeeded"})

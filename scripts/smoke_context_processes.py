@@ -14,10 +14,10 @@ from unittest.mock import patch
 import httpx
 import uvicorn
 
-import rtagent.infrastructure.workspace.downloads as downloads
-from rtagent.domain import uid
-from rtagent.infrastructure.config import Settings
-from rtagent.interfaces.http.app import create_app
+import glassbox.infrastructure.workspace.downloads as downloads
+from glassbox.domain import uid
+from glassbox.infrastructure.config import Settings
+from glassbox.interfaces.http.app import create_app
 
 
 async def wait_until(read, ready, seconds: float = 45):
@@ -142,7 +142,7 @@ async def verify(
         await asyncio.Event().wait()
         yield {}
 
-    with patch("rtagent.application.context.generate", paused_summary):
+    with patch("glassbox.application.context.generate", paused_summary):
         cancelled = await api(
             "POST",
             f"/sessions/{session['id']}/compact",
@@ -165,7 +165,7 @@ async def verify(
         )
     command = (
         "[Console]::WriteLine('waiting'); $line=[Console]::ReadLine(); "
-        "[IO.File]::WriteAllText((Join-Path $env:RTAGENT_WORKSPACE 'input.txt'), $line); "
+        "[IO.File]::WriteAllText((Join-Path $env:GLASSBOX_WORKSPACE 'input.txt'), $line); "
         "[Console]::WriteLine('received:'+$line)"
         if os.name == "nt"
         else "printf 'waiting\\n'; read -r line; printf '%s' \"$line\" > input.txt; printf 'received:%s\\n' \"$line\""
@@ -298,7 +298,7 @@ async def verify(
         interpreter = "python" if os.name == "nt" else "python3"
         install = (
             interpreter
-            + " -c \"import zipfile; zipfile.ZipFile('six.whl').extractall('.rtagent/packages')\"; "
+            + " -c \"import zipfile; zipfile.ZipFile('six.whl').extractall('.glassbox/packages')\"; "
             + interpreter
             + " -c \"import six; print('dependency:'+six.__version__)\""
         )
@@ -313,7 +313,7 @@ async def verify(
 async def main(network: bool = False, public_dns: bool = False) -> None:
     """Own the listening server and scratch resources, including cleanup after a failed assertion."""
     with tempfile.TemporaryDirectory(
-        prefix="rtagent-context-processes-", ignore_cleanup_errors=True
+        prefix="glassbox-context-processes-", ignore_cleanup_errors=True
     ) as temporary:
         root = Path(temporary)
         workspace = root / "workspace"

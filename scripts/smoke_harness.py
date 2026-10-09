@@ -10,13 +10,20 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from rtagent.domain import AppError, ResumeRequest, RunEvent, StudioConfig, ToolCall, ToolDefinition
-from rtagent.domain.hooks import Hooks
-from rtagent.harness import Harness
-from rtagent.infrastructure.config import Settings
-from rtagent.infrastructure.workspace.files import Workspace
-from rtagent.interfaces.client import AgentClient
-from rtagent.interfaces.http.app import create_app
+from glassbox.domain import (
+    AppError,
+    GlassboxConfig,
+    ResumeRequest,
+    RunEvent,
+    ToolCall,
+    ToolDefinition,
+)
+from glassbox.domain.hooks import Hooks
+from glassbox.harness import Harness
+from glassbox.infrastructure.config import Settings
+from glassbox.infrastructure.workspace.files import Workspace
+from glassbox.interfaces.client import AgentClient
+from glassbox.interfaces.http.app import create_app
 
 
 async def command(args: list[str], stdin: bytes | None = None) -> str:
@@ -24,7 +31,7 @@ async def command(args: list[str], stdin: bytes | None = None) -> str:
     child = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
-        "rtagent",
+        "glassbox",
         *args,
         stdin=asyncio.subprocess.PIPE if stdin else asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
@@ -51,7 +58,7 @@ async def embedding(root: Path) -> None:
         """Collect committed lifecycle evidence without changing its original payload."""
         seen.append(event.type)
 
-    async def guard(call: ToolCall, _config: StudioConfig) -> str | None:
+    async def guard(call: ToolCall, _config: GlassboxConfig) -> str | None:
         """Apply a concrete protected-file rule in addition to the core permission decision."""
         return (
             "Fixture protects protected.txt." if call.args.get("path") == "protected.txt" else None
@@ -116,7 +123,7 @@ async def embedding(root: Path) -> None:
         config = await harness.repository.config()
         config.tools["workspace_summary"] = "allow"
         config.tools["uncertain_effect"] = "allow"
-        await harness.studio.save_config(config)
+        await harness.glassbox.save_config(config)
         started = await harness.run('/tool workspace_summary {"pattern":"**/*.py"}')
         finished = await harness.wait(started.id, 30)
         assert finished.status == "succeeded" and hits == 1, finished
@@ -129,7 +136,7 @@ async def embedding(root: Path) -> None:
         assert not (root / "workspace" / "protected.txt").exists()
         config = await harness.repository.config()
         config.tools["workspace_summary"] = "deny"
-        await harness.studio.save_config(config)
+        await harness.glassbox.save_config(config)
         # Fake decisions only choose exposed tools; invoke policy directly through a frozen call scenario later in focused tests.
         assert "workspace_summary" not in {
             item.name for item in harness.registry.selected(await harness.repository.config())
@@ -316,7 +323,7 @@ async def http_workflow(base_url: str, fixture: FastAPI) -> None:
         assert imported["id"] != package["preset"]["id"] and imported["revision"] == 1
         assert imported["blocks"][0]["id"] != package["preset"]["blocks"][0]["id"]
         skill = {
-            "format": "rtagent.skill.v1",
+            "format": "glassbox.skill.v1",
             "name": "fixture-review",
             "files": {
                 "SKILL.md": "---\nname: fixture-review\ndescription: Review fixture evidence.\n---\n\nRead resources/guide.md and evidence.txt.\n",
@@ -385,7 +392,7 @@ async def http_workflow(base_url: str, fixture: FastAPI) -> None:
 async def main() -> None:
     """Keep test services/data separate and await every process/connection during cleanup."""
     with tempfile.TemporaryDirectory(
-        prefix="rtagent-harness-", ignore_cleanup_errors=True
+        prefix="glassbox-harness-", ignore_cleanup_errors=True
     ) as temporary:
         root = Path(temporary)
         workspace = root / "workspace"

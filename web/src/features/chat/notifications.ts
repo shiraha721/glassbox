@@ -9,7 +9,7 @@ const notable: Record<string, string> = {
   interrupted: 'was interrupted',
 };
 
-const storageKey = 'studio.notify';
+const storageKey = 'glassbox.notify';
 
 /** Decide whether a status change deserves a notification. The first sighting of a Run (for
  * example after a page load) never notifies; only a change into a notable state does. */

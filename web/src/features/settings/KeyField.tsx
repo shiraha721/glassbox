@@ -35,7 +35,7 @@ export function KeyField({
   const description = !name
     ? 'No key: for local endpoints that do not need one.'
     : status?.source === 'stored'
-      ? `Saved in the studio · ends in ${status.hint}`
+      ? `Saved in Glassbox · ends in ${status.hint}`
       : status?.source === 'environment'
         ? `Read from the ${name} environment variable`
         : `Not set · enter a key or set ${name} in .env`;

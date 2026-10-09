@@ -230,8 +230,8 @@ function MemoryEditor({
         />
       </label>
       <p className="subtle">
-        Loaded with AGENTS.md at the start of each run. Kept in the studio&apos;s data folder, not
-        in the project: <code>{memory.path}</code>
+        Loaded with AGENTS.md at the start of each run. Kept in Glassbox&apos;s data folder, not in
+        the project: <code>{memory.path}</code>
       </p>
       <button
         className="button"

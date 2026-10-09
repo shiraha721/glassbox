@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from rtagent.domain.git import parse_status, split_diff
+from glassbox.domain.git import parse_status, split_diff
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="Git is not installed")
 
@@ -65,9 +65,9 @@ def git(root, *args):
 
 
 @needs_git
-async def test_status_and_diff_hide_private_content(studio_client, tmp_path):
+async def test_status_and_diff_hide_private_content(glassbox_client, tmp_path):
     """Changed files are listed; diffs include text changes but never private files."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     root = tmp_path / "workspace"
     git(root, "init", "-q", "-b", "main")
     (root / ".env.local").write_text("TOKEN=old\n", encoding="utf-8")
@@ -77,7 +77,7 @@ async def test_status_and_diff_hide_private_content(studio_client, tmp_path):
     (root / ".env.local").write_text("TOKEN=new-secret\n", encoding="utf-8")
     (root / ".env").write_text("SECRET=untracked-secret\n", encoding="utf-8")
     (root / "notes.txt").write_text("a note\n", encoding="utf-8")
-    # A repository-provided program must never run when the studio reads Git.
+    # A repository-provided program must never run when Glassbox reads Git.
     git(root, "config", "core.fsmonitor", f"touch {root / 'pwned'}; false")
 
     status = (await client.get("/api/v1/workspace/git")).json()
@@ -99,7 +99,7 @@ async def test_status_and_diff_hide_private_content(studio_client, tmp_path):
 
 
 @needs_git
-async def test_a_folder_outside_git_says_so(studio_client):
-    client, _app = studio_client
+async def test_a_folder_outside_git_says_so(glassbox_client):
+    client, _app = glassbox_client
     status = (await client.get("/api/v1/workspace/git")).json()
     assert status["repository"] is False and "not a git repository" in status["reason"].lower()

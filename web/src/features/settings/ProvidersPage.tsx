@@ -57,7 +57,7 @@ export function ProvidersPage({
   return (
     <>
       <p className="page-intro">
-        Model endpoints the studio can call. Keys stay on this computer and are never sent to the
+        Model endpoints Glassbox can call. Keys stay on this computer and are never sent to the
         browser. Choose models on the Models page or below the message box.
       </p>
       {draft.providers.map((profile) => (

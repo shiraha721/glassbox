@@ -4,19 +4,19 @@ import json
 
 from test_api import start, wait_state
 
-from rtagent.domain import (
+from glassbox.domain import (
+    GlassboxConfig,
     Message,
     ModelChoice,
     Preset,
     ProviderConfig,
     ProviderProfile,
-    StudioConfig,
     ToolCall,
     reasoning_text,
     resolve_model,
 )
-from rtagent.domain.prompts import compile_prompt
-from rtagent.infrastructure.providers.chat import prepare
+from glassbox.domain.prompts import compile_prompt
+from glassbox.infrastructure.providers.chat import prepare
 
 
 def test_reasoning_text_reads_thinking_and_summaries_only():
@@ -43,11 +43,11 @@ def test_the_option_asks_each_api_for_readable_reasoning():
         base_url="https://api.anthropic.com/v1",
         show_reasoning=True,
     )
-    config = StudioConfig(providers=[profile])
+    config = GlassboxConfig(providers=[profile])
     resolved = resolve_model(config, ModelChoice(provider_id="claude", model="claude-opus-5-5"))
     assert resolved.show_reasoning is True
     compiled = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=resolved), [], "Hi", {}, []
+        Preset(name="Empty"), GlassboxConfig(provider=resolved), [], "Hi", {}, []
     )
     assert prepare(resolved, compiled, [])["thinking"] == {
         "type": "adaptive",
@@ -61,7 +61,7 @@ def test_the_option_asks_each_api_for_readable_reasoning():
         adapter="responses", model="gpt-x", base_url="http://127.0.0.1:1/v1", show_reasoning=True
     )
     compiled = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=responses), [], "Hi", {}, []
+        Preset(name="Empty"), GlassboxConfig(provider=responses), [], "Hi", {}, []
     )
     assert prepare(responses, compiled, [])["reasoning"] == {"summary": "auto"}
 
@@ -78,7 +78,7 @@ def test_responses_replay_skips_reasoning_it_cannot_resolve():
     )
     compiled = compile_prompt(
         Preset(name="Empty"),
-        StudioConfig(provider=provider),
+        GlassboxConfig(provider=provider),
         [],
         "Read",
         {},
@@ -89,8 +89,8 @@ def test_responses_replay_skips_reasoning_it_cannot_resolve():
     assert reasoning not in items and call in items
 
 
-async def test_run_views_show_reasoning_without_signatures(studio_client, monkeypatch):
-    client, _app = studio_client
+async def test_run_views_show_reasoning_without_signatures(glassbox_client, monkeypatch):
+    client, _app = glassbox_client
 
     async def thinking_model(_config, _compiled, _tools, _prepared, on_wire, _key=""):
         await on_wire(None)
@@ -101,7 +101,7 @@ async def test_run_views_show_reasoning_without_signatures(studio_client, monkey
         message = Message(role="assistant", content="Hello.", blocks=blocks)
         yield {"kind": "result", "message": message, "usage": {}}
 
-    monkeypatch.setattr("rtagent.application.runner.generate", thinking_model)
+    monkeypatch.setattr("glassbox.application.runner.generate", thinking_model)
     run, *_ = await start(client, "Greet me")
     completed = await wait_state(client, run["id"], {"succeeded"})
     assert completed["messages"][-1]["reasoning"] == "The task asks for a greeting."

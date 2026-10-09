@@ -28,7 +28,7 @@ export function addImages(current: Attachment[], added: Attachment[]): Attachmen
   return next;
 }
 
-/** Where the studio serves a stored image. */
+/** Where Glassbox serves a stored image. */
 export function imageUrl(item: Attachment): string {
   return `/api/v1/attachments/${item.hash}`;
 }

@@ -230,7 +230,7 @@ export function Composer({
               kind="preset"
               filename={`${preset.id}.preset.json`}
               disabled={busy}
-              exportPackage={async () => ({ format: 'rtagent.preset.v1', preset })}
+              exportPackage={async () => ({ format: 'glassbox.preset.v1', preset })}
               importPackage={async (value) => {
                 await onImported(await request<Preset>('/presets/import', 'POST', value));
               }}

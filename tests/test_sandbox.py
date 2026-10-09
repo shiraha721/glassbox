@@ -6,8 +6,8 @@ import sys
 
 import pytest
 
-from rtagent.infrastructure.sandbox.linux import BashSandbox
-from rtagent.infrastructure.workspace.files import Workspace
+from glassbox.infrastructure.sandbox.linux import BashSandbox
+from glassbox.infrastructure.workspace.files import Workspace
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux" or not shutil.which("bwrap"), reason="Requires Linux bubblewrap."
@@ -88,7 +88,7 @@ async def test_trusted_runtimes_are_mounted_at_their_host_paths(tmp_path):
     sandbox = BashSandbox(Workspace(root))
     result = await run(
         sandbox,
-        ".venv/bin/tool; runtime-tool; echo $RTAGENT_TOOLCHAIN_1",
+        ".venv/bin/tool; runtime-tool; echo $GLASSBOX_TOOLCHAIN_1",
         toolchain_roots=[str(tmp_path / "runtime")],
     )
     assert result["stdout"].split() == ["runtime-ok", "runtime-ok", "/toolchains/1"]

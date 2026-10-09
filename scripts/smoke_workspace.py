@@ -16,8 +16,8 @@ from uuid import uuid4
 import httpx
 import uvicorn
 
-from rtagent.infrastructure.config import Settings
-from rtagent.interfaces.http.app import create_app
+from glassbox.infrastructure.config import Settings
+from glassbox.interfaces.http.app import create_app
 
 COMMAND_TOOL = "powershell" if os.name == "nt" else "bash"
 
@@ -120,7 +120,7 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
                     f"foreach ($name in @('{original}\\.env', '{original}\\.ENV', '{outside}\\host-only.txt')) {{ "
                     "try { $f = [IO.File]::OpenRead($name); $f.Dispose(); exit 11 } catch {} }; "
                     f"try {{ [IO.File]::WriteAllText('{outside}\\outside-write.txt', 'leak'); exit 12 }} catch {{}}; "
-                    "if ($env:RTAGENT_SMOKE_SECRET) { exit 13 }; [Console]::Write('host-blocked')"
+                    "if ($env:GLASSBOX_SMOKE_SECRET) { exit 13 }; [Console]::Write('host-blocked')"
                 )
             },
         )
@@ -149,7 +149,7 @@ async def exercise(client: httpx.AsyncClient, workspace: Path) -> None:
                 "command": (
                     "$child = [Diagnostics.ProcessStartInfo]::new(); "
                     "$child.FileName = $env:SystemRoot + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'; "
-                    "$child.WorkingDirectory = $env:RTAGENT_WORKSPACE; "
+                    "$child.WorkingDirectory = $env:GLASSBOX_WORKSPACE; "
                     "$child.UseShellExecute = $false; $child.CreateNoWindow = $true; "
                     f"$child.Arguments = '-NoProfile -NonInteractive -EncodedCommand {child_code}'; "
                     "$process = [Diagnostics.Process]::Start($child); [Console]::Write($process.Id)"
@@ -261,8 +261,8 @@ async def main() -> None:
             uvicorn.Config(create_app(settings), host="127.0.0.1", port=8766, log_level="warning")
         )
         serving = asyncio.create_task(server.serve())
-        previous_canary = os.environ.get("RTAGENT_SMOKE_SECRET")
-        os.environ["RTAGENT_SMOKE_SECRET"] = "not-forwarded-to-commands"
+        previous_canary = os.environ.get("GLASSBOX_SMOKE_SECRET")
+        os.environ["GLASSBOX_SMOKE_SECRET"] = "not-forwarded-to-commands"
         try:
             async with asyncio.timeout(15):
                 while not server.started:
@@ -277,9 +277,9 @@ async def main() -> None:
             server.should_exit = True
             await serving
             if previous_canary is None:
-                os.environ.pop("RTAGENT_SMOKE_SECRET", None)
+                os.environ.pop("GLASSBOX_SMOKE_SECRET", None)
             else:
-                os.environ["RTAGENT_SMOKE_SECRET"] = previous_canary
+                os.environ["GLASSBOX_SMOKE_SECRET"] = previous_canary
 
 
 if __name__ == "__main__":

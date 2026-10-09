@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 /** Which key runs the task: Enter (Shift+Enter adds a line) or Ctrl/Cmd+Enter (Enter adds one). */
 export type SendKey = 'enter' | 'mod-enter';
 
-const storageKey = 'studio.sendKey';
+const storageKey = 'glassbox.sendKey';
 const listeners = new Set<() => void>();
 
 function stored(): SendKey {

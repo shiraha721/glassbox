@@ -10,14 +10,14 @@ from pathlib import Path
 
 import uvicorn
 
-from rtagent.domain import ProviderConfig, StudioConfig, ToolCall, ToolDefinition
-from rtagent.domain.hooks import Hooks
-from rtagent.harness import Harness
-from rtagent.infrastructure.config import Settings
-from rtagent.infrastructure.credentials import CredentialStore
-from rtagent.infrastructure.workspace.files import Workspace
-from rtagent.interfaces.client import AgentClient
-from rtagent.interfaces.http.app import create_app
+from glassbox.domain import GlassboxConfig, ProviderConfig, ToolCall, ToolDefinition
+from glassbox.domain.hooks import Hooks
+from glassbox.harness import Harness
+from glassbox.infrastructure.config import Settings
+from glassbox.infrastructure.credentials import CredentialStore
+from glassbox.infrastructure.workspace.files import Workspace
+from glassbox.interfaces.client import AgentClient
+from glassbox.interfaces.http.app import create_app
 
 FIXTURES = {
     "AGENTS.md": "This project is RIVER. Preserve check.py, data/*.csv and KEEP.txt. Use English docstrings/comments. Use the native Windows sandbox, not host execution. Python is explicitly available through the trusted runtime configuration. Workspace commands have no network.\n",
@@ -47,7 +47,7 @@ def share_key(provider: ProviderConfig, settings: Settings) -> None:
         )
 
 
-async def guard(call: ToolCall, _config: StudioConfig) -> str | None:
+async def guard(call: ToolCall, _config: GlassboxConfig) -> str | None:
     """Add a concrete fixture-file guard without granting any otherwise denied permission."""
     return "Preserve the independent checker." if call.args.get("path") == "check.py" else None
 
@@ -199,7 +199,7 @@ async def main() -> None:
             package = await client.request("GET", "/presets/coding/export")
             imported = await client.request("POST", "/presets/import", package)
             skill = {
-                "format": "rtagent.skill.v1",
+                "format": "glassbox.skill.v1",
                 "name": "csv-review",
                 "files": {
                     "SKILL.md": "---\nname: csv-review\ndescription: Inspect and repair RIVER CSV reporting.\n---\n\nRead resources/rules.md before changing source files. Verify with the immutable checker.\n",
@@ -225,11 +225,11 @@ async def main() -> None:
                 "repair",
                 "Use workspace_summary and $csv-review to inspect this multi-file CSV reporter. Reproduce check.py in the native sandbox, repair quoted-field CSV parsing, normalization/blank-row handling and cli.py's ignored path argument while keeping public function names. Add meaningful English docstrings/comments, use a short recorded plan and guarded patches. Preserve check.py, CSV fixtures and KEEP.txt. Run python check.py again and report only actual evidence.",
             )
-            studio = server.config.app.state.studio
-            current = await studio.repository.config()
+            glassbox = server.config.app.state.glassbox
+            current = await glassbox.repository.config()
             checked = json.loads(
-                await studio.registry.execute(
-                    studio.registry.catalog["powershell"], {"command": "python check.py"}, current
+                await glassbox.registry.execute(
+                    glassbox.registry.catalog["powershell"], {"command": "python check.py"}, current
                 )
             )
             assert checked["exit_code"] == 0 and "RIVER_CHECK_OK" in checked["stdout"], checked
@@ -286,7 +286,7 @@ async def main() -> None:
             child = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-m",
-                "rtagent",
+                "glassbox",
                 "--url",
                 "http://127.0.0.1:8775",
                 "run",
@@ -318,10 +318,10 @@ async def main() -> None:
                 for value in trace["calls"][0]["data"]["canonical_messages"]
             )
             result = json.loads(
-                await studio.registry.execute(
-                    studio.registry.catalog["powershell"],
+                await glassbox.registry.execute(
+                    glassbox.registry.catalog["powershell"],
                     {"command": "python check.py; python cli.py data/events.csv --action LOGIN"},
-                    await studio.repository.config(),
+                    await glassbox.repository.config(),
                 )
             )
             assert result["exit_code"] == 0 and '"total": 4' in result["stdout"], result
@@ -330,7 +330,7 @@ async def main() -> None:
             )
             approval = await settle(client, approval.id, approve=False)
             assert approval.status == "waiting_approval" and approval.approval
-            pending = studio.runner.tasks.get(approval.id)
+            pending = glassbox.runner.tasks.get(approval.id)
             if pending:
                 await asyncio.shield(pending)
     finally:
@@ -369,7 +369,7 @@ async def main() -> None:
         config = await embedded.repository.config()
         config.provider = provider.model_copy(update={"profile_id": None})
         config.tools["workspace_summary"] = "allow"
-        await embedded.studio.save_config(config)
+        await embedded.glassbox.save_config(config)
         view = await embedded.run(
             "Use workspace_summary, read workspace memory and load csv-review. Give a concise evidence-based overview of RIVER's implemented CLI and its check command. Do not edit files."
         )

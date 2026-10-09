@@ -1,13 +1,21 @@
 import pytest
 
-from rtagent.domain import AppError, Block, Message, Preset, ProviderConfig, StudioConfig, Variable
-from rtagent.domain.prompts import compile_prompt, condition_value
+from glassbox.domain import (
+    AppError,
+    Block,
+    GlassboxConfig,
+    Message,
+    Preset,
+    ProviderConfig,
+    Variable,
+)
+from glassbox.domain.prompts import compile_prompt, condition_value
 
 
 def compile_blocks(blocks, **kwargs):
     return compile_prompt(
         Preset(blocks=blocks, name="Test", id="test"),
-        StudioConfig(provider=ProviderConfig(adapter="fake")),
+        GlassboxConfig(provider=ProviderConfig(adapter="fake")),
         [],
         "Task",
         kwargs.get("variables", {}),
@@ -30,7 +38,14 @@ def test_compilation_is_deterministic_and_preserves_slots():
             Block(id="a", name="Rules", order=2, template="Rules"),
         ],
     )
-    args = (preset, StudioConfig(), [Message(role="assistant", content="History")], "Task", {}, [])
+    args = (
+        preset,
+        GlassboxConfig(),
+        [Message(role="assistant", content="History")],
+        "Task",
+        {},
+        [],
+    )
     first, second = compile_prompt(*args), compile_prompt(*args)
     assert first == second
     assert [message.content for message in first.messages] == [
@@ -95,7 +110,7 @@ def test_substitution_does_not_reinterpret_text():
 
 
 def test_context_budget():
-    config = StudioConfig()
+    config = GlassboxConfig()
     config.provider.context_window = 256
     with pytest.raises(AppError, match="context"):
         compile_prompt(Preset(name="Empty"), config, [], "Task", {}, [])

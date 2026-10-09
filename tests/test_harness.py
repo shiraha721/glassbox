@@ -6,24 +6,24 @@ import httpx
 import openai
 import pytest
 
-from rtagent.domain import (
+from glassbox.domain import (
     AppError,
     AutoCompact,
     Block,
+    GlassboxConfig,
     Message,
     Preset,
     ProviderConfig,
-    StudioConfig,
     ToolCall,
     ToolDefinition,
     digest,
 )
-from rtagent.domain.hooks import Hooks
-from rtagent.domain.prompts import compile_prompt
-from rtagent.harness import Harness
-from rtagent.infrastructure.config import Settings
-from rtagent.infrastructure.providers.messages import prepare_anthropic
-from rtagent.infrastructure.storage import Repository
+from glassbox.domain.hooks import Hooks
+from glassbox.domain.prompts import compile_prompt
+from glassbox.harness import Harness
+from glassbox.infrastructure.config import Settings
+from glassbox.infrastructure.providers.messages import prepare_anthropic
+from glassbox.infrastructure.storage import Repository
 
 
 async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, monkeypatch):
@@ -50,10 +50,10 @@ async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, 
                 "usage": {"input_tokens": 1, "output_tokens": None},
             }
 
-        monkeypatch.setattr("rtagent.application.context.generate", summarizer)
-        from rtagent.domain import CompactRequest, SessionUpdate
+        monkeypatch.setattr("glassbox.application.context.generate", summarizer)
+        from glassbox.domain import CompactRequest, SessionUpdate
 
-        job = await harness.studio.compact(
+        job = await harness.glassbox.compact(
             first.session_id,
             CompactRequest(
                 expected_revision=session["revision"],
@@ -70,7 +70,7 @@ async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, 
             ),
         )
         release.set()
-        await harness.studio.compaction_tasks[job.id]
+        await harness.glassbox.compaction_tasks[job.id]
         final = await harness.repository.session(first.session_id)
         assert final["compaction_id"] is None and final["messages"] == session["messages"]
         failed = await harness.repository.compaction(job.id)
@@ -93,21 +93,21 @@ async def test_auto_compaction_is_opt_in_recorded_and_reversible(tmp_path, monke
             "usage": {"input_tokens": 1, "output_tokens": 1},
         }
 
-    monkeypatch.setattr("rtagent.application.context.generate", summarizer)
+    monkeypatch.setattr("glassbox.application.context.generate", summarizer)
     async with Harness(settings) as harness:
         first = await harness.run("Large earlier evidence. " * 400)
         assert (await harness.wait(first.id, 10)).status == "succeeded"
         second = await harness.run("Keep the recent turn.", session_id=first.session_id)
         assert (await harness.wait(second.id, 10)).status == "succeeded"
         # Off by default, however large the history is.
-        assert await harness.studio.auto_compact(second.id) is None
+        assert await harness.glassbox.auto_compact(second.id) is None
         config = await harness.repository.config()
         config.auto_compact = AutoCompact(enabled=True, threshold_tokens=100_000)
-        config = await harness.studio.save_config(config)
+        config = await harness.glassbox.save_config(config)
         # Below the threshold nothing happens.
-        assert await harness.studio.auto_compact(second.id) is None
+        assert await harness.glassbox.auto_compact(second.id) is None
         config.auto_compact = AutoCompact(enabled=True, threshold_tokens=1_000, keep_recent_turns=1)
-        await harness.studio.save_config(config)
+        await harness.glassbox.save_config(config)
         before = await harness.repository.session(first.session_id)
 
         third = await harness.run("Trigger the check.", session_id=first.session_id)
@@ -115,7 +115,7 @@ async def test_auto_compaction_is_opt_in_recorded_and_reversible(tmp_path, monke
         async with asyncio.timeout(5):
             while not (records := await harness.repository.list_compactions(first.session_id)):
                 await asyncio.sleep(0.05)
-            await asyncio.gather(*harness.studio.compaction_tasks.values())
+            await asyncio.gather(*harness.glassbox.compaction_tasks.values())
         job = await harness.repository.compaction(records[0]["id"])
         assert job["status"] == "succeeded" and job["data"]["trigger"] == "auto"
         # The two older turns are covered and the newest turn stays verbatim.
@@ -123,13 +123,13 @@ async def test_auto_compaction_is_opt_in_recorded_and_reversible(tmp_path, monke
         session = await harness.repository.session(first.session_id)
         assert session["compaction_id"] == job["id"]
         assert session["messages"][: len(before["messages"])] == before["messages"]
-        context = await harness.studio.context(first.session_id)
+        context = await harness.glassbox.context(first.session_id)
         assert context.compactions[0].trigger == "auto"
         # The view carries the revision the activation produced, for the panel's next action.
         assert context.revision == session["revision"]
         assert context.effective_estimated_tokens < context.raw_estimated_tokens
         # Nothing new to cover: the next check is a no-op rather than another summary.
-        assert await harness.studio.auto_compact(third.id) is None
+        assert await harness.glassbox.auto_compact(third.id) is None
         await harness.repository.reset_compaction(first.session_id, session["revision"])
         assert (await harness.repository.session(first.session_id))["compaction_id"] is None
 
@@ -181,7 +181,7 @@ async def test_restart_marks_reduction_and_process_intents_uncertain(tmp_path):
 
 def test_messages_rejects_lossy_roles_and_unpaired_tool_ids():
     """Unsupported canonical ordering must fail before transmitting a rewritten request."""
-    config = StudioConfig(provider=ProviderConfig(adapter="anthropic", model="fixture"))
+    config = GlassboxConfig(provider=ProviderConfig(adapter="anthropic", model="fixture"))
     preset = Preset(
         id="fixture",
         name="Fixture",
@@ -232,7 +232,7 @@ async def test_trusted_guard_is_never_called_before_core_denial(tmp_path, monkey
             "usage": {"input_tokens": 1, "output_tokens": 1},
         }
 
-    monkeypatch.setattr("rtagent.application.runner.generate", model)
+    monkeypatch.setattr("glassbox.application.runner.generate", model)
     async with Harness(
         Settings(
             data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
@@ -258,7 +258,7 @@ async def test_mcp_tools_are_rediscovered_after_restart(tmp_path):
     import sys
     from pathlib import Path
 
-    from rtagent.domain import MCPServer
+    from glassbox.domain import MCPServer
 
     fixture = Path(__file__).parent / "fixtures" / "mcp_server.py"
     settings = Settings(
@@ -269,11 +269,11 @@ async def test_mcp_tools_are_rediscovered_after_restart(tmp_path):
         config.mcp_servers = [
             MCPServer(name="Fixture", command=sys.executable, args=[str(fixture.resolve())])
         ]
-        config = await harness.studio.save_config(config)
+        config = await harness.glassbox.save_config(config)
         tools = await harness.registry.discover(config)
         name = next(tool.name for tool in tools if tool.original_name == "fixture_echo")
         config.tools[name] = "allow"
-        await harness.studio.save_config(config)
+        await harness.glassbox.save_config(config)
     async with Harness(settings) as harness:
         assert name not in harness.registry.catalog
         run = await harness.wait((await harness.run(f'/tool {name} {{"text": "again"}}')).id, 30)
@@ -286,8 +286,8 @@ async def test_summary_requests_are_retried_after_a_broken_connection(
     tmp_path, monkeypatch, failures, status
 ):
     """A summary request has no effect but its cost, so a dropped connection is retried."""
-    from rtagent.domain import CompactRequest
-    from rtagent.infrastructure.providers.errors import transport_failure
+    from glassbox.domain import CompactRequest
+    from glassbox.infrastructure.providers.errors import transport_failure
 
     settings = Settings(
         data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
@@ -310,10 +310,10 @@ async def test_summary_requests_are_retried_after_a_broken_connection(
                 "usage": {"input_tokens": 1, "output_tokens": 1},
             }
 
-        monkeypatch.setattr("rtagent.application.context.generate", flaky)
-        monkeypatch.setattr("rtagent.application.context.RETRY_DELAYS", (0, 0))
+        monkeypatch.setattr("glassbox.application.context.generate", flaky)
+        monkeypatch.setattr("glassbox.application.context.RETRY_DELAYS", (0, 0))
         session = await harness.repository.session(first.session_id)
-        job = await harness.studio.compact(
+        job = await harness.glassbox.compact(
             first.session_id,
             CompactRequest(
                 expected_revision=session["revision"],
@@ -321,7 +321,7 @@ async def test_summary_requests_are_retried_after_a_broken_connection(
                 keep_recent_turns=1,
             ),
         )
-        await harness.studio.compaction_tasks[job.id]
+        await harness.glassbox.compaction_tasks[job.id]
         record = await harness.repository.compaction(job.id)
         assert record["status"] == status
         call = record["data"]["calls"][0]
@@ -332,7 +332,7 @@ async def test_summary_requests_are_retried_after_a_broken_connection(
 
 
 def test_connection_failures_say_what_happened():
-    from rtagent.infrastructure.providers.errors import sdk_failure, transport_failure
+    from glassbox.infrastructure.providers.errors import sdk_failure, transport_failure
 
     refused = transport_failure(httpx.ConnectError("refused"))
     assert "could not connect" in refused.message and refused.details == {"transient": True}
@@ -375,8 +375,8 @@ async def test_auto_compaction_starts_when_a_request_fills_the_context_window(
             "usage": {"input_tokens": 1, "output_tokens": 1},
         }
 
-    monkeypatch.setattr("rtagent.application.runner.generate", model)
-    monkeypatch.setattr("rtagent.application.context.generate", summarizer)
+    monkeypatch.setattr("glassbox.application.runner.generate", model)
+    monkeypatch.setattr("glassbox.application.context.generate", summarizer)
     async with Harness(settings) as harness:
         assert AutoCompact().window_percent == 90 and AutoCompact().threshold_tokens is None
         config = await harness.repository.config()
@@ -384,7 +384,7 @@ async def test_auto_compaction_starts_when_a_request_fills_the_context_window(
         profile.models, profile.context_window, profile.credential_ref = ["m"], 200_000, ""
         config.provider = ProviderConfig(profile_id=profile.id, model="m", credential_ref="")
         config.auto_compact = AutoCompact(enabled=True, keep_recent_turns=1)
-        await harness.studio.save_config(config)
+        await harness.glassbox.save_config(config)
         session_id = None
         for task in ("First.", "Second, half the window.", "Third, nearly full."):
             run = await harness.run(task, session_id=session_id)
@@ -394,11 +394,11 @@ async def test_auto_compaction_starts_when_a_request_fills_the_context_window(
             if task.startswith("Second"):
                 await asyncio.sleep(0.2)
                 assert not await harness.repository.list_compactions(session_id)
-        assert await harness.studio.context_used(run.id) == 185_000
+        assert await harness.glassbox.context_used(run.id) == 185_000
         async with asyncio.timeout(5):
             while not (records := await harness.repository.list_compactions(session_id)):
                 await asyncio.sleep(0.05)
-            await asyncio.gather(*harness.studio.compaction_tasks.values())
+            await asyncio.gather(*harness.glassbox.compaction_tasks.values())
         job = await harness.repository.compaction(records[0]["id"])
         assert job["status"] == "succeeded" and job["data"]["trigger"] == "auto"
         with pytest.raises(ValueError, match="Choose when"):

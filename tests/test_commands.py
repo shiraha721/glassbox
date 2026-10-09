@@ -2,9 +2,9 @@
 
 from test_api import start, wait_state
 
-from rtagent.domain import Message
-from rtagent.domain.commands import expand_template, parse_invocation
-from rtagent.infrastructure.workspace.files import Workspace
+from glassbox.domain import Message
+from glassbox.domain.commands import expand_template, parse_invocation
+from glassbox.infrastructure.workspace.files import Workspace
 
 
 def test_invocations_are_recognized_only_at_the_start():
@@ -59,10 +59,10 @@ def test_project_commands_replace_global_ones_and_report_bad_files(tmp_path):
 
 
 async def test_a_command_run_records_what_was_typed_and_sends_the_expansion(
-    studio_client, monkeypatch, tmp_path
+    glassbox_client, monkeypatch, tmp_path
 ):
     """The model receives the expanded template; the Run keeps the command and arguments."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     commands = tmp_path / "workspace" / ".agents" / "commands"
     commands.mkdir(parents=True)
     (commands / "review.md").write_text(
@@ -85,7 +85,7 @@ async def test_a_command_run_records_what_was_typed_and_sends_the_expansion(
         seen.append(compiled.messages[-1].content)
         yield {"kind": "result", "message": Message(role="assistant", content="Done."), "usage": {}}
 
-    monkeypatch.setattr("rtagent.application.runner.generate", recording_model)
+    monkeypatch.setattr("glassbox.application.runner.generate", recording_model)
     run, _body, session_id, preview = await start(client, "/review app.py errors")
     expanded = "Review app.py carefully. Focus: app.py errors"
     assert preview["command"]["name"] == "review"

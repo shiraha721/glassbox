@@ -2,7 +2,7 @@ import type { components } from './generated';
 
 export type Preset = components['schemas']['Preset-Output'];
 export type Block = components['schemas']['Block-Output'];
-export type Config = components['schemas']['StudioConfig-Output'];
+export type Config = components['schemas']['GlassboxConfig-Output'];
 export type PromptInspection = components['schemas']['PromptInspection'];
 export type SkillInfo = components['schemas']['SkillInfo'];
 export type Run = components['schemas']['RunView'];

@@ -5,20 +5,20 @@ import os
 import pytest
 from pydantic import ValidationError
 
-from rtagent.domain import (
+from glassbox.domain import (
     SIMULATED,
     AppError,
+    GlassboxConfig,
     MCPServer,
     ModelChoice,
     ProviderConfig,
     ProviderProfile,
-    StudioConfig,
     resolve_model,
 )
-from rtagent.domain.models import default_providers
-from rtagent.infrastructure import config as config_module
-from rtagent.infrastructure.config import Settings
-from rtagent.infrastructure.credentials import CredentialStore
+from glassbox.domain.models import default_providers
+from glassbox.infrastructure import config as config_module
+from glassbox.infrastructure.config import Settings
+from glassbox.infrastructure.credentials import CredentialStore
 
 
 @pytest.mark.parametrize(
@@ -46,18 +46,18 @@ def test_shell_permission_follows_the_data_directory_across_systems(monkeypatch,
     monkeypatch.setattr(config_module, "SHELL_TOOL", native)
     settings = Settings(_env_file=None)
     for permission in ("allow", "ask", "deny"):
-        original = StudioConfig(tools={foreign: permission})
+        original = GlassboxConfig(tools={foreign: permission})
         configured = settings.apply_provider(original)
         assert configured.tools == {native: permission}
         # Existing Runs keep the snapshot they were given.
         assert original.tools == {foreign: permission}
-    explicit = StudioConfig(tools={foreign: "allow", native: "deny"})
+    explicit = GlassboxConfig(tools={foreign: "allow", native: "deny"})
     assert settings.apply_provider(explicit).tools == {native: "deny"}
 
 
 def test_model_choices_resolve_against_configured_providers():
     """A Run's choice takes connection and options from its provider; unknown values fail."""
-    config = StudioConfig(
+    config = GlassboxConfig(
         providers=[
             ProviderProfile(
                 id="claude",
@@ -88,7 +88,7 @@ def test_model_choices_resolve_against_configured_providers():
 
 
 def test_env_values_update_provider_profiles_and_the_default_model():
-    """OPENAI_* and ANTHROPIC_* values configure providers; STUDIO_PROVIDER picks the default."""
+    """OPENAI_* and ANTHROPIC_* values configure providers; GLASSBOX_PROVIDER picks the default."""
     settings = Settings(
         _env_file=None,
         provider="anthropic",
@@ -96,7 +96,7 @@ def test_env_values_update_provider_profiles_and_the_default_model():
         openai_model="deepseek-chat",
         anthropic_model="claude-opus-5-5",
     )
-    configured = settings.apply_provider(StudioConfig())
+    configured = settings.apply_provider(GlassboxConfig())
     profiles = {profile.id: profile for profile in configured.providers}
     assert profiles["openai"].base_url == "https://api.deepseek.com/v1"
     assert profiles["openai"].models == ["deepseek-chat"]
@@ -111,15 +111,15 @@ def test_env_values_update_provider_profiles_and_the_default_model():
 
 def test_saved_keys_take_precedence_and_are_never_reported(tmp_path, monkeypatch):
     """A key saved in Settings wins over the environment; status reveals only its source."""
-    monkeypatch.setenv("STUDIO_TEST_KEY", "from-environment")
+    monkeypatch.setenv("GLASSBOX_TEST_KEY", "from-environment")
     store = CredentialStore(tmp_path / "credentials.json")
-    assert store.status("STUDIO_TEST_KEY").source == "environment"
-    store.save("STUDIO_TEST_KEY", "sk-saved-0123456789")
-    assert store.resolve("STUDIO_TEST_KEY") == "sk-saved-0123456789"
-    status = store.status("STUDIO_TEST_KEY")
+    assert store.status("GLASSBOX_TEST_KEY").source == "environment"
+    store.save("GLASSBOX_TEST_KEY", "sk-saved-0123456789")
+    assert store.resolve("GLASSBOX_TEST_KEY") == "sk-saved-0123456789"
+    status = store.status("GLASSBOX_TEST_KEY")
     assert (status.source, status.hint) == ("stored", "6789")
     if os.name != "nt":
         assert (tmp_path / "credentials.json").stat().st_mode & 0o777 == 0o600
-    store.delete("STUDIO_TEST_KEY")
-    assert store.resolve("STUDIO_TEST_KEY") == "from-environment"
-    assert CredentialStore(None).status("STUDIO_MISSING_KEY").source == "missing"
+    store.delete("GLASSBOX_TEST_KEY")
+    assert store.resolve("GLASSBOX_TEST_KEY") == "from-environment"
+    assert CredentialStore(None).status("GLASSBOX_MISSING_KEY").source == "missing"

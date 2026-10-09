@@ -493,7 +493,7 @@ summary::-webkit-details-marker {
 }
 
 /* Application frame: each region owns its scrolling and the composer stays docked. */
-.studio {
+.glassbox {
   display: flex;
   height: 100dvh;
   overflow: hidden;

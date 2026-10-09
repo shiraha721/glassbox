@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rtagent.domain import AppError, StudioConfig
-from rtagent.harness import Harness
-from rtagent.infrastructure.config import Settings
-from rtagent.infrastructure.sandbox.command_io import CommandControl
-from rtagent.interfaces.rpc import serve_rpc
+from glassbox.domain import AppError, GlassboxConfig
+from glassbox.harness import Harness
+from glassbox.infrastructure.config import Settings
+from glassbox.infrastructure.sandbox.command_io import CommandControl
+from glassbox.interfaces.rpc import serve_rpc
 
 
 async def test_process_exit_during_settings_read_returns_conflict(tmp_path, monkeypatch):
@@ -41,11 +41,11 @@ async def test_process_exit_during_settings_read_returns_conflict(tmp_path, monk
         manager.live["exiting"] = (control, task, data)
         task.add_done_callback(lambda _completed: manager.live.pop("exiting", None))
 
-        async def settings_after_exit() -> StudioConfig:
+        async def settings_after_exit() -> GlassboxConfig:
             """Force the otherwise timing-dependent completion between ownership and input checks."""
             gate.set()
             await task
-            return StudioConfig()
+            return GlassboxConfig()
 
         monkeypatch.setattr(harness.repository, "config", settings_after_exit)
         with pytest.raises(AppError) as caught:
@@ -65,7 +65,7 @@ async def test_failed_summary_cleanup_still_closes_checkpoints(tmp_path, monkeyp
     await harness.__aenter__()
     connection = harness.runner.checkpointer.conn
     monkeypatch.setattr(
-        harness.studio, "close", AsyncMock(side_effect=RuntimeError("cleanup fixture"))
+        harness.glassbox, "close", AsyncMock(side_effect=RuntimeError("cleanup fixture"))
     )
     with pytest.raises(RuntimeError, match="cleanup fixture"):
         await harness.__aexit__()
@@ -79,10 +79,10 @@ async def test_rpc_internal_failure_keeps_next_frame_readable(monkeypatch):
     lines = b'{"jsonrpc":"2.0","id":1,"method":"fixture"}\n{"jsonrpc":"2.0","id":2,"method":"fixture"}\n'
     input_stream = io.TextIOWrapper(io.BytesIO(lines), encoding="utf-8")
     output = io.StringIO()
-    monkeypatch.setattr("rtagent.interfaces.rpc.sys.stdin", input_stream)
-    monkeypatch.setattr("rtagent.interfaces.rpc.sys.stdout", output)
+    monkeypatch.setattr("glassbox.interfaces.rpc.sys.stdin", input_stream)
+    monkeypatch.setattr("glassbox.interfaces.rpc.sys.stdout", output)
     monkeypatch.setattr(
-        "rtagent.interfaces.rpc.dispatch",
+        "glassbox.interfaces.rpc.dispatch",
         AsyncMock(side_effect=[RuntimeError("fixture"), {"status": "ok"}]),
     )
     await serve_rpc(None)

@@ -7,17 +7,17 @@ import pytest
 from test_api import start, wait_state
 from test_providers import mock_client
 
-from rtagent.domain import (
+from glassbox.domain import (
     AppError,
     Attachment,
+    GlassboxConfig,
     Message,
     Preset,
     ProviderConfig,
-    StudioConfig,
     ToolCall,
 )
-from rtagent.domain.prompts import compile_prompt
-from rtagent.infrastructure.providers.chat import generate, prepare
+from glassbox.domain.prompts import compile_prompt
+from glassbox.infrastructure.providers.chat import generate, prepare
 
 PROVIDER = ProviderConfig(
     adapter="responses",
@@ -75,7 +75,7 @@ def test_messages_become_input_items_with_unchanged_roles_and_ids():
     ]
     compiled = compile_prompt(
         Preset(name="Empty"),
-        StudioConfig(provider=PROVIDER),
+        GlassboxConfig(provider=PROVIDER),
         history,
         "Look at a.py",
         {},
@@ -124,7 +124,7 @@ def test_messages_become_input_items_with_unchanged_roles_and_ids():
     ]
     unpaired = compile_prompt(
         Preset(name="Empty"),
-        StudioConfig(provider=PROVIDER),
+        GlassboxConfig(provider=PROVIDER),
         [],
         "x",
         {},
@@ -138,7 +138,7 @@ def test_messages_become_input_items_with_unchanged_roles_and_ids():
 
 async def test_streams_text_and_replays_reasoning_within_the_run(monkeypatch):
     compiled = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=PROVIDER), [], "Read a.py", {}, [TOOL]
+        Preset(name="Empty"), GlassboxConfig(provider=PROVIDER), [], "Read a.py", {}, [TOOL]
     )
     prepared = prepare(PROVIDER, compiled, [TOOL])
     reasoning = {"id": "rs_1", "type": "reasoning", "summary": [], "encrypted_content": "enc"}
@@ -186,7 +186,7 @@ async def test_streams_text_and_replays_reasoning_within_the_run(monkeypatch):
 
     follow_up = compile_prompt(
         Preset(name="Empty"),
-        StudioConfig(provider=PROVIDER),
+        GlassboxConfig(provider=PROVIDER),
         [],
         "Read a.py",
         {},
@@ -246,7 +246,7 @@ async def test_streams_text_and_replays_reasoning_within_the_run(monkeypatch):
 )
 async def test_failures_are_explained_without_the_key(monkeypatch, handler, code):
     compiled = compile_prompt(
-        Preset(name="Empty"), StudioConfig(provider=PROVIDER), [], "Hi", {}, [TOOL]
+        Preset(name="Empty"), GlassboxConfig(provider=PROVIDER), [], "Hi", {}, [TOOL]
     )
     mock_client(monkeypatch, "responses", handler)
     with pytest.raises(AppError) as failure:
@@ -255,9 +255,9 @@ async def test_failures_are_explained_without_the_key(monkeypatch, handler, code
     assert "sk-test" not in failure.value.message
 
 
-async def test_a_run_uses_a_responses_provider_end_to_end(studio_client, monkeypatch):
+async def test_a_run_uses_a_responses_provider_end_to_end(glassbox_client, monkeypatch):
     """Preview, execution and the recorded wire body agree; usage and cost come through."""
-    client, app = studio_client
+    client, app = glassbox_client
     config = (await client.get("/api/v1/bootstrap")).json()["config"]
     profile = {
         "id": "responses",
@@ -293,6 +293,6 @@ async def test_a_run_uses_a_responses_provider_end_to_end(studio_client, monkeyp
     assert finished["provider"] == "responses" and finished["model"] == "gpt-x"
     # 20 uncached x $2 + 80 cached x $0.5 + 20 output x $8, per million tokens.
     assert finished["usage"]["cost"] == 0.00024
-    call = await app.state.studio.repository.call(f"{run_view['id']}:model:0000")
+    call = await app.state.glassbox.repository.call(f"{run_view['id']}:model:0000")
     assert call["data"]["wire_request_body"] == seen[0] == call["data"]["prepared_request"]
     assert seen[0]["input"][-1] == {"role": "user", "content": "Say done"}

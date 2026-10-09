@@ -2,7 +2,7 @@
 
 import asyncio
 
-from rtagent.domain import EvalCheck, EvalItemResult, Message, final_text, grade, summarize_variant
+from glassbox.domain import EvalCheck, EvalItemResult, Message, final_text, grade, summarize_variant
 
 
 def test_grade_covers_each_check_kind():
@@ -56,9 +56,9 @@ async def wait_batch(client, batch_id, timeout=20.0):
     raise AssertionError(f"Batch did not finish: {batch}")
 
 
-async def test_evaluation_compares_prompts_over_real_runs(studio_client):
+async def test_evaluation_compares_prompts_over_real_runs(glassbox_client):
     """Define an eval, run every case under every variant, and read graded comparison results."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     bootstrap = (await client.get("/api/v1/bootstrap")).json()
     assert bootstrap["evals"] == []
     preset_id = bootstrap["presets"][0]["id"]
@@ -106,9 +106,9 @@ async def test_evaluation_compares_prompts_over_real_runs(studio_client):
     assert (await client.get(f"/api/v1/sessions/{item['run_session_id']}")).status_code == 404
 
 
-async def test_evaluation_rejects_a_duplicate_name_and_bad_regex(studio_client):
+async def test_evaluation_rejects_a_duplicate_name_and_bad_regex(glassbox_client):
     """Names are unique and a check's regex must compile, so mistakes fail at save time."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     preset_id = (await client.get("/api/v1/bootstrap")).json()["presets"][0]["id"]
     base = {
         "name": "Only one",
@@ -125,9 +125,9 @@ async def test_evaluation_rejects_a_duplicate_name_and_bad_regex(studio_client):
     assert (await client.post("/api/v1/evals", json=bad)).status_code == 422
 
 
-async def test_an_item_that_cannot_start_fails_alone(studio_client):
+async def test_an_item_that_cannot_start_fails_alone(glassbox_client):
     """A variant naming an unknown provider fails its own items; the other variant still runs."""
-    client, _app = studio_client
+    client, _app = glassbox_client
     preset_id = (await client.get("/api/v1/bootstrap")).json()["presets"][0]["id"]
     draft = {
         "name": "Mixed",

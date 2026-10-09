@@ -6,7 +6,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
-.rtagent/
+.glassbox/
 var/
 *.db
 *.db-shm

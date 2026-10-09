@@ -96,9 +96,9 @@ function Workspace({ data }: { data: Bootstrap }) {
   const { preset, dirty } = drafts;
   const [{ sessionId, projectId }, setSelection] = useState(() => {
     const remembered = data.sessions.find(
-      (item) => item.id === localStorage.getItem('studio.session'),
+      (item) => item.id === localStorage.getItem('glassbox.session'),
     );
-    const storedProject = localStorage.getItem('studio.project') || '';
+    const storedProject = localStorage.getItem('glassbox.project') || '';
     return {
       sessionId: remembered?.id || '',
       projectId: remembered
@@ -114,7 +114,7 @@ function Workspace({ data }: { data: Bootstrap }) {
   const [uploading, setUploading] = useState(false);
   const [variables, setVariables] = useState('{}');
   const [tab, setTab] = useState<'preview' | 'trace'>(() =>
-    localStorage.getItem('studio.session') ? 'trace' : 'preview',
+    localStorage.getItem('glassbox.session') ? 'trace' : 'preview',
   );
   const [settings, setSettings] = useState<SettingsPage | null>(null);
   const [evaluations, setEvaluations] = useState(false);
@@ -234,8 +234,8 @@ function Workspace({ data }: { data: Bootstrap }) {
     const chosen = data.sessions.find((item) => item.id === id);
     const nextProject = chosenProject ?? (chosen ? chosen.project_id || '' : projectId);
     setSelection({ sessionId: id, projectId: nextProject });
-    localStorage.setItem('studio.session', id);
-    localStorage.setItem('studio.project', nextProject);
+    localStorage.setItem('glassbox.session', id);
+    localStorage.setItem('glassbox.project', nextProject);
     setSkills([]);
     setVariables('{}');
     submission.current = null;
@@ -355,7 +355,7 @@ function Workspace({ data }: { data: Bootstrap }) {
     </button>
   );
   return (
-    <div className="studio">
+    <div className="glassbox">
       <aside
         className="sidebar"
         id="conversation-sidebar"
@@ -364,7 +364,7 @@ function Workspace({ data }: { data: Bootstrap }) {
       >
         <div className="sidebar-heading">
           <img className="brand-mark" src="/favicon.svg" alt="" />
-          <strong>Agent Studio</strong>
+          <strong>Glassbox</strong>
           <button
             className="icon-button"
             aria-label="Close sidebar"

@@ -6,9 +6,9 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from rtagent.domain import AppError, SearchSettings
-from rtagent.infrastructure import web
-from rtagent.infrastructure.credentials import CredentialStore
+from glassbox.domain import AppError, SearchSettings
+from glassbox.infrastructure import web
+from glassbox.infrastructure.credentials import CredentialStore
 
 
 def test_html_becomes_readable_text_without_scripts():
@@ -60,12 +60,12 @@ async def test_each_search_service_gets_its_request_and_the_key_stays_server_sid
 
     seen = answer(handler)
     brave = SearchSettings(provider="brave", credential_ref="SEARCH_KEY")
-    result = await web.web_search(brave, credentials, "agent studio", 3)
+    result = await web.web_search(brave, credentials, "agent glassbox", 3)
     assert result["results"] == [
         {"title": "Brave", "url": "https://a.example", "snippet": "about a"}
     ]
     assert seen[-1].headers["X-Subscription-Token"] == "secret-search-key"
-    assert seen[-1].url.params["q"] == "agent studio" and seen[-1].url.params["count"] == "3"
+    assert seen[-1].url.params["q"] == "agent glassbox" and seen[-1].url.params["count"] == "3"
     assert "secret-search-key" not in json.dumps(result)
 
     tavily = SearchSettings(provider="tavily", credential_ref="SEARCH_KEY")
@@ -166,12 +166,12 @@ async def test_binary_pages_and_endless_redirects_are_refused(answer, monkeypatc
     assert looping.value.message == "More than 3 redirects."
 
 
-async def test_search_is_offered_only_once_a_service_is_configured(studio_client):
+async def test_search_is_offered_only_once_a_service_is_configured(glassbox_client):
     """The tool stays out of prompts until Settings name a search service."""
-    _client, app = studio_client
-    studio = app.state.studio
-    config = await studio.repository.config()
-    names = {tool.name for tool in studio.registry.selected(config)}
+    _client, app = glassbox_client
+    glassbox = app.state.glassbox
+    config = await glassbox.repository.config()
+    names = {tool.name for tool in glassbox.registry.selected(config)}
     assert "read_url" in names and "web_search" not in names
     config.search = SearchSettings(provider="searxng", base_url="https://search.example")
-    assert "web_search" in {tool.name for tool in studio.registry.selected(config)}
+    assert "web_search" in {tool.name for tool in glassbox.registry.selected(config)}

@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--http", type=int)
 arguments = parser.parse_args()
 server = FastMCP(
-    "studio-contract",
+    "glassbox-contract",
     host="127.0.0.1",
     port=arguments.http or 8766,
     stateless_http=True,

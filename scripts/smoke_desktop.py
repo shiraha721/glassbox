@@ -10,10 +10,10 @@ import httpx
 import uvicorn
 from fastapi.responses import Response
 
-from rtagent.domain import AppError
-from rtagent.infrastructure.config import Settings
-from rtagent.interfaces.client import AgentClient
-from rtagent.interfaces.http.app import create_app
+from glassbox.domain import AppError
+from glassbox.infrastructure.config import Settings
+from glassbox.interfaces.client import AgentClient
+from glassbox.interfaces.http.app import create_app
 
 
 def dialog_window(pid: int) -> int | None:
@@ -83,7 +83,7 @@ async def exercise(client: httpx.AsyncClient, app, root: Path, native: bool) -> 
     imported = await client.post(
         "/workspace/skills/import",
         json={
-            "format": "rtagent.skill.v1",
+            "format": "glassbox.skill.v1",
             "name": "manual-workspace-notes",
             "files": {
                 "SKILL.md": "---\nname: manual-workspace-notes\ndescription: Review project notes.\n---\nRead the existing project memory.\n"
@@ -151,7 +151,7 @@ async def exercise(client: httpx.AsyncClient, app, root: Path, native: bool) -> 
 
 async def main(native: bool) -> None:
     """Start an isolated listener and keep acceptance data outside the user's application database."""
-    with TemporaryDirectory(prefix="rtagent-desktop-") as temporary:
+    with TemporaryDirectory(prefix="glassbox-desktop-") as temporary:
         root = Path(temporary).resolve()
         workspace = root / "Workspace with spaces and Unicode λ"
         workspace.mkdir()

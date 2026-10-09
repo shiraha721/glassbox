@@ -4,20 +4,20 @@ The agent is available through HTTP, a CLI, newline JSON-RPC and Python embeddin
 
 ## Attach to the running service
 
-Start `uv run rtagent serve` (or `uv run python -m rtagent`; add `--port` for another port) and open http://127.0.0.1:8001. Client commands attach to that service over HTTP; they never open its databases.
+Start `uv run glassbox serve` (or `uv run python -m glassbox`; add `--port` for another port) and open http://127.0.0.1:8001. Client commands attach to that service over HTTP; they never open its databases.
 
 ```powershell
-uv run rtagent run "Inspect the project and report its entry point" --preset coding --wait --json
-uv run rtagent run --task-file task.txt --session SESSION_ID --skill debugging --wait
-uv run rtagent run "Review src/ for injection" --model anthropic:claude-opus-5-5 --effort high --access read-only
-uv run rtagent sessions
-uv run rtagent status RUN_ID
-uv run rtagent wait RUN_ID --timeout 600
-uv run rtagent events RUN_ID --after 0
-uv run rtagent approve RUN_ID APPROVAL_ID
-uv run rtagent approve RUN_ID APPROVAL_ID --reject
-uv run rtagent resume RUN_ID --resolutions decisions.json
-uv run rtagent cancel RUN_ID
+uv run glassbox run "Inspect the project and report its entry point" --preset coding --wait --json
+uv run glassbox run --task-file task.txt --session SESSION_ID --skill debugging --wait
+uv run glassbox run "Review src/ for injection" --model anthropic:claude-opus-5-5 --effort high --access read-only
+uv run glassbox sessions
+uv run glassbox status RUN_ID
+uv run glassbox wait RUN_ID --timeout 600
+uv run glassbox events RUN_ID --after 0
+uv run glassbox approve RUN_ID APPROVAL_ID
+uv run glassbox approve RUN_ID APPROVAL_ID --reject
+uv run glassbox resume RUN_ID --resolutions decisions.json
+uv run glassbox cancel RUN_ID
 ```
 
 Use `--url http://127.0.0.1:8001` **before** the subcommand to choose a service. `--project PROJECT_ID` selects a registered workspace for a new conversation. Existing conversations keep their saved Project; change that membership explicitly through the Web/API before submitting a new turn. `--skill` can repeat. `--model PROVIDER_ID:MODEL` (a provider ID from Settings, e.g. `openai:gpt-5`, or `simulated:simulated`), `--effort` and `--access read-only|ask|workspace-write` apply to this Run only; without them the saved default model and sandbox mode apply. `--effort` requires `--model`. `--task-file` is UTF-8; when task/file is omitted, Run reads stdin. Standard input/output/error use UTF-8 on Windows as well as Linux.
@@ -36,8 +36,8 @@ Use `retry` only after deciding repetition is appropriate. A model call with an 
 
 ```python
 import asyncio
-from rtagent.interfaces.client import AgentClient
-from rtagent.domain import ModelChoice
+from glassbox.interfaces.client import AgentClient
+from glassbox.domain import ModelChoice
 
 async def main() -> None:
     async with AgentClient() as client:
@@ -53,14 +53,14 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`AgentClient.run` reads current revisions and optionally creates a conversation. `model` and `access` are optional per-Run choices, as in the CLI; the Run view reports the `provider_id`, `model`, `reasoning_effort` and `access` that were used. For reliable retry after a lost response, capture a typed `PreviewRequest` containing the observed session/preset/config revisions and input, then call **`client.start(request, key)` with the same request and key**. The server returns the original Run even if the session revision later changes. Reconstructing a convenience request with newer revisions or creating a new session is a new submission. Neither convenience nor explicit submission requires Preview. Exact request/response shapes are in `/openapi.json` and `src/rtagent/domain/models.py`.
+`AgentClient.run` reads current revisions and optionally creates a conversation. `model` and `access` are optional per-Run choices, as in the CLI; the Run view reports the `provider_id`, `model`, `reasoning_effort` and `access` that were used. For reliable retry after a lost response, capture a typed `PreviewRequest` containing the observed session/preset/config revisions and input, then call **`client.start(request, key)` with the same request and key**. The server returns the original Run even if the session revision later changes. Reconstructing a convenience request with newer revisions or creating a new session is a new submission. Neither convenience nor explicit submission requires Preview. Exact request/response shapes are in `/openapi.json` and `src/glassbox/domain/models.py`.
 
 The Web client follows the same rule: an unchanged visible task retains its complete submitted body and key across a lost response and later history revisions. HTTP validation, business and unexpected pre-response failures share `{"error":{"code":"...","message":"...","details":null,"request_id":"..."}}`. Field errors contain locations/types without submitted input values. AgentClient handles non-JSON failures as transport errors; JSON-RPC returns `-32603` for an unexpected operation and continues reading independent frames.
 
 ## Newline JSON-RPC
 
 ```powershell
-uv run python -m rtagent rpc
+uv run python -m glassbox rpc
 ```
 
 Each UTF-8 input line is an ID-bearing JSON-RPC 2.0 request; each output line is its response. Requests are processed sequentially, capped at 512 KiB per line. Batch envelopes and notifications are outside this interface. Run submission is asynchronous; use state/event requests between operations. No arbitrary tool invocation or URL forwarding exists.
@@ -93,16 +93,16 @@ Unknown parameters fail. IDs are strict strings/integers, not booleans. Errors d
 
 ## Own an embedded harness
 
-Use embedding when another Python program owns the agent lifecycle. **Do not share its data directory with a running Web server or another Harness.** `Settings()` without `data_dir` (and without `STUDIO_DATA_DIR`) uses the same per-user folder as `rtagent serve`, so give an embedded harness its own `data_dir`, as below (a folder beside the studio's, outside the project). Use AgentClient to attach to an existing owner.
+Use embedding when another Python program owns the agent lifecycle. **Do not share its data directory with a running Web server or another Harness.** `Settings()` without `data_dir` (and without `GLASSBOX_DATA_DIR`) uses the same per-user folder as `glassbox serve`, so give an embedded harness its own `data_dir`, as below (a folder beside Glassbox's, outside the project). Use AgentClient to attach to an existing owner.
 
 ```python
 import asyncio
 from pathlib import Path
-from rtagent.infrastructure.config import Settings, default_data_dir
-from rtagent.harness import Harness
+from glassbox.infrastructure.config import Settings, default_data_dir
+from glassbox.harness import Harness
 
 async def main() -> None:
-    data = default_data_dir().with_name("rtagent-embedded")
+    data = default_data_dir().with_name("glassbox-embedded")
     settings = Settings(data_dir=data, workspace_root=Path("."))
     async with Harness(settings) as harness:
         run = await harness.run(
@@ -116,22 +116,22 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`Harness` has `run`, `wait`, `approve`, `cancel` and `resume`, plus its concrete `studio`, `repository` and `registry` for supported local integration. It constructs no resources on import. Entering migrates/seeds and opens the same graph/checkpointer used by Web. Exiting awaits summaries, Runs, native processes and database closure. A successful Run can leave an owned background command alive; it ends at Stop, its absolute deadline, or harness/service shutdown. Restart retains evidence, never relaunches processes.
+`Harness` has `run`, `wait`, `approve`, `cancel` and `resume`, plus its concrete `glassbox`, `repository` and `registry` for supported local integration. It constructs no resources on import. Entering migrates/seeds and opens the same graph/checkpointer used by Web. Exiting awaits summaries, Runs, native processes and database closure. A successful Run can leave an owned background command alive; it ends at Stop, its absolute deadline, or harness/service shutdown. Restart retains evidence, never relaunches processes.
 
 ## Focused trusted extensions
 
 ```python
 import asyncio
 import json
-from rtagent.domain import RunEvent, StudioConfig, ToolCall, ToolDefinition
-from rtagent.domain.hooks import Hooks
-from rtagent.infrastructure.workspace.files import Workspace
+from glassbox.domain import RunEvent, GlassboxConfig, ToolCall, ToolDefinition
+from glassbox.domain.hooks import Hooks
+from glassbox.infrastructure.workspace.files import Workspace
 
 async def observe(event: RunEvent) -> None:
     """Consume a committed, redacted event without mutating its stored payload."""
     print(event.run_id, event.seq, event.type)
 
-async def guard(call: ToolCall, config: StudioConfig) -> str | None:
+async def guard(call: ToolCall, config: GlassboxConfig) -> str | None:
     """Restrict direct file writes in addition to the existing tool policy."""
     if call.name in {"write_text", "edit_text"} and call.args.get("path") == "KEEP.txt":
         return "Preserve KEEP.txt."
@@ -167,25 +167,25 @@ Web integrations pass `hooks=` and `configure=` to `create_app`; the configure c
 Prompt/Workspace expose **Import/Export** controls. CLI equivalents:
 
 ```powershell
-uv run rtagent preset export coding.json --id coding
-uv run rtagent preset import coding.json
-uv run rtagent skill export review.json --id code-review
-uv run rtagent skill import review.json --project PROJECT_ID
+uv run glassbox preset export coding.json --id coding
+uv run glassbox preset import coding.json
+uv run glassbox skill export review.json --id code-review
+uv run glassbox skill import review.json --project PROJECT_ID
 ```
 
 Exports create new local files and refuse overwrite. Package formats are:
 
 ```json
-{"format":"rtagent.preset.v1","preset":{"id":"source-id","name":"Coding","revision":1,"blocks":[]}}
+{"format":"glassbox.preset.v1","preset":{"id":"source-id","name":"Coding","revision":1,"blocks":[]}}
 ```
 
 ```json
-{"format":"rtagent.skill.v1","name":"csv-review","files":{"SKILL.md":"---\nname: csv-review\ndescription: Review CSV input.\n---\n\nRead resources/rules.md.\n","resources/rules.md":"Preserve quoted fields and verify actual output.\n"}}
+{"format":"glassbox.skill.v1","name":"csv-review","files":{"SKILL.md":"---\nname: csv-review\ndescription: Review CSV input.\n---\n\nRead resources/rules.md.\n","resources/rules.md":"Preserve quoted fields and verify actual output.\n"}}
 ```
 
 Preset import always creates fresh aggregate/block identities and a revision-one saved preset. Skill imports are new-name-only, with matching frontmatter, portable forward-slash relative paths, no links/traversal/case aliases, one to fifty text resources, 64 KiB per file and 1 MiB total. All resources stage and validate before a directory rename publishes the Skill. Existing/bundled names cannot be overwritten. Export a bundled procedure, change the name/frontmatter and import it as a project procedure when customization is needed. Browser/CLI JSON inputs additionally cap at 2 MiB. No secrets, runtime configuration, live effects or checkpoint state are included by these formats.
 
-Studio owns package use cases for HTTP and embedding. Explicit user Skill import follows the same authoring policy as the memory/Skill editors, including when agent tools are read-only. Agent mutation tools and native commands still obey their captured policy; importing procedure text cannot grant tool permissions.
+Glassbox owns package use cases for HTTP and embedding. Explicit user Skill import follows the same authoring policy as the memory/Skill editors, including when agent tools are read-only. Agent mutation tools and native commands still obey their captured policy; importing procedure text cannot grant tool permissions.
 
 ## Provider support
 
@@ -198,7 +198,7 @@ Providers are configured in **Settings → Providers** (or seeded from `.env`) a
 A provider's `show_reasoning` option asks Messages for summarized thinking and Responses for reasoning summaries; Run views return the readable text as `reasoning` on each message, never signatures or encrypted content. `.env` seeds only the `openai` and `anthropic` providers; add a Responses provider in Settings or through `PUT /config`.
 
 ```dotenv
-STUDIO_PROVIDER=anthropic
+GLASSBOX_PROVIDER=anthropic
 ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
 ANTHROPIC_MODEL=claude-opus-5-5
 ANTHROPIC_API_KEY=

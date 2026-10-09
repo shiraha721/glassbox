@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def check_python() -> list[str]:
     """Reject outward domain imports and reverse infrastructure/application dependencies."""
     errors = []
-    package = ROOT / "src/rtagent"
+    package = ROOT / "src/glassbox"
     forbidden = {
         "domain": ("application", "infrastructure", "interfaces", "harness"),
         "infrastructure": ("application", "interfaces", "harness"),
@@ -30,11 +30,11 @@ def check_python() -> list[str]:
             if isinstance(node, ast.ImportFrom) and node.level:
                 # Resolve relative imports as well; package aliases must not bypass the rule.
                 parents = list(path.relative_to(package).parts[:-1])
-                prefix = ["rtagent", *parents[: len(parents) - node.level + 1]]
+                prefix = ["glassbox", *parents[: len(parents) - node.level + 1]]
                 names = [".".join([*prefix, name]) for name in names]
             for name in names:
                 if any(
-                    name == f"rtagent.{target}" or name.startswith(f"rtagent.{target}.")
+                    name == f"glassbox.{target}" or name.startswith(f"glassbox.{target}.")
                     for target in forbidden[layer]
                 ):
                     errors.append(f"{path.relative_to(ROOT)}:{node.lineno}: {layer} imports {name}")

@@ -8,7 +8,7 @@ Conventions and constraints for everyone changing this repository, including cod
 - **Run works directly from a task.** Preview is optional inspection through the same compiler, never a gate. Never fall back to simulation silently.
 - **Evidence over convenience.** Keep Run snapshots immutable, message roles and sources intact, every tool call paired with one result, revision checks on edits, and provenance on copies. Copies never replay effects or clone checkpoints.
 - **Real isolation.** Use bubblewrap with Bash on Linux and AppContainer with PowerShell on Windows. Never replace OS isolation with host execution or require WSL.
-- **Program data stays out of projects and the checkout.** Databases, saved keys, memory, undo copies and images live in the data directory (a per-user folder by default); the studio writes into a workspace only what the user or agent asked for.
+- **Program data stays out of projects and the checkout.** Databases, saved keys, memory, undo copies and images live in the data directory (a per-user folder by default); Glassbox writes into a workspace only what the user or agent asked for.
 - **Secrets stay on the server.** Resolve credentials from environment variable names at the moment of use. Keep secret values out of snapshots, prompts, logs, browser storage and Git.
 - **Finish one vertical workflow at a time:** UI, API, persistence, execution feedback and tests together. Check the real service behaves as intended before broadening tests.
 
@@ -50,7 +50,7 @@ These are relied on by recovery, inspection and the security model. Changing one
 - **Child processes** use `pathlib` and argument lists; never concatenate shell strings on the host side. Blocking file or Win32 work runs off the event loop.
 - **Timestamps** are stored in UTC ISO format and displayed in local time.
 - **Language:** identifiers, docstrings, comments and documentation in English. Public classes and functions have docstrings that say what they guarantee; comments explain constraints and non-obvious decisions rather than restating code.
-- **Keep files at their functional paths:** documentation in `docs/`, bundled Skills in `src/rtagent/skills/`, test fixtures in `tests/fixtures/`. Never commit `.env`, databases, checkpoints, traces or credentials.
+- **Keep files at their functional paths:** documentation in `docs/`, bundled Skills in `src/glassbox/skills/`, test fixtures in `tests/fixtures/`. Never commit `.env`, databases, checkpoints, traces or credentials.
 
 ## Commands
 
@@ -60,7 +60,7 @@ From the repository root:
 uv sync --dev --locked                 # install backend dependencies
 npm --prefix web ci                    # install frontend dependencies
 npm --prefix web run build             # build the UI served by the backend
-uv run rtagent serve                   # run the app at http://127.0.0.1:8001
+uv run glassbox serve                   # run the app at http://127.0.0.1:8001
 npm --prefix web run dev               # Vite dev server at :5173, proxying the API to :8001
 ```
 
@@ -98,7 +98,7 @@ npm --prefix web run generate:api
 | Runtime and API | `tests/test_api.py`, `test_runtime.py`, `test_harness.py`, `test_evaluation.py`, `test_permissions.py`, `test_review_regressions.py`, `test_file_undo.py`, `test_commands.py`, `test_subagents.py`, `test_attachments.py` | The real app over ASGI with the simulated or a mocked provider: idempotency, approvals and grants, cancellation, checkpoint recovery, uncertain effects, manual and automatic compaction, concurrency, origin checks, undo, slash commands, sub-agents, images. |
 | Adapters | `tests/test_providers.py`, `test_responses.py`, `test_tools.py`, `test_sandbox.py`, `test_storage.py`, `test_config.py`, `test_data_location.py`, `test_downloads.py`, `test_shell_hooks.py`, `test_git.py`, `test_web.py`, `test_desktop.py` | Captured provider requests and errors for all three APIs, MCP over stdio and HTTP, real bubblewrap isolation (skipped without it), migrations and revisions, the default data folder, download redirects and hosts, memory outside the project, hook processes, host Git, web search and page reading over mocked transports, the WSL folder dialog. |
 | UI components | `web/src/**/*.test.ts(x)` | Rendering and pure UI decisions: tool step pairing, preset editing, model choices, notifications, `/` and `$` completion and the send key, compaction placement, evaluation drafts, image helpers, the review task. |
-| Browser | `web/e2e/studio.spec.ts` | End-to-end workflows against a real backend with temporary data. |
+| Browser | `web/e2e/glassbox.spec.ts` | End-to-end workflows against a real backend with temporary data. |
 | Live service | `scripts/smoke_*.py` | Start a real HTTP server on a fixed port with disposable data and exercise actual OS effects. |
 | Real model | `scripts/acceptance_*.py --live` | Opt-in work against the configured provider; may cost money. |
 

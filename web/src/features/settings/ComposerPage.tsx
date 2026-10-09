@@ -19,8 +19,8 @@ export function ComposerPage() {
   return (
     <>
       <p className="page-intro">
-        How the message box behaves in this browser. Changes apply immediately; they are not saved
-        with the studio settings.
+        How the message box behaves in this browser. Changes apply immediately and stay in this
+        browser, apart from the saved settings.
       </p>
       <fieldset className="choice-group">
         <legend>Send key</legend>

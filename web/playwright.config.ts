@@ -23,15 +23,16 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'uv run uvicorn rtagent.interfaces.http.app:create_app --factory --host 127.0.0.1 --port 8765',
+    command:
+      'uv run uvicorn glassbox.interfaces.http.app:create_app --factory --host 127.0.0.1 --port 8765',
     cwd: root,
     url: 'http://127.0.0.1:8765/api/v1/health',
     reuseExistingServer: false,
     timeout: 30_000,
     env: {
-      STUDIO_PROVIDER: 'fake',
-      STUDIO_DATA_DIR: path.join(runRoot, 'data'),
-      STUDIO_WORKSPACE_ROOT: workspaceRoot,
+      GLASSBOX_PROVIDER: 'fake',
+      GLASSBOX_DATA_DIR: path.join(runRoot, 'data'),
+      GLASSBOX_WORKSPACE_ROOT: workspaceRoot,
     },
   },
 });

@@ -5,8 +5,8 @@ import shutil
 import pytest
 from test_api import wait_state
 
-from rtagent.domain import CommandRule, Grant, ToolCall
-from rtagent.domain.policies import command_permission, grant_for, granted
+from glassbox.domain import CommandRule, Grant, ToolCall
+from glassbox.domain.policies import command_permission, grant_for, granted
 
 
 def test_command_rules_match_whole_words_and_prefer_the_longest_prefix():
@@ -60,8 +60,8 @@ async def submit(client, session_id, text):
     return response.json()
 
 
-async def test_approving_for_the_conversation_stops_later_prompts_until_revoked(studio_client):
-    client, _app = studio_client
+async def test_approving_for_the_conversation_stops_later_prompts_until_revoked(glassbox_client):
+    client, _app = glassbox_client
     session_id = (await client.post("/api/v1/sessions", json={})).json()["id"]
     run = await submit(client, session_id, "/echo first")
     waiting = await wait_state(client, run["id"], {"waiting_approval"})
@@ -93,8 +93,8 @@ async def test_approving_for_the_conversation_stops_later_prompts_until_revoked(
 
 
 @pytest.mark.skipif(not shutil.which("bwrap"), reason="Runs a real sandboxed command.")
-async def test_a_command_rule_allows_a_simple_command_but_not_a_chained_one(studio_client):
-    client, _app = studio_client
+async def test_a_command_rule_allows_a_simple_command_but_not_a_chained_one(glassbox_client):
+    client, _app = glassbox_client
     config = (await client.get("/api/v1/bootstrap")).json()["config"]
     config["tools"]["bash"] = "ask"
     config["command_rules"] = [{"prefix": "ls", "permission": "allow"}]

@@ -657,7 +657,7 @@ function Recovery({
         <h3>Review interrupted execution</h3>
       </div>
       <p>
-        Some calls may have completed outside the studio. Retrying can repeat an external effect or
+        Some calls may have completed outside Glassbox. Retrying can repeat an external effect or
         model charge.
       </p>
       {run.unknown_calls.map((call) => (

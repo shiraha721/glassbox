@@ -10,8 +10,8 @@ from pathlib import Path
 import httpx
 from acceptance_local_agent import api, run_task, service_key, share_key, start_server
 
-from rtagent.domain import ProviderConfig
-from rtagent.infrastructure.config import Settings
+from glassbox.domain import ProviderConfig
+from glassbox.infrastructure.config import Settings
 
 FIXTURES = {
     "AGENTS.md": "Keep changes focused. Preserve check.ps1 and KEEP.txt. Use native PowerShell; no network or dependencies are needed. Follow instructions for the src directory.\n",
@@ -28,14 +28,14 @@ async def main() -> None:
     """Use the configured real provider in an isolated project and retain local, uncommitted evidence."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="Explicitly allow real model requests.")
-    parser.add_argument("--studio-url", default="http://127.0.0.1:8001")
+    parser.add_argument("--glassbox-url", default="http://127.0.0.1:8001")
     args = parser.parse_args()
     if not args.live or os.name != "nt":
         parser.error(
             "This Windows acceptance requires --live; use smoke_agent_tools.py for offline HTTP checks."
         )
     async with httpx.AsyncClient(trust_env=False, timeout=20) as source:
-        response = await source.get(args.studio_url.rstrip("/") + "/api/v1/bootstrap")
+        response = await source.get(args.glassbox_url.rstrip("/") + "/api/v1/bootstrap")
         response.raise_for_status()
         provider = ProviderConfig.model_validate(response.json()["config"]["provider"])
     if (
@@ -103,9 +103,9 @@ async def main() -> None:
             run = await api(client, "GET", f'/runs/{summary["run_id"]}')
             assert run["preset_name"] == "Coding" and run["plan"]
             assert all(item["status"] == "completed" for item in run["plan"]["plan"])
-            studio = server.config.app.state.studio
-            registry = await studio.workspace_registry(project_id)
-            current = await studio.repository.config()
+            glassbox = server.config.app.state.glassbox
+            registry = await glassbox.workspace_registry(project_id)
+            current = await glassbox.repository.config()
             checked = json.loads(
                 await registry.execute(
                     registry.catalog["powershell"],

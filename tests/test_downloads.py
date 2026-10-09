@@ -3,9 +3,9 @@
 import httpx
 import pytest
 
-import rtagent.infrastructure.workspace.downloads as downloads
-from rtagent.domain import COMMON_DOWNLOAD_HOSTS, AppError, StudioConfig
-from rtagent.infrastructure.workspace.files import Workspace
+import glassbox.infrastructure.workspace.downloads as downloads
+from glassbox.domain import COMMON_DOWNLOAD_HOSTS, AppError, GlassboxConfig
+from glassbox.infrastructure.workspace.files import Workspace
 
 HOSTS = ["github.com", "release-assets.githubusercontent.com"]
 
@@ -85,7 +85,7 @@ async def test_redirect_loops_and_query_urls_are_refused(tmp_path, served):
 
 
 def test_new_settings_allow_common_download_hosts():
-    hosts = StudioConfig().network_hosts
+    hosts = GlassboxConfig().network_hosts
     assert hosts == list(COMMON_DOWNLOAD_HOSTS)
     assert {"github.com", "registry.npmjs.org", "pypi.org", "huggingface.co"} <= set(hosts)
-    StudioConfig(network_hosts=hosts)  # every default passes the exact-host rule
+    GlassboxConfig(network_hosts=hosts)  # every default passes the exact-host rule
