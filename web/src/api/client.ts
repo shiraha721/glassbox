@@ -33,7 +33,6 @@ export type Eval = components['schemas']['Eval'];
 export type EvalCase = components['schemas']['EvalCase-Output'];
 export type EvalVariant = components['schemas']['EvalVariant-Output'];
 export type EvalCheck = components['schemas']['EvalCheck-Output'];
-export type EvalSummary = components['schemas']['EvalSummary'];
 export type EvalBatch = components['schemas']['EvalBatchView'];
 export type WorkspaceAccess = 'read-only' | 'ask' | 'workspace-write';
 /** What the composer sends with each Run: the model and the workspace access. */

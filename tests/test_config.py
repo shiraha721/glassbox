@@ -19,7 +19,6 @@ from rtagent.domain.models import default_providers
 from rtagent.infrastructure import config as config_module
 from rtagent.infrastructure.config import Settings
 from rtagent.infrastructure.credentials import CredentialStore
-from rtagent.infrastructure.storage import with_provider_profiles
 
 
 @pytest.mark.parametrize(
@@ -108,25 +107,6 @@ def test_env_values_update_provider_profiles_and_the_default_model():
     )
     simulated = Settings(_env_file=None, provider="fake").apply_provider(configured)
     assert simulated.provider.adapter == "fake" and simulated.providers == configured.providers
-
-
-def test_legacy_single_provider_settings_become_a_profile():
-    """Settings saved before provider profiles keep their endpoint, key name and options."""
-    legacy = StudioConfig().model_dump()
-    del legacy["providers"]
-    legacy["provider"] = {
-        "adapter": "openai",
-        "model": "deepseek-chat",
-        "base_url": "https://api.deepseek.com/v1",
-        "credential_ref": "OPENAI_API_KEY",
-        "temperature": 0.2,
-        "max_output_tokens": 8192,
-        "context_window": None,
-    }
-    upgraded = StudioConfig.model_validate(with_provider_profiles(legacy))
-    assert upgraded.providers[0].base_url == "https://api.deepseek.com/v1"
-    assert upgraded.providers[0].temperature == 0.2
-    assert resolve_model(upgraded).model == "deepseek-chat"
 
 
 def test_saved_keys_take_precedence_and_are_never_reported(tmp_path, monkeypatch):

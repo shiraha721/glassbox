@@ -1,11 +1,7 @@
 """Process settings. Model credentials are resolved only at the provider boundary."""
 
-import logging
 import os
-import shutil
-import sqlite3
 import sys
-from contextlib import closing
 from pathlib import Path
 from typing import Literal
 
@@ -20,23 +16,6 @@ from rtagent.domain import (
     ProviderProfile,
     StudioConfig,
     resolve_model,
-)
-
-logger = logging.getLogger(__name__)
-
-# Where earlier versions kept studio data: `var/` under the directory the studio started in.
-LEGACY_DATA_DIR = Path("var")
-# The studio's own entries in a data directory. app.db moves last, so a target that has it
-# holds a complete move; anything else in the old folder (test or acceptance output) stays.
-DATA_ENTRIES = (
-    "credentials.json",
-    "skills",
-    "commands",
-    "memory",
-    "file-history",
-    "attachments",
-    "checkpoints.db",
-    "app.db",
 )
 
 DEFAULT_BASE_URLS = {
@@ -70,73 +49,11 @@ def default_data_dir() -> Path:
     )
 
 
-# Tables every studio database has had since its first migration.
-STUDIO_TABLES = {"alembic_version", "settings", "presets", "sessions", "runs", "calls"}
-
-
-def studio_database(path: Path) -> bool:
-    """Whether `path` is a studio database, not another program's `var/app.db`."""
-    try:
-        with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as database:
-            names = {row[0] for row in database.execute("SELECT name FROM sqlite_master")}
-    except sqlite3.Error:
-        return False
-    return STUDIO_TABLES <= names
-
-
-def release_database(path: Path) -> None:
-    """Fold a closed SQLite database's write-ahead log back into the file, so it moves alone.
-
-    Leaving WAL mode needs the only connection to the database, so this also proves that no
-    other process (such as a studio still running from the old folder) has it open. The
-    studio turns WAL back on when it opens the moved file."""
-    try:
-        with closing(sqlite3.connect(path, timeout=0)) as database:
-            mode = database.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
-    except sqlite3.Error as exc:
-        raise RuntimeError(f"{path} is open in another process ({exc}).") from exc
-    if str(mode).lower() != "delete":
-        raise RuntimeError(f"{path} is open in another process.")
-
-
-def move_legacy_data(legacy: Path, target: Path) -> list[str]:
-    """Move studio data an earlier version kept in `legacy` to `target`, once.
-
-    Nothing happens unless `legacy` holds a studio database and `target` does not. The move
-    refuses to start while a database is open elsewhere, and returns the names it moved."""
-    if legacy.resolve() == target.resolve() or not (legacy / "app.db").is_file():
-        return []
-    if not studio_database(legacy / "app.db"):
-        logger.warning("Not moving %s: its app.db is not a studio database.", legacy)
-        return []
-    if (target / "app.db").exists():
-        logger.warning("Using %s; the older studio data in %s is not used.", target, legacy)
-        return []
-    present = [name for name in DATA_ENTRIES if (legacy / name).exists()]
-    for name in ("checkpoints.db", "app.db"):
-        if name in present:
-            release_database(legacy / name)
-    target.mkdir(parents=True, exist_ok=True)
-    moved = []
-    for name in present:
-        if (target / name).exists():
-            logger.warning("Not moving %s: %s already exists.", legacy / name, target / name)
-            continue
-        shutil.move(str(legacy / name), str(target / name))
-        moved.append(name)
-    (legacy / "MOVED.txt").write_text(
-        f"Studio data moved to {target}.\nSet STUDIO_DATA_DIR to choose another folder.\n",
-        encoding="utf-8",
-    )
-    return moved
-
-
 class Settings(BaseSettings):
     """Local process configuration kept outside versioned Run settings."""
 
     model_config = SettingsConfigDict(env_prefix="STUDIO_", env_file=".env", extra="ignore")
 
-    # Explicit values (STUDIO_DATA_DIR, .env, code) are used as given; see initialize().
     data_dir: Path = Field(default_factory=default_data_dir)
     workspace_root: Path = Path(".")
     provider: Literal["openai", "fake", "anthropic"] | None = None
@@ -148,28 +65,9 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
     def initialize(self) -> None:
-        """Resolve local paths and create the runtime data directory.
-
-        With the default data directory, data that an earlier version kept in `var/` under
-        the start directory is moved there first, unless it is still open elsewhere."""
-        # Read before assigning below: an assignment marks the field as explicitly set.
-        chosen = "data_dir" in self.model_fields_set
+        """Resolve local paths and create the runtime data directory."""
         self.data_dir = self.data_dir.resolve()
         self.workspace_root = self.workspace_root.resolve()
-        if not chosen:
-            legacy = LEGACY_DATA_DIR.resolve()
-            try:
-                moved = move_legacy_data(legacy, self.data_dir)
-            except RuntimeError as exc:
-                raise RuntimeError(
-                    f"Studio data in {legacy} could not be moved to {self.data_dir}: {exc} "
-                    "Stop the other studio and start again, or set STUDIO_DATA_DIR to keep "
-                    "using the old folder."
-                ) from exc
-            if moved:
-                logger.warning(
-                    "Moved studio data (%s) from %s to %s.", ", ".join(moved), legacy, self.data_dir
-                )
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def apply_provider(self, config: StudioConfig) -> StudioConfig:

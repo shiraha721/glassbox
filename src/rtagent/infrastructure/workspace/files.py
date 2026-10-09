@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import threading
-from contextlib import suppress
 from difflib import unified_diff
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -22,9 +21,6 @@ from rtagent.domain.patches import apply_hunks, parse_patch
 
 FILE_LIMIT = 65_536
 TEXT_FILE_LIMIT = 2 * 1024 * 1024
-# Memory is studio data, kept per workspace in the data directory. Earlier versions kept it
-# in the project at this path; it moves out the first time the workspace's memory is used.
-LEGACY_MEMORY_PATH = ".rtagent/MEMORY.md"
 SKILL_ROOT = ".agents/skills"
 COMMAND_ROOT = ".agents/commands"
 SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -540,27 +536,9 @@ class Workspace:
         key = hashlib.sha256(str(self.root).encode()).hexdigest()[:16]
         return self.data_dir / "memory" / key / "MEMORY.md"
 
-    def _memory_target(self) -> Path:
-        """The memory file, after moving one an earlier version left in the project."""
-        target = self.memory_file
-        try:
-            legacy = self.path(LEGACY_MEMORY_PATH)  # rejects links and anything outside the root
-        except AppError:
-            return target
-        with self.lock:
-            if not target.exists() and legacy.is_file():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                # Copy, then remove: the project and the data directory may be on other drives.
-                shutil.copy2(legacy, target)
-                with suppress(FileNotFoundError):
-                    legacy.unlink()
-                with suppress(OSError):
-                    legacy.parent.rmdir()  # only if nothing else, such as packages, is left
-        return target
-
     def memory(self) -> dict[str, str]:
         """Read workspace memory, treating a missing file as an empty editable document."""
-        target = self._memory_target()
+        target = self.memory_file
         content = self.read_path(target) if target.exists() else ""
         return {"path": str(target), "content": content, "hash": digest(content)}
 
@@ -568,7 +546,7 @@ class Workspace:
         """Replace workspace memory only if it still has the hash the caller last read."""
         if len(content.encode()) > FILE_LIMIT:
             raise AppError("tool_output_limit", "Memory is limited to 64 KiB of text.")
-        target = self._memory_target()
+        target = self.memory_file
         with self.lock:
             self._write_file(target, content, expected_hash)
             # Name the workspace beside its memory, so the folder can be recognized.

@@ -37,7 +37,7 @@ Open **http://127.0.0.1:8001**. Use `uv run rtagent serve --port 8080` for anoth
 
 Start-up applies database migrations. The studio keeps its data (conversations, settings, saved keys, memory, global Skills and commands, undo history, images) in a folder of your own, never in a project or in this checkout: `~/.local/share/rtagent` on Linux and WSL (`$XDG_DATA_HOME/rtagent` if that is set), `%LOCALAPPDATA%\rtagent` on Windows, `~/Library/Application Support/rtagent` on macOS. Set `STUDIO_DATA_DIR` to use another folder.
 
-Earlier versions kept this data in `var/` under the folder the studio was started from. The first start with the default folder moves the studio's own files from there (other files in `var/` stay, and `var/MOVED.txt` says where the data went). Only a `var/app.db` that is a studio database starts the move; another program's `var/` folder is left alone. If the old data is still open, for example because another studio is running from that folder, start-up stops with a message instead; stop the other studio and start again, or set `STUDIO_DATA_DIR` to the old folder to keep using it. A `.env` copied from an older `.env.example` sets `STUDIO_DATA_DIR=var`; remove that line to move.
+Versions before 2026-10-08 kept this data in `var/` in the checkout. To move it, stop the studio, run `uv run python scripts/upgrade_data.py` once, and remove `STUDIO_DATA_DIR=var` from `.env` if it is there.
 
 ## Configure a model
 
@@ -181,7 +181,7 @@ Each conversation belongs to one project, or to the default workspace (`STUDIO_W
 At the start of each Run, the agent receives:
 
 - **Instructions:** the first non-empty `AGENTS.override.md` or `AGENTS.md` at the project root. The `read_instructions` tool loads the chain for deeper directories, where deeper files take precedence.
-- **Memory:** notes kept per workspace, editable in **Workspace → Memory** and through the agent's `read_memory`/`save_memory` tools. It is plain Markdown; there is no hidden summarization. Memory is studio data, stored in the data folder (`memory/<id>/MEMORY.md`, with `workspace.txt` naming the folder it belongs to), not in the project; a `.rtagent/MEMORY.md` left by an earlier version moves there the first time the workspace is used. Commands cannot read it, and **Undo file changes** does not cover it.
+- **Memory:** notes kept per workspace, editable in **Workspace → Memory** and through the agent's `read_memory`/`save_memory` tools. It is plain Markdown; there is no hidden summarization. Memory is studio data, stored in the data folder (`memory/<id>/MEMORY.md`, with `workspace.txt` naming the folder it belongs to), not in the project. Commands cannot read it, and **Undo file changes** does not cover it.
 - **Skill catalog:** the name and description of each Skill. The agent loads a Skill's full text with `load_skill` when it matches the task, or you select it in **Workspace → Skills** or mention `$name`.
 
 Skills are folders with a `SKILL.md`:
@@ -277,7 +277,6 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 | **Undo file changes** skips a file | The file changed after the Run (a later Run, a command or you), so it is left alone. Use Git for those changes. |
 | "Model request failed: the connection to the provider closed before the response was complete" | The network or the provider dropped the connection mid-response; the other variants say the connection could not be opened or the provider did not answer in time. Run the task again (an interrupted Run offers **Retry**). Compaction already retried twice. |
 | A side panel covers the conversation | The window is narrower than 960 pixels; close the panel or widen the window. Wider windows keep the conversation beside the panel. |
-| "Studio data in … could not be moved" at start-up | The old `var/` data is still open, usually by another studio started from the same folder. Stop it and start again, or set `STUDIO_DATA_DIR` to the old folder. |
 | "… is outside this workspace (…)" from a file tool | The agent asked for a file in another folder. Add that folder as a project (**Projects → +**) and work there, or copy what it needs into this workspace. |
 | "The download redirected to …, which is not an allowed download host" | The download host sends files from another host. Add that host under **Settings → Sandbox → Allowed HTTPS download hosts** if you trust it. |
 | A Run is "interrupted" | The service restarted, or a call's outcome is unknown. Review each uncertain call and choose **Retry** or record a verified result before resuming. |

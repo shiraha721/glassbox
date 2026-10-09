@@ -27,7 +27,6 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from rtagent.domain import (
-    SIMULATED,
     AppError,
     Preset,
     RunEvent,
@@ -41,7 +40,7 @@ from rtagent.domain import (
 )
 from rtagent.domain.hooks import EventHook
 from rtagent.domain.lifecycle import ACTIVE_PROCESSES, TERMINAL
-from rtagent.domain.prompts import builtin_presets, is_previous_builtin
+from rtagent.domain.prompts import builtin_presets
 from rtagent.infrastructure.tracing import redact
 
 metadata = MetaData()
@@ -200,28 +199,6 @@ RUN_PROJECTION = {
 }
 
 
-def with_provider_profiles(stored: dict[str, Any]) -> dict[str, Any]:
-    """Upgrade settings saved before provider profiles: the one provider becomes a profile."""
-    if "providers" in stored:
-        return stored
-    old = stored.get("provider", {})
-    adapter = "anthropic" if old.get("adapter") == "anthropic" else "openai"
-    profile = {
-        "id": adapter,
-        "name": "Anthropic" if adapter == "anthropic" else "OpenAI-compatible",
-        "adapter": adapter,
-        "base_url": old.get("base_url") or f"https://api.{adapter}.com/v1",
-        "credential_ref": old.get("credential_ref", ""),
-        "models": [old["model"]] if old.get("model") else [],
-        "temperature": old.get("temperature"),
-        "max_output_tokens": old.get("max_output_tokens", 8192),
-        "context_window": old.get("context_window"),
-    }
-    simulated = old.get("adapter") == "fake"
-    provider = {**old, "profile_id": SIMULATED if simulated else adapter}
-    return {**stored, "providers": [profile], "provider": provider}
-
-
 def call_order(identifier: str) -> tuple[int, int, int]:
     """Order receipt IDs as executed: model step N precedes the tool calls it requested.
 
@@ -280,48 +257,11 @@ class Repository:
                         id="default", data=StudioConfig(revision=1).model_dump()
                     )
                 )
-            else:
-                stored = (await connection.execute(select(settings_table.c.data))).scalar_one()
-                config = StudioConfig.model_validate(with_provider_profiles(stored))
-                permissions = dict(config.tools)
-                additions = {
-                    "search_files": permissions.get("list_files", "deny"),
-                    "search_text": permissions.get("read_text", "deny"),
-                    "read_instructions": permissions.get("read_text", "deny"),
-                    "update_plan": "allow",
-                    # Patches add deletion, so existing profiles ask before this new capability.
-                    "apply_patch": "ask",
-                    "start_process": "ask",
-                    "poll_process": "allow",
-                    "send_process_input": "ask",
-                    "stop_process": "allow",
-                    "fetch_url": "ask",
-                }
-                for name, permission in additions.items():
-                    permissions.setdefault(name, permission)
-                if permissions != config.tools or "providers" not in stored:
-                    saved = config.model_copy(
-                        update={"tools": permissions, "revision": config.revision + 1}
-                    )
-                    await connection.execute(update(settings_table).values(data=saved.model_dump()))
-            existing = (await connection.execute(select(presets.c.data))).scalars().all()
-            by_id = {value["id"]: Preset.model_validate(value) for value in existing}
+            existing = set((await connection.execute(select(presets.c.id))).scalars())
             for preset in builtin_presets():
-                current = by_id.get(preset.id)
-                if current is None:
+                if preset.id not in existing:
                     await connection.execute(
                         insert(presets).values(id=preset.id, data=preset.model_dump())
-                    )
-                elif is_previous_builtin(current):
-                    # Only migrate recognized starter content, never user edits or Run snapshots.
-                    await connection.execute(
-                        update(presets)
-                        .where(presets.c.id == current.id)
-                        .values(
-                            data=preset.model_copy(
-                                update={"revision": current.revision + 1}
-                            ).model_dump()
-                        )
                     )
 
     async def close(self) -> None:
