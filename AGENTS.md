@@ -11,7 +11,7 @@ Read in this order:
 
 Working rules:
 
-- Keep project documentation and system design in `docs/`. Root `README.md` and `AGENTS.md` are brief entry points. Runtime Skills and test fixtures stay at their functional paths.
+- Keep project documentation and system design in `docs/`, describing the current system only. Root `README.md` and `AGENTS.md` are brief entry points. Reviews, work logs and conversation excerpts stay out of the repository and out of commit messages. Runtime Skills and test fixtures stay at their functional paths.
 - Keep the local single-user workflow simple. Avoid speculative abstractions, services, authentication, or configuration switches.
 - Run works directly from task input; Preview is optional. Never silently fall back to simulation.
 - Preserve immutable Run snapshots, message roles/sources, tool-call pairing, revision checks, and explicit copy provenance. Conversation copies never replay effects or clone checkpoints.

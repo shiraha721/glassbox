@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated 2026-10-08. This describes the implemented system. The [project guide](README.md) covers usage; the [development guide](development.md) covers conventions and commands.
+This describes the implemented system. The [project guide](README.md) covers usage; the [development guide](development.md) covers conventions and commands.
 
 ## Overview
 

@@ -11,7 +11,7 @@ What makes it different from a plain chat agent:
 
 Contents: [Install](#install-and-start) · [Configure a model](#configure-a-model) · [Use Glassbox](#use-glassbox) · [Projects, memory and Skills](#projects-memory-and-skills) · [Isolation and permissions](#isolation-and-permissions) · [Troubleshooting](#troubleshooting) · [Status and roadmap](#status-and-roadmap)
 
-Further reading: [Architecture](architecture.md) for how it works, [Development guide](development.md) for contributing, [Harness interfaces](harness.md) for the CLI, JSON-RPC and Python APIs, and the [2026-10-06 review](review.md) for the latest assessment.
+Further reading: [Architecture](architecture.md) for how it works, [Development guide](development.md) for contributing, and [Harness interfaces](harness.md) for the CLI, JSON-RPC and Python APIs.
 
 ## Install and start
 
@@ -76,7 +76,7 @@ OPENAI_API_KEY=sk-...
 
 `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` and `ANTHROPIC_API_KEY` do the same for an `anthropic` provider. Values set in `.env` update their provider and the default model again at the next start.
 
-Each Run records the provider, model, effort and access it used, so its snapshot stays reproducible after settings change. With Anthropic models the Run keeps the model's thinking blocks between its own tool calls, as the Messages API requires; later turns receive the conversation without them. Temperature has no default: left empty, none is sent and each model uses its own, which matters for reasoning models that accept only 1 and for current Claude models, which reject any. (Settings saved by versions before 2026-10-07 carried a fixed 0.2; the 2026-10-08 update clears that value.) Requests to Claude models ask Anthropic to cache the prompt prefix, so the steps of a Run after the first are cheaper and faster; **Context** shows the resulting cache hit rate. OpenAI-compatible providers cache long prompts on their own.
+Each Run records the provider, model, effort and access it used, so its snapshot stays reproducible after settings change. With Anthropic models the Run keeps the model's thinking blocks between its own tool calls, as the Messages API requires; later turns receive the conversation without them. Temperature has no default: left empty, none is sent and each model uses its own, which matters for reasoning models that accept only 1 and for current Claude models, which reject any. Requests to Claude models ask Anthropic to cache the prompt prefix, so the steps of a Run after the first are cheaper and faster; **Context** shows the resulting cache hit rate. OpenAI-compatible providers cache long prompts on their own.
 
 **Thinking.** When a model's reply includes readable reasoning, the turn shows it in a collapsed **Thinking** section above the answer. Current Claude models leave their thinking empty unless asked, and OpenAI returns reasoning summaries only on request, so turn on **Show the model's thinking** for the provider in **Settings → Models**. For Anthropic this asks for summarized thinking and needs a model with adaptive thinking (Claude 4.6 or later); for the Responses API it asks for reasoning summaries, which OpenAI may restrict to verified organizations. Either way an unsupported request is rejected by the provider with its reason. Chat Completions providers do not return reasoning through this adapter. The simulated model's `/think` command shows how it looks.
 
@@ -305,9 +305,7 @@ Hooks run **outside** the sandbox, on this computer with your permissions, using
 
 ## Status and roadmap
 
-As of 2026-10-09:
-
-- Stages 1–4 below are implemented, stage 6 in part (prompt evaluations), and the agent features row. Real-model acceptance ran on Windows (its records remain in the Git history); the Linux sandbox is covered by automated tests against real bubblewrap, but a live-model Linux acceptance and checks against Anthropic's and OpenAI's hosted APIs have not been run. The Messages and Responses adapters, thinking replay and display, reasoning effort, prompt caching and images are tested against mocked HTTP transports and local protocol fixtures. The known services' endpoints were checked up to authentication with invalid keys, and the ChatGPT sign-in against fake servers plus OpenAI's real signing keys and token errors; a Run on a signed-in ChatGPT plan has not been tried.
+- Implemented: stages 1–4 below, stage 6 in part (prompt evaluations), and the agent features row.
 - Not implemented: full terminal emulation (PTY/ConPTY), command network access, disk quotas, stateful MCP sessions, specialized reverse-engineering integrations, undo of changes made by commands, approvals inside sub-agents, live streaming of model thinking.
 - Not planned: signing in with a Claude subscription (Anthropic's terms do not allow it; ChatGPT plans are supported), IDE extensions, a terminal UI.
 
@@ -320,5 +318,3 @@ As of 2026-10-09:
 | 5 — Security analysis workflows | Stateful MCP, IDA/Ghidra/debugger/browser integrations, evidence artifacts, analysis Skills | Planned |
 | 6 — Evaluation | Prompt comparisons over task sets with deterministic checks and token, time and cost reporting (done); replay of recorded Runs, model-judged grading (planned) | Partial |
 | Agent features | Prompt caching, cost in dollars, conversation approvals and command rules, automatic compaction, undo of file-tool changes, custom slash commands, shell hooks, Git changes panel, web search and page reading, images, Responses API, thinking display, sub-agents | Done |
-
-Later stages should add capabilities with a real workload and acceptance criteria each, while keeping the single-user local path simple.

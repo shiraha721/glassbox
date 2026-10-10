@@ -121,7 +121,7 @@ Live acceptance (`acceptance_local_agent.py`, `acceptance_agent_tools.py` on por
 
 ## Documentation
 
-Keep `docs/` accurate when behavior changes: the [project guide](README.md) for users, [architecture](architecture.md) for design, this guide for conventions, [harness](harness.md) for programmatic interfaces. Dated records of reviews and changes go in the [review](review.md); earlier records, removed from `docs/` on 2026-10-10, remain in the Git history. `scripts/check_docs.py` validates every relative link and heading anchor. Source code carries the function-level detail in docstrings.
+Keep `docs/` accurate when behavior changes: the [project guide](README.md) for users, [architecture](architecture.md) for design, this guide for conventions, [harness](harness.md) for programmatic interfaces. `docs/` describes the current system only: no reviews, plans or dated work logs; the Git history records how it changed. `scripts/check_docs.py` validates every relative link and heading anchor. Source code carries the function-level detail in docstrings.
 
 For documentation-only changes, check content, links and examples; application builds and test suites are unnecessary.
 
