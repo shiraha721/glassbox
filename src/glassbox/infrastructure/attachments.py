@@ -7,13 +7,13 @@ import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from glassbox.domain import AppError, Attachment
+from glassbox.domain import AppError, Attachment, ImageType
 
 IMAGE_LIMIT = 5 * 1024 * 1024
 HASH = re.compile(r"[0-9a-f]{64}")
 
 
-def sniff(head: bytes) -> str | None:
+def sniff(head: bytes) -> ImageType | None:
     """The image type from its first bytes; SVG and anything else is refused."""
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"

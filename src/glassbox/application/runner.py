@@ -9,6 +9,7 @@ from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import Any, TypedDict
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import END, START, StateGraph
@@ -81,7 +82,7 @@ class Runner:
         self.hooks = hooks or Hooks()
         repository.on_event = self.observe
         self.hook_tasks: set[asyncio.Task[None]] = set()
-        registry.bind_repository(repository)
+        self.processes = registry.bind_repository(repository)
         self.checkpoint_path = checkpoint_path
         self.stack = AsyncExitStack()
         self.tasks: dict[str, asyncio.Task] = {}
@@ -213,7 +214,7 @@ class Runner:
                 task.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
-            await self.registry.processes.close()
+            await self.processes.close()
         finally:
             await self.stack.aclose()
 
@@ -234,7 +235,7 @@ class Runner:
                         "workspace_changed",
                         "Restore the original workspace before resuming this Run.",
                     )
-                graph_config = {
+                graph_config: RunnableConfig = {
                     "configurable": {"thread_id": run_id},
                     "recursion_limit": config.max_steps + config.max_tool_calls + 10,
                 }
@@ -311,7 +312,7 @@ class Runner:
             if started is not None:
                 run = await self.repository.run(run_id)
                 if run["status"] in {"failed", "cancelled", "interrupted"}:
-                    await self.registry.processes.stop_run(run_id)
+                    await self.processes.stop_run(run_id)
                 usage = {
                     **run["usage"],
                     "active_seconds": run["usage"].get("active_seconds", 0)
@@ -435,7 +436,7 @@ class Runner:
     async def cancel(self, run_id: str) -> None:
         """Stop local execution without claiming that external effects were rolled back."""
         run = await self.repository.run(run_id)
-        await self.registry.processes.stop_run(run_id)
+        await self.processes.stop_run(run_id)
         if run["status"] in TERMINAL:
             return
         task = self.tasks.get(run_id)
@@ -667,6 +668,7 @@ class Runner:
                     data["decision"] = decision
                 if decision != "allow":
                     raise AppError("tool_denied", "Tool execution was not authorized.", 403)
+                assert definition is not None  # decide() denies a call without a definition.
                 await self.before_tool_hooks(run, config, call, data)
                 if self.hooks.before_tool:
                     try:

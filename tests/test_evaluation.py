@@ -48,6 +48,7 @@ def test_summarize_variant_aggregates_pass_rate_and_average_cost():
 async def wait_batch(client, batch_id, timeout=20.0):
     """Poll a comparison batch until it reaches a terminal state."""
     deadline = asyncio.get_event_loop().time() + timeout
+    batch = None
     while asyncio.get_event_loop().time() < deadline:
         batch = (await client.get(f"/api/v1/batches/{batch_id}")).json()
         if batch["status"] in {"succeeded", "failed", "cancelled"}:

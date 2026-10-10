@@ -182,8 +182,8 @@ async def main() -> None:
             (workspace / "AGENTS.md").write_text(
                 f"Use evidence from {workspace.name}.", encoding="utf-8"
             )
-        settings = Settings(
-            data_dir=root / "data", workspace_root=workspaces[0], provider="fake", _env_file=None
+        settings = Settings.without_env_file(
+            data_dir=root / "data", workspace_root=workspaces[0], provider="fake"
         )
         server = uvicorn.Server(
             uvicorn.Config(create_app(settings), host="127.0.0.1", port=8769, log_level="warning")

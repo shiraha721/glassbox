@@ -1,6 +1,7 @@
 """Windows Common Item Dialog adapter, executed in its own disposable STA process."""
 
 import ctypes
+import io
 import json
 import sys
 from collections.abc import Callable
@@ -9,6 +10,8 @@ from uuid import UUID
 
 def select_folder(initial_path: str) -> str | None:
     """Show the native Explorer folder dialog and return a Unicode absolute path or cancellation."""
+    if sys.platform != "win32":
+        raise OSError("The Explorer folder dialog exists only on Windows.")
     from ctypes import wintypes
 
     ole = ctypes.WinDLL("ole32")
@@ -93,7 +96,8 @@ def select_folder(initial_path: str) -> str | None:
 
 def main() -> None:
     """Emit one UTF-8 JSON result; failures signal manual fallback through the helper exit status."""
-    sys.stdout.reconfigure(encoding="utf-8")
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     try:
         path = select_folder(sys.argv[1])
     except (OSError, ValueError, IndexError):

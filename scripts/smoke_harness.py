@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from glassbox.domain import (
     AppError,
     GlassboxConfig,
+    RecoveryDecision,
     ResumeRequest,
     RunEvent,
     ToolCall,
@@ -79,11 +80,8 @@ async def embedding(root: Path) -> None:
         await asyncio.to_thread(workspace.write, "effect.txt", "Created once.")
         raise RuntimeError("Fixture fails after its effect.")
 
-    settings = Settings(
-        data_dir=root / "embed-data",
-        workspace_root=root / "workspace",
-        provider="fake",
-        _env_file=None,
+    settings = Settings.without_env_file(
+        data_dir=root / "embed-data", workspace_root=root / "workspace", provider="fake"
     )
     harness = Harness(settings, Hooks(on_event=observe, before_tool=guard))
     harness.registry.register(
@@ -155,10 +153,10 @@ async def embedding(root: Path) -> None:
             started.id,
             ResumeRequest(
                 resolutions={
-                    call_id: {
-                        "action": "record",
-                        "result": "Verified effect.txt contains Created once.",
-                    }
+                    call_id: RecoveryDecision(
+                        action="record",
+                        result="Verified effect.txt contains Created once.",
+                    )
                 }
             ),
         )
@@ -405,11 +403,8 @@ async def main() -> None:
             uvicorn.Server(
                 uvicorn.Config(
                     create_app(
-                        Settings(
-                            data_dir=root / "http-data",
-                            workspace_root=workspace,
-                            provider="fake",
-                            _env_file=None,
+                        Settings.without_env_file(
+                            data_dir=root / "http-data", workspace_root=workspace, provider="fake"
                         )
                     ),
                     host="127.0.0.1",

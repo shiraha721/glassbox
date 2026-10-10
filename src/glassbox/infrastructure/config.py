@@ -3,7 +3,7 @@
 import os
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Self
 
 from dotenv import dotenv_values
 from pydantic import Field
@@ -17,6 +17,9 @@ from glassbox.domain import (
     ProviderProfile,
     resolve_model,
 )
+
+# The providers that OPENAI_* and ANTHROPIC_* values in .env configure.
+EnvProvider = Literal["openai", "anthropic"]
 
 DEFAULT_BASE_URLS = {
     "openai": "https://api.openai.com/v1",
@@ -64,6 +67,14 @@ class Settings(BaseSettings):
     # Additional browser origins; pages served by this process are always same-origin.
     allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
 
+    @classmethod
+    def without_env_file(cls, **values: Any) -> Self:
+        """Settings from explicit values and environment variables, never from a .env file.
+
+        Tests and smoke scripts use it so that a developer's .env cannot change their
+        results. Type checkers do not know pydantic-settings' `_env_file` argument."""
+        return cls(_env_file=None, **values)  # pyright: ignore[reportCallIssue]
+
     def initialize(self) -> None:
         """Resolve local paths and create the runtime data directory."""
         self.data_dir = self.data_dir.resolve()
@@ -84,11 +95,12 @@ class Settings(BaseSettings):
         if foreign in values.tools:
             permission = values.tools.pop(foreign)
             values.tools.setdefault(SHELL_TOOL, permission)
-        explicit: dict[str, str | None] = {}
-        for adapter, base_url, model in (
+        explicit: dict[EnvProvider, str | None] = {}
+        sources: tuple[tuple[EnvProvider, str | None, str | None], ...] = (
             ("openai", self.openai_base_url, self.openai_model),
             ("anthropic", self.anthropic_base_url, self.anthropic_model),
-        ):
+        )
+        for adapter, base_url, model in sources:
             if base_url is None and model is None:
                 continue
             profile = next((item for item in values.providers if item.id == adapter), None)

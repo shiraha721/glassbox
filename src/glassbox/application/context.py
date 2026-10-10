@@ -198,11 +198,11 @@ async def reduce_context(
                 data["calls"].append(call)
                 await repository.save_compaction(identifier, data)
 
-                async def on_wire(
-                    body: dict[str, Any] | None, current_call: dict[str, Any] = call
-                ) -> None:
-                    """Persist the checked outbound body before sending a summarization request."""
-                    current_call["wire_request_body"] = body
+                async def on_wire(body: dict[str, Any] | None) -> None:
+                    """Persist the checked outbound body before sending a summarization request.
+
+                    The request in progress is always the last call appended above."""
+                    data["calls"][-1]["wire_request_body"] = body
                     await repository.save_compaction(identifier, data)
 
                 result = None

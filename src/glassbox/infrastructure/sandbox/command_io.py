@@ -115,7 +115,7 @@ class CommandOutput:
         with self.lock:
             return self.streams[stream].text(), self.streams[stream].truncated
 
-    async def _flush(self) -> None:
+    async def _flush(self, callback: OutputCallback) -> None:
         with self.lock:
             frames = [
                 {
@@ -127,19 +127,20 @@ class CommandOutput:
             ]
             self.dirty.clear()
         for frame in frames:
-            await self.callback(frame)
+            await callback(frame)
 
     async def drain(self) -> None:
         """Publish coalesced snapshots until close() flushes the final state."""
-        if not self.callback:
+        callback = self.callback
+        if not callback:
             return
         while not self.finished:
             await self.changed.wait()
             self.changed.clear()
             if not self.finished:
                 await asyncio.sleep(self.interval)
-            await self._flush()
-        await self._flush()
+            await self._flush(callback)
+        await self._flush(callback)
 
     async def close(self, reader: asyncio.Task[None]) -> None:
         """Flush retained output before a final command receipt or cancellation is recorded."""

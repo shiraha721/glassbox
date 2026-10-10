@@ -342,10 +342,11 @@ class ToolRegistry:
         registry.local_tools = self.local_tools
         return registry
 
-    def bind_repository(self, repository: Repository) -> None:
+    def bind_repository(self, repository: Repository) -> ProcessManager:
         """Share one concrete process owner across project registries in this service."""
         if self.processes is None:
             self.processes = ProcessManager(repository)
+        return self.processes
 
     def _base_catalog(self) -> dict[str, ToolDefinition]:
         """Native tools with schema hashes plus explicitly registered trusted local tools."""
@@ -504,12 +505,13 @@ class ToolRegistry:
                     "tool_unavailable", "This command tool belongs to a different operating system."
                 )
             timeout = min(args.get("timeout", config.tool_timeout), config.tool_timeout)
+            execution = current_execution.get()
             return await self.sandbox.execute(
                 args["command"],
                 args.get("cwd", "."),
                 config.sandbox_mode,
                 timeout,
-                on_output=(current_execution.get().on_output if current_execution.get() else None),
+                on_output=execution.on_output if execution else None,
                 toolchain_roots=config.toolchain_roots,
             )
         if name == "fetch_url":
@@ -604,11 +606,11 @@ class ToolRegistry:
                 cursor = page.nextCursor
                 if current or not cursor:
                     break
-            schema_matches = (
-                current is not None and digest(current.inputSchema) == definition.schema_hash
-            )
+            # `current` was found by the snapshot's original name, so its name is that name.
             result = (
-                await session.call_tool(definition.original_name, args) if schema_matches else None
+                await session.call_tool(current.name, args)
+                if current is not None and digest(current.inputSchema) == definition.schema_hash
+                else None
             )
         # Raise local validation errors after SDK task groups close, preserving their identity.
         if result is None:

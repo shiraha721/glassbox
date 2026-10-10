@@ -77,6 +77,7 @@ async def start(client, text="Hello"):
 
 
 async def wait_state(client, run_id, expected):
+    run = None
     for _ in range(150):
         response = await client.get(f"/api/v1/runs/{run_id}")
         run = response.json()

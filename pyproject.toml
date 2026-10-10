@@ -33,6 +33,7 @@ dev = [
   "ruff>=0.12,<1",
   "black>=25,<27",
   "isort>=6,<8",
+  "pyright>=1.1.414,<2",
 ]
 
 [build-system]
@@ -62,3 +63,10 @@ target-version = ["py312"]
 profile = "black"
 line_length = 100
 skip_glob = [".venv/*", "web/node_modules/*"]
+
+# Pylance in VS Code reads this too, so the editor and `uv run pyright` report the same errors.
+[tool.pyright]
+include = ["src", "tests", "scripts", "migrations"]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"

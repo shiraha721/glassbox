@@ -6,23 +6,26 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.pool import QueuePool
 
 from glassbox.domain import AppError, GlassboxConfig
 from glassbox.harness import Harness
 from glassbox.infrastructure.config import Settings
 from glassbox.infrastructure.sandbox.command_io import CommandControl
+from glassbox.interfaces.client import AgentClient
 from glassbox.interfaces.rpc import serve_rpc
 
 
 async def test_process_exit_during_settings_read_returns_conflict(tmp_path, monkeypatch):
     """An owned command finishing across an await cannot turn an input action into a KeyError/500."""
-    settings = Settings(
-        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    settings = Settings.without_env_file(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake"
     )
     async with Harness(settings) as harness:
         run = await harness.run("Create an owner for the process receipt.")
         await harness.wait(run.id, 10)
         manager = harness.registry.processes
+        assert manager is not None
         gate = asyncio.Event()
         control = CommandControl()
         data = {
@@ -58,8 +61,8 @@ async def test_process_exit_during_settings_read_returns_conflict(tmp_path, monk
 async def test_failed_summary_cleanup_still_closes_checkpoints(tmp_path, monkeypatch):
     """A failure in the first shutdown stage still closes actual checkpoint and DB resources."""
     harness = Harness(
-        Settings(
-            data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+        Settings.without_env_file(
+            data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake"
         )
     )
     await harness.__aenter__()
@@ -71,7 +74,8 @@ async def test_failed_summary_cleanup_still_closes_checkpoints(tmp_path, monkeyp
         await harness.__aexit__()
     with pytest.raises(ValueError):
         await connection.execute("SELECT 1")
-    assert not harness.entered and harness.repository.engine.pool.checkedout() == 0
+    pool = harness.repository.engine.pool
+    assert not harness.entered and isinstance(pool, QueuePool) and pool.checkedout() == 0
 
 
 async def test_rpc_internal_failure_keeps_next_frame_readable(monkeypatch):
@@ -85,7 +89,8 @@ async def test_rpc_internal_failure_keeps_next_frame_readable(monkeypatch):
         "glassbox.interfaces.rpc.dispatch",
         AsyncMock(side_effect=[RuntimeError("fixture"), {"status": "ok"}]),
     )
-    await serve_rpc(None)
+    # The dispatcher is replaced above, so the client is never used.
+    await serve_rpc(AgentClient())
     first, second = [json.loads(line) for line in output.getvalue().splitlines()]
     assert first["id"] == 1 and first["error"]["code"] == -32603
     assert second["id"] == 2 and second["result"] == {"status": "ok"}

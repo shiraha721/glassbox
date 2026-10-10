@@ -234,8 +234,8 @@ async def main() -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8", newline="\n")
         (workspace / "root.txt").write_bytes(b"unchanged\nMARKER old\r\nlast line without newline")
-        settings = Settings(
-            data_dir=root / "data", workspace_root=workspace, provider="fake", _env_file=None
+        settings = Settings.without_env_file(
+            data_dir=root / "data", workspace_root=workspace, provider="fake"
         )
         run_id = ""
         for iteration in range(2):

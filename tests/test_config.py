@@ -44,7 +44,7 @@ def test_mcp_env_and_urls_do_not_embed_credentials():
 def test_shell_permission_follows_the_data_directory_across_systems(monkeypatch, native, foreign):
     """Moving data between Windows and Linux keeps the shell permission without granting more."""
     monkeypatch.setattr(config_module, "SHELL_TOOL", native)
-    settings = Settings(_env_file=None)
+    settings = Settings.without_env_file()
     for permission in ("allow", "ask", "deny"):
         original = GlassboxConfig(tools={foreign: permission})
         configured = settings.apply_provider(original)
@@ -89,8 +89,7 @@ def test_model_choices_resolve_against_configured_providers():
 
 def test_env_values_update_provider_profiles_and_the_default_model():
     """OPENAI_* and ANTHROPIC_* values configure providers; GLASSBOX_PROVIDER picks the default."""
-    settings = Settings(
-        _env_file=None,
+    settings = Settings.without_env_file(
         provider="anthropic",
         openai_base_url="https://api.deepseek.com/v1",
         openai_model="deepseek-chat",
@@ -105,7 +104,7 @@ def test_env_values_update_provider_profiles_and_the_default_model():
         "anthropic",
         "claude-opus-5-5",
     )
-    simulated = Settings(_env_file=None, provider="fake").apply_provider(configured)
+    simulated = Settings.without_env_file(provider="fake").apply_provider(configured)
     assert simulated.provider.adapter == "fake" and simulated.providers == configured.providers
 
 

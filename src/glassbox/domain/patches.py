@@ -24,7 +24,7 @@ def parse_patch(patch: str) -> list[PatchOperation]:
         raise AppError("invalid_patch", "Wrap the patch in *** Begin Patch and *** End Patch.")
     result = []
     index = 1
-    headers = {
+    headers: dict[str, Literal["add", "update", "delete"]] = {
         "*** Add File: ": "add",
         "*** Update File: ": "update",
         "*** Delete File: ": "delete",

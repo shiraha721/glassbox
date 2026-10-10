@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import httpx
@@ -35,7 +36,7 @@ async def verify(
 ) -> None:
     """Exercise actual effects with explicit simulated decisions and disposable data."""
 
-    async def api(method: str, path: str, body=None, status: int | None = None):
+    async def api(method: str, path: str, body=None, status: int | None = None) -> Any:
         """Check response status before accepting any lifecycle projection."""
         response = await client.request(method, path, json=body, headers={"Idempotency-Key": uid()})
         assert response.status_code == status if status else response.is_success, response.text
@@ -318,8 +319,8 @@ async def main(network: bool = False, public_dns: bool = False) -> None:
         root = Path(temporary)
         workspace = root / "workspace"
         workspace.mkdir()
-        settings = Settings(
-            workspace_root=workspace, data_dir=root / "data", provider="fake", _env_file=None
+        settings = Settings.without_env_file(
+            workspace_root=workspace, data_dir=root / "data", provider="fake"
         )
         server = uvicorn.Server(
             uvicorn.Config(create_app(settings), host="127.0.0.1", port=8771, log_level="error")

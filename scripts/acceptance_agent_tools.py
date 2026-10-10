@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 from acceptance_local_agent import api, run_task, service_key, share_key, start_server
+from fastapi import FastAPI
 
 from glassbox.domain import ProviderConfig
 from glassbox.infrastructure.config import Settings
@@ -51,13 +52,12 @@ async def main() -> None:
         target = workspace / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8", newline="\n")
-    settings = Settings(
+    settings = Settings.without_env_file(
         data_dir=(root / "data").resolve(),
         workspace_root=workspace,
         provider="openai",
         openai_model=provider.model,
         openai_base_url=provider.base_url,
-        _env_file=None,
     )
     share_key(provider, settings)
     server, serving = await start_server(settings)
@@ -103,7 +103,9 @@ async def main() -> None:
             run = await api(client, "GET", f'/runs/{summary["run_id"]}')
             assert run["preset_name"] == "Coding" and run["plan"]
             assert all(item["status"] == "completed" for item in run["plan"]["plan"])
-            glassbox = server.config.app.state.glassbox
+            app = server.config.app
+            assert isinstance(app, FastAPI)
+            glassbox = app.state.glassbox
             registry = await glassbox.workspace_registry(project_id)
             current = await glassbox.repository.config()
             checked = json.loads(

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import uvicorn
+from fastapi import FastAPI
 
 from glassbox.domain import GlassboxConfig, ProviderConfig, ToolCall, ToolDefinition
 from glassbox.domain.hooks import Hooks
@@ -172,13 +173,12 @@ async def main() -> None:
         target = workspace / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8", newline="\n")
-    settings = Settings(
+    settings = Settings.without_env_file(
         data_dir=root / "data",
         workspace_root=workspace,
         provider="openai",
         openai_base_url=provider.base_url,
         openai_model=provider.model,
-        _env_file=None,
     )
     summaries = []
     share_key(provider, settings)
@@ -225,7 +225,9 @@ async def main() -> None:
                 "repair",
                 "Use workspace_summary and $csv-review to inspect this multi-file CSV reporter. Reproduce check.py in the native sandbox, repair quoted-field CSV parsing, normalization/blank-row handling and cli.py's ignored path argument while keeping public function names. Add meaningful English docstrings/comments, use a short recorded plan and guarded patches. Preserve check.py, CSV fixtures and KEEP.txt. Run python check.py again and report only actual evidence.",
             )
-            glassbox = server.config.app.state.glassbox
+            app = server.config.app
+            assert isinstance(app, FastAPI)
+            glassbox = app.state.glassbox
             current = await glassbox.repository.config()
             checked = json.loads(
                 await glassbox.registry.execute(
@@ -354,13 +356,12 @@ async def main() -> None:
     finally:
         server.should_exit = True
         await serving
-    embed_settings = Settings(
+    embed_settings = Settings.without_env_file(
         data_dir=root / "embed-data",
         workspace_root=workspace,
         provider="openai",
         openai_base_url=provider.base_url,
         openai_model=provider.model,
-        _env_file=None,
     )
     share_key(provider, embed_settings)
     embedded = Harness(embed_settings, Hooks(before_tool=guard))

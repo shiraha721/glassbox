@@ -312,6 +312,8 @@ class Glassbox:
         if reported is not None and reported.prompt_tokens is not None:
             return reported.prompt_tokens
         call = await self.repository.call(rows[-1]["call_id"])
+        if call is None:
+            return None
         body = call["data"].get("wire_request_body") or call["data"].get("prepared_request")
         return estimated_tokens([body]) if body else None
 
@@ -637,15 +639,18 @@ class Glassbox:
         """Read editable workspace context and probe the configured sandbox."""
         registry = await self.workspace_registry(project_id)
         skills, errors = await asyncio.to_thread(registry.files.skills)
-        return WorkspaceView(
-            root=str(registry.workspace),
-            sandbox=await registry.sandbox.status(refresh),
-            instructions=await asyncio.to_thread(registry.files.instructions),
-            memory=await asyncio.to_thread(registry.files.memory),
-            skills=[
-                {key: value for key, value in skill.items() if key != "content"} for skill in skills
-            ],
-            skill_errors=errors,
+        return WorkspaceView.model_validate(
+            {
+                "root": str(registry.workspace),
+                "sandbox": await registry.sandbox.status(refresh),
+                "instructions": await asyncio.to_thread(registry.files.instructions),
+                "memory": await asyncio.to_thread(registry.files.memory),
+                "skills": [
+                    {key: value for key, value in skill.items() if key != "content"}
+                    for skill in skills
+                ],
+                "skill_errors": errors,
+            }
         )
 
     async def save_memory(
@@ -672,11 +677,14 @@ class Glassbox:
     async def global_skills(self) -> WorkspaceSkills:
         """List bundled and global skills, which every project shares."""
         skills, errors = await asyncio.to_thread(self.registry.files.skills, False)
-        return WorkspaceSkills(
-            skills=[
-                {key: value for key, value in skill.items() if key != "content"} for skill in skills
-            ],
-            errors=errors,
+        return WorkspaceSkills.model_validate(
+            {
+                "skills": [
+                    {key: value for key, value in skill.items() if key != "content"}
+                    for skill in skills
+                ],
+                "errors": errors,
+            }
         )
 
     async def global_skill(self, name: str) -> SkillDocument:

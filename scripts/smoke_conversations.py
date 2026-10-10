@@ -3,6 +3,7 @@
 import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -15,7 +16,7 @@ from glassbox.interfaces.http.app import create_app
 async def exercise(client: httpx.AsyncClient) -> None:
     """Verify copy boundaries, independent traces, metadata conflicts, and continued chatting."""
 
-    async def api(method: str, path: str, body=None, status: int = 200):
+    async def api(method: str, path: str, body=None, status: int = 200) -> Any:
         response = await client.request(
             method, path, json=body, headers={"Idempotency-Key": uuid4().hex}
         )
@@ -147,8 +148,8 @@ async def main() -> None:
         root = Path(directory).resolve()
         workspace = root / "workspace"
         workspace.mkdir()
-        settings = Settings(
-            data_dir=root / "data", workspace_root=workspace, provider="fake", _env_file=None
+        settings = Settings.without_env_file(
+            data_dir=root / "data", workspace_root=workspace, provider="fake"
         )
         server = uvicorn.Server(
             uvicorn.Config(create_app(settings), host="127.0.0.1", port=8767, log_level="warning")

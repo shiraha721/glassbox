@@ -1,10 +1,13 @@
 """Protect context provenance and extension boundaries after live HTTP acceptance."""
 
 import asyncio
+import socket
 
 import httpx
+import httpx2
 import openai
 import pytest
+from langchain_core.messages import HumanMessage
 
 from glassbox.domain import (
     AppError,
@@ -28,8 +31,8 @@ from glassbox.infrastructure.storage import Repository
 
 async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, monkeypatch):
     """A completed provider result cannot replace context after its captured revision changes."""
-    settings = Settings(
-        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    settings = Settings.without_env_file(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake"
     )
     async with Harness(settings) as harness:
         first = await harness.run("Original observed evidence.")
@@ -81,8 +84,8 @@ async def test_late_summary_does_not_activate_after_metadata_revision(tmp_path, 
 async def test_auto_compaction_is_opt_in_recorded_and_reversible(tmp_path, monkeypatch):
     """Once enabled, a Run that leaves the history past the threshold starts a recorded summary
     of older turns; the original messages stay and Restore full context undoes it."""
-    settings = Settings(
-        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    settings = Settings.without_env_file(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake"
     )
 
     async def summarizer(_config, _compiled, _tools, _prepared, on_wire, _key=""):
@@ -136,8 +139,8 @@ async def test_auto_compaction_is_opt_in_recorded_and_reversible(tmp_path, monke
 
 async def test_restart_marks_reduction_and_process_intents_uncertain(tmp_path):
     """Reopening receipts preserves partial evidence without starting any abandoned effects."""
-    settings = Settings(
-        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    settings = Settings.without_env_file(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake"
     )
     async with Harness(settings) as harness:
         view = await harness.run("A completed source turn.")
@@ -234,8 +237,8 @@ async def test_trusted_guard_is_never_called_before_core_denial(tmp_path, monkey
 
     monkeypatch.setattr("glassbox.application.runner.generate", model)
     async with Harness(
-        Settings(
-            data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+        Settings.without_env_file(
+            data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake"
         ),
         Hooks(before_tool=guard),
     ) as harness:
@@ -261,8 +264,8 @@ async def test_mcp_tools_are_rediscovered_after_restart(tmp_path):
     from glassbox.domain import MCPServer
 
     fixture = Path(__file__).parent / "fixtures" / "mcp_server.py"
-    settings = Settings(
-        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    settings = Settings.without_env_file(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake"
     )
     async with Harness(settings) as harness:
         config = await harness.repository.config()
@@ -289,8 +292,8 @@ async def test_summary_requests_are_retried_after_a_broken_connection(
     from glassbox.domain import CompactRequest
     from glassbox.infrastructure.providers.errors import transport_failure
 
-    settings = Settings(
-        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake", _env_file=None
+    settings = Settings.without_env_file(
+        data_dir=tmp_path / "data", workspace_root=tmp_path, provider="fake"
     )
     async with Harness(settings) as harness:
         first = await harness.run("Evidence to summarize.")
@@ -338,24 +341,43 @@ def test_connection_failures_say_what_happened():
     assert "could not connect" in refused.message and refused.details == {"transient": True}
     dropped = transport_failure(httpx.ReadError("reset"))
     assert "closed before the response was complete (ReadError)" in dropped.message
-    request = httpx.Request("POST", "https://api.example/v1/chat/completions")
+    # The SDK is built on httpx2; its errors carry httpx2 requests and responses.
+    request = httpx2.Request("POST", "https://api.example/v1/chat/completions")
     wrapped = openai.APIConnectionError(request=request)
     wrapped.__cause__ = httpx.RemoteProtocolError("peer closed")
     assert "closed before" in sdk_failure(wrapped, "").message
     status = sdk_failure(
         openai.APIStatusError(
-            "bad", response=httpx.Response(400, request=request), body={"error": "x"}
+            "bad", response=httpx2.Response(400, request=request), body={"error": "x"}
         ),
         "",
     )
     assert status.details is None
 
 
+async def test_a_refused_connection_is_named_through_the_sdk_wrappers():
+    """LangChain re-raises the SDK's connection error, so the reason lies two causes down."""
+    from glassbox.infrastructure.providers.chat import model
+    from glassbox.infrastructure.providers.errors import sdk_failure
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    # Nothing listens on the port once the probe is closed, so connecting is refused.
+    config = ProviderConfig(adapter="openai", model="m", base_url=f"http://127.0.0.1:{port}/v1")
+    async with httpx.AsyncClient(timeout=5) as client:
+        with pytest.raises(openai.APIConnectionError) as caught:
+            async for _chunk in model(config, "key", client).astream([HumanMessage("Hi")]):
+                pass
+    failure = sdk_failure(caught.value, "key")
+    assert "could not connect" in failure.message and failure.details == {"transient": True}
+
+
 async def test_auto_compaction_starts_when_a_request_fills_the_context_window(
     tmp_path, monkeypatch
 ):
     """By default, automatic compaction waits until a request used 90% of the model's window."""
-    settings = Settings(data_dir=tmp_path / "data", workspace_root=tmp_path, _env_file=None)
+    settings = Settings.without_env_file(data_dir=tmp_path / "data", workspace_root=tmp_path)
     prompts = iter([1_000, 100_000, 185_000])
 
     async def model(_config, _compiled, _tools, _prepared, on_wire, _key=""):

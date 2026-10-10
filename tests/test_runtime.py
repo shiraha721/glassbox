@@ -23,6 +23,7 @@ def test_context_usage_counts_cached_prompt_tokens_per_adapter():
         },
         "default-model",
     )
+    assert anthropic is not None
     assert anthropic.prompt_tokens == 1050 and anthropic.cache_read_tokens == 900
     assert anthropic.model == "claude-x"
     # Chat Completions already counts cached tokens inside input_tokens; do not double-count.
@@ -30,10 +31,11 @@ def test_context_usage_counts_cached_prompt_tokens_per_adapter():
         {"adapter": "openai", "input_tokens": 1000, "output_tokens": 20, "cache_read": 900},
         "gpt-x",
     )
-    assert openai.prompt_tokens == 1000 and openai.model == "gpt-x"
+    assert openai is not None and openai.prompt_tokens == 1000 and openai.model == "gpt-x"
     # No call, or a provider that omits usage: null prompt rather than a misleading zero.
     assert context_usage(None, "m") is None
-    assert context_usage({"adapter": "fake", "input_tokens": None}, "sim").prompt_tokens is None
+    simulated = context_usage({"adapter": "fake", "input_tokens": None}, "sim")
+    assert simulated is not None and simulated.prompt_tokens is None
 
 
 async def test_context_reports_the_latest_request_usage(glassbox_client, monkeypatch):

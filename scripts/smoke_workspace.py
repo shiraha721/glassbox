@@ -9,6 +9,7 @@ import asyncio
 import base64
 import json
 import os
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -29,6 +30,8 @@ def command(windows: str, linux: str) -> str:
 
 def assert_windows_process_stopped(pid: int) -> None:
     """Check the real child handle; output alone cannot prove process-tree cleanup."""
+    if sys.platform != "win32":
+        raise RuntimeError("The process handle check runs only on Windows.")
     import ctypes as C
 
     kernel = C.WinDLL("kernel32", use_last_error=True)
@@ -251,11 +254,8 @@ async def main() -> None:
         (workspace / ".env").write_text("CANARY=not-for-the-agent\n", encoding="utf-8")
         (root / "host-only.txt").write_text("outside-canary", encoding="utf-8")
         (workspace / "AGENTS.md").write_text("Report evidence accurately.\n", encoding="utf-8")
-        settings = Settings(
-            data_dir=root / "data",
-            workspace_root=workspace,
-            provider="fake",
-            _env_file=None,
+        settings = Settings.without_env_file(
+            data_dir=root / "data", workspace_root=workspace, provider="fake"
         )
         server = uvicorn.Server(
             uvicorn.Config(create_app(settings), host="127.0.0.1", port=8766, log_level="warning")

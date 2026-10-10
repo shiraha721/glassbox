@@ -13,6 +13,7 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -32,6 +33,9 @@ from glassbox.infrastructure.sandbox.command_io import (
 from glassbox.infrastructure.sandbox.files import SandboxFiles
 from glassbox.infrastructure.workspace.files import Workspace
 from glassbox.infrastructure.workspace.toolchains import copy_toolchains
+
+if sys.platform != "win32":
+    raise ImportError("The AppContainer sandbox exists only on Windows.")
 
 VOID = C.c_void_p
 SIZE = C.c_size_t
@@ -382,6 +386,7 @@ class WindowsSandbox:
                 if _resume(process.thread) == 0xFFFFFFFF:
                     raise C.WinError(C.get_last_error())
                 if control:
+                    assert input_writer is not None  # Created above whenever there is control.
                     input_writer.start()
                     control.started(process.pid)
                     null.close()
@@ -458,18 +463,20 @@ class WindowsSandbox:
         root = None
         try:
             _check(_sid_string(sid, C.byref(sid_text)))
+            sid_value = sid_text.value
+            assert sid_value  # The conversion succeeded, so the string is set.
             root = Path(tempfile.mkdtemp(prefix="glassbox-sandbox-"))
             copied = SandboxFiles(self.workspace, root / "workspace")
             copied.open()
             (root / "scratch").mkdir()
-            _grant(root, sid_text.value, "RX")
-            _grant(root / "workspace", sid_text.value, "RX" if mode == "read-only" else "M")
-            _grant(root / "scratch", sid_text.value, "M")
+            _grant(root, sid_value, "RX")
+            _grant(root / "workspace", sid_value, "RX" if mode == "read-only" else "M")
+            _grant(root / "scratch", sid_value, "M")
             toolchains = copy_toolchains(
                 toolchain_roots or [], root / "toolchains", self.workspace.root, stop, deadline
             )
             if toolchains:
-                _grant(root / "toolchains", sid_text.value, "RX")
+                _grant(root / "toolchains", sid_value, "RX")
             if stop.is_set() or time.monotonic() >= deadline:
                 result = {"exit_code": None, "timed_out": not stop.is_set()}
             else:

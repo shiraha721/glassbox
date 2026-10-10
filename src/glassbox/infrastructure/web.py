@@ -61,7 +61,7 @@ class _TextExtractor(HTMLParser):
         self.skipping = 0
         self.in_title = False
 
-    def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "title":
             self.in_title = True
         elif tag in self.SKIP:
@@ -115,6 +115,7 @@ async def web_search(
         raise AppError(
             "search_key", f"The search key {settings.credential_ref} is not set in Settings."
         )
+    request: tuple[str, str, dict[str, Any]]
     if settings.provider == "brave":
         request = (
             "GET",

@@ -636,6 +636,9 @@ async def run_events(
         while not await request.is_disconnected():
             # Browser disconnects cancel this generator. Finish short DB reads before
             # yielding so cancellation cannot return a half-closed SQLite connection.
+            # Bound before the scope, which pyright assumes may swallow exceptions.
+            page: list[dict[str, Any]] = []
+            current = run
             with CancelScope(shield=True):
                 page = await glassbox.repository.read_events(run_id, cursor)
                 current = await glassbox.repository.run_progress(run_id)

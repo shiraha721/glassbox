@@ -2,7 +2,7 @@
 
 import httpx
 
-from glassbox.domain import CHATGPT_API, AppError, ProviderProfile
+from glassbox.domain import CHATGPT_API, AppError, ProviderProfile, RequestFormat
 from glassbox.infrastructure.providers import USER_AGENT
 from glassbox.infrastructure.providers.errors import error_message, plan_failure, provider_failure
 
@@ -21,7 +21,9 @@ async def list_models(profile: ProviderProfile, key: str) -> list[str]:
     if profile.auth == "chatgpt":
         return await plan_models(key)
     offered = {profile.adapter, *profile.endpoints}
-    listed = next((value for value in ("openai", "responses") if value in offered), "anthropic")
+    listed: RequestFormat = (
+        "openai" if "openai" in offered else "responses" if "responses" in offered else "anthropic"
+    )
     anthropic = listed == "anthropic"
     headers = {"User-Agent": USER_AGENT}
     if anthropic:

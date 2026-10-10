@@ -53,7 +53,7 @@ def test_project_commands_replace_global_ones_and_report_bad_files(tmp_path):
     assert found[1]["description"] == "Review a file" and found[1]["argument_hint"] == "<path>"
     assert set(errors) == {"Bad Name.md", "empty"}
     text, use = workspace.expand_command("/review a.py")
-    assert text == "Project review of a.py" and use["scope"] == "project"
+    assert text == "Project review of a.py" and use is not None and use["scope"] == "project"
     # Input naming no command is left alone, so a literal leading slash still works.
     assert workspace.expand_command("/missing thing") == ("/missing thing", None)
 

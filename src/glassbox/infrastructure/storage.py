@@ -585,7 +585,7 @@ class Repository:
                 .values(status=status, data=data)
             )
             if status != "running" and session["compacting_id"] == identifier:
-                changes = {"compacting_id": None}
+                changes: dict[str, Any] = {"compacting_id": None}
                 if status == "succeeded":
                     changes.update(compaction_id=identifier, revision=session["revision"] + 1)
                 await connection.execute(

@@ -264,7 +264,7 @@ class ChatGPTSignIn:
                     "another ChatGPT plan provider, or remove this one and add it again.",
                     400,
                 )
-            identity = {
+            identity: dict[str, Any] = {
                 "client_id": client_id,
                 "subject": claims["sub"],
                 "email": claims.get("email") if isinstance(claims.get("email"), str) else None,
@@ -272,7 +272,7 @@ class ChatGPTSignIn:
             }
             plan = PLAN_SCOPE in str(tokens.get("scope") or "").split()
             # Without plan usage the sign-in is of no use here; keep only who signed in.
-            account = identity | (
+            account: dict[str, Any] = identity | (
                 self._credentials(tokens, []) if plan else {"plan_declined": True}
             )
             data["accounts"][attempt.provider_id] = account

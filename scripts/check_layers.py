@@ -22,10 +22,12 @@ def check_python() -> list[str]:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
             names = (
                 [node.module or ""]
                 if isinstance(node, ast.ImportFrom)
-                else [alias.name for alias in node.names] if isinstance(node, ast.Import) else []
+                else [alias.name for alias in node.names]
             )
             if isinstance(node, ast.ImportFrom) and node.level:
                 # Resolve relative imports as well; package aliases must not bypass the rule.

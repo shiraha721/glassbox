@@ -20,7 +20,7 @@ REDIRECTS = {301, 302, 303, 307, 308}
 async def public_address(host: str) -> str:
     """Resolve once and reject every non-public answer before pinning the actual connection."""
     answers = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-    addresses = list(dict.fromkeys(item[4][0] for item in answers))
+    addresses = list(dict.fromkeys(str(item[4][0]) for item in answers))
     if not addresses or any(not ipaddress.ip_address(item).is_global for item in addresses):
         raise AppError("network_denied", "Only public Internet addresses are allowed.", 403)
     return addresses[0]
@@ -139,6 +139,10 @@ async def fetch_url(
                         raise AppError("download_limit", "Download exceeds 16 MiB.")
                     body.extend(chunk)
                 break
+        else:  # Not reached: the last hop downloads or raises on another redirect.
+            raise AppError(
+                "download_failed", f"Download stopped: more than {MAX_REDIRECTS} redirects."
+            )
     actual = hashlib.sha256(body).hexdigest()
     if sha256 is not None and actual != sha256.lower():
         raise AppError("download_hash", "Downloaded content does not match the expected SHA-256.")

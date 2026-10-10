@@ -9,7 +9,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from glassbox.domain import AppError, FolderSelection
 
@@ -64,6 +64,10 @@ class FolderPicker:
                         status="unavailable",
                         detail="No desktop folder dialog is available. Enter an absolute folder path.",
                     )
+                # Without this, Windows opens a console window for the dialog helper.
+                hidden: dict[str, Any] = (
+                    {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+                )
                 # Spawn is shielded so cancellation during process creation cannot lose its handle.
                 spawning = asyncio.create_task(
                     asyncio.create_subprocess_exec(
@@ -72,11 +76,7 @@ class FolderPicker:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.DEVNULL,
                         env=command.env,
-                        **(
-                            {"creationflags": subprocess.CREATE_NO_WINDOW}
-                            if os.name == "nt"
-                            else {}
-                        ),
+                        **hidden,
                     )
                 )
                 try:

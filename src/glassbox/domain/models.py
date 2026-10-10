@@ -5,7 +5,7 @@ import json
 import os
 import re
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -618,7 +618,8 @@ class ToolCall(Contract):
     args: dict[str, Any]
 
 
-IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+ImageType = Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+IMAGE_TYPES = get_args(ImageType)
 
 
 class Attachment(Contract):
@@ -628,7 +629,7 @@ class Attachment(Contract):
     as it is sent, so histories, snapshots and receipts stay small."""
 
     hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    media_type: Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+    media_type: ImageType
     size: int = Field(ge=1)
 
 

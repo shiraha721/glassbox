@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import io
 import json
 import sys
 from pathlib import Path
@@ -167,7 +168,7 @@ def main() -> None:
     """Run the service by default or an explicit client command with concise stderr failures."""
     # Machine JSON and pipe input use UTF-8 even when Windows' redirected console uses ANSI.
     for stream in (sys.stdin, sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
+        if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(encoding="utf-8", errors="replace")
     args = parser().parse_args()
     if args.command in {None, "serve"}:

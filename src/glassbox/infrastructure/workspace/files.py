@@ -572,7 +572,8 @@ class Workspace:
         except yaml.YAMLError as exc:
             raise AppError("invalid_skill", f"Invalid YAML in skill {name}.") from exc
         if (
-            not isinstance(metadata, dict)
+            frontmatter is None
+            or not isinstance(metadata, dict)
             or metadata.get("name") != name
             or not isinstance(metadata.get("description"), str)
             or not metadata["description"].strip()

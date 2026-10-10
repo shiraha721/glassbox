@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from glassbox.domain import AppError, CompiledPrompt, Message, ProviderConfig, ToolCall, uid
 from glassbox.infrastructure.providers import USER_AGENT, portable_id
@@ -88,10 +89,10 @@ def model(config: ProviderConfig, key: str, client: httpx.AsyncClient | None = N
     return ChatOpenAI(
         model=config.model,
         base_url=config.base_url,
-        api_key=key or "local-no-key",
+        api_key=SecretStr(key or "local-no-key"),
         temperature=config.temperature,
         reasoning_effort=config.reasoning_effort,
-        max_tokens=config.max_output_tokens,
+        max_completion_tokens=config.max_output_tokens,
         max_retries=0,
         timeout=90,
         use_responses_api=False,
@@ -332,14 +333,17 @@ async def generate(
             role="assistant",
             content=total.content if isinstance(total.content, str) else total.text,
             tool_calls=[
-                ToolCall(id=call["id"], name=call["name"], args=call["args"])
+                # A missing ID becomes "" and is rejected just below with a clear error.
+                ToolCall(id=call["id"] or "", name=call["name"], args=call["args"])
                 for call in total.tool_calls
             ],
         )
         ids = [call.id for call in message.tool_calls]
         if len(set(ids)) != len(ids) or any(not identifier for identifier in ids):
             raise AppError("provider_protocol", "Tool call IDs must be present and unique.", 502)
-        usage = dict(total.usage_metadata or {"input_tokens": None, "output_tokens": None})
+        usage: dict[str, Any] = dict(
+            total.usage_metadata or {"input_tokens": None, "output_tokens": None}
+        )
         # Surface cached-prompt tokens at the top level so context accounting does not have to
         # know each provider's nesting. Chat Completions reports them under input_token_details,
         # where input_tokens already includes the cached part (unlike the Messages API).

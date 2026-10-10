@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import os
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -18,6 +19,8 @@ from glassbox.interfaces.http.app import create_app
 
 def dialog_window(pid: int) -> int | None:
     """Locate this helper's native window by PID and title, never a window from another application."""
+    if sys.platform != "win32":
+        raise RuntimeError("The native dialog check runs only on Windows.")
     import ctypes
     from ctypes import wintypes
 
@@ -45,6 +48,8 @@ def dialog_window(pid: int) -> int | None:
 
 def answer_dialog(window: int, cancel: bool) -> None:
     """Activate Select/Cancel through the known dialog's own command, without keyboard injection."""
+    if sys.platform != "win32":
+        raise RuntimeError("The native dialog check runs only on Windows.")
     import ctypes
     from ctypes import wintypes
 
@@ -156,8 +161,8 @@ async def main(native: bool) -> None:
         workspace = root / "Workspace with spaces and Unicode λ"
         workspace.mkdir()
         app = create_app(
-            Settings(
-                data_dir=root / "data", workspace_root=workspace, provider="fake", _env_file=None
+            Settings.without_env_file(
+                data_dir=root / "data", workspace_root=workspace, provider="fake"
             )
         )
 

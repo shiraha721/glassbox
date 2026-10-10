@@ -49,14 +49,25 @@ def transport_failure(exc: BaseException | None) -> AppError:
     return provider_failure(f"{detail} ({name}).", details={"transient": True})
 
 
+def transport_cause(exc: BaseException) -> BaseException | None:
+    """The transport's exception beneath an SDK connection error.
+
+    LangChain re-raises the SDK's error as its own subclass, so the immediate cause can be
+    the SDK's error rather than the transport's."""
+    cause = exc.__cause__
+    while isinstance(cause, openai.APIConnectionError):
+        cause = cause.__cause__
+    return cause
+
+
 def sdk_failure(exc: Exception, secret: str) -> AppError:
     """Describe an OpenAI-compatible SDK exception without its URL, headers or request body."""
     if isinstance(exc, openai.APIStatusError):
         return provider_failure(error_message(exc.body) or exc.message, secret, exc.status_code)
     if isinstance(exc, openai.APITimeoutError):
-        return transport_failure(exc.__cause__ or httpx.ReadTimeout("timed out"))
+        return transport_failure(transport_cause(exc) or httpx.ReadTimeout("timed out"))
     if isinstance(exc, openai.APIConnectionError):
-        return transport_failure(exc.__cause__)
+        return transport_failure(transport_cause(exc))
     return provider_failure(f"{type(exc).__name__}; check endpoint, model and credentials.")
 
 

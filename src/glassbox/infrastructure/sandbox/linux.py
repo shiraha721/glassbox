@@ -7,6 +7,7 @@ import os
 import queue
 import shutil
 import signal
+import sys
 from pathlib import Path
 
 from glassbox.domain import AppError
@@ -169,10 +170,11 @@ class BashSandbox:
 
     async def _stop(self, process: asyncio.subprocess.Process, group: int | None) -> None:
         """Kill the complete Linux process group on completion, cancellation, or timeout."""
-        try:
-            os.killpg(group or process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        if sys.platform != "win32":  # Process groups are POSIX; this sandbox runs on Linux.
+            try:
+                os.killpg(group or process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         if process.returncode is None:
             process.kill()
         await process.wait()
@@ -246,6 +248,8 @@ class BashSandbox:
                     ],
                     pipe_input=control is not None,
                 )
+                # _spawn always pipes stdout and stderr, and stdin when there is input.
+                assert process.stdout is not None and process.stderr is not None
                 group = process_group(await process.stdout.readline())
                 if group is None:
                     raise AppError(
@@ -253,6 +257,7 @@ class BashSandbox:
                         "Bash requires bubblewrap and util-linux on Linux.",
                     )
                 if control:
+                    assert process.stdin is not None
                     control.started(group)
                     writer = asyncio.create_task(self._feed_input(process.stdin, control))
                 readers = [
@@ -280,7 +285,7 @@ class BashSandbox:
                 control.input_stop.set()
             # Cancellation must finish cleanup before the runtime records the cancelled call.
             if process is not None:
-                if group is None and process.returncode is None:
+                if group is None and process.returncode is None and process.stdout:
                     try:
                         async with asyncio.timeout(3):
                             group = process_group(await process.stdout.readline())

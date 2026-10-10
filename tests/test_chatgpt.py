@@ -6,12 +6,14 @@ import json
 import os
 import stat
 import time
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from jwt.algorithms import RSAAlgorithm
 from test_api import start, wait_state
 from test_providers import mock_client
 from test_responses import completed, events
@@ -36,7 +38,7 @@ from glassbox.infrastructure.providers.chatgpt import (
 )
 
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-JWK = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(KEY.public_key())) | {"kid": "k1"}
+JWK = json.loads(RSAAlgorithm.to_jwk(KEY.public_key())) | {"kid": "k1"}
 CALLBACK = "http://127.0.0.1:8001/auth/callback"
 PLAN = ProviderConfig(
     profile_id="plan",
@@ -58,7 +60,7 @@ class OpenAI:
         self.refresh_error: str | None = None
         self.subject = "user-1"
         self.scopes = SCOPES
-        self.reply = lambda _request: httpx.Response(404)
+        self.reply: Callable[[httpx.Request], httpx.Response] = lambda _request: httpx.Response(404)
 
     def id_token(self, nonce: str | None) -> str:
         now = int(time.time())

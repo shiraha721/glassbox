@@ -71,6 +71,7 @@ uv run pytest                                       # backend tests (offline)
 uv run ruff check src tests scripts migrations
 uv run black --check src tests scripts migrations
 uv run isort --check-only src tests scripts migrations
+uv run pyright                                      # types, as Pylance reports them in VS Code
 uv run python scripts/check_layers.py               # dependency direction, Python and TS
 uv run python scripts/check_docs.py                 # Markdown links, images and anchors
 npm --prefix web run lint
@@ -120,7 +121,7 @@ Live acceptance (`acceptance_local_agent.py`, `acceptance_agent_tools.py` on por
 
 ## Documentation
 
-Keep `docs/` accurate when behavior changes: the [project guide](README.md) for users, [architecture](architecture.md) for design, this guide for conventions, [harness](harness.md) for programmatic interfaces. Dated records go in [history](history/README.md) and are not rewritten. `scripts/check_docs.py` validates every relative link and heading anchor. Source code carries the function-level detail in docstrings.
+Keep `docs/` accurate when behavior changes: the [project guide](README.md) for users, [architecture](architecture.md) for design, this guide for conventions, [harness](harness.md) for programmatic interfaces. Dated records of reviews and changes go in the [review](review.md); earlier records, removed from `docs/` on 2026-10-10, remain in the Git history. `scripts/check_docs.py` validates every relative link and heading anchor. Source code carries the function-level detail in docstrings.
 
 For documentation-only changes, check content, links and examples; application builds and test suites are unnecessary.
 

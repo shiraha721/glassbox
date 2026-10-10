@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import httpx
 import uvicorn
+from fastapi import FastAPI
 
 from glassbox.domain import GlassboxConfig, ProviderConfig
 from glassbox.infrastructure.config import Settings
@@ -194,7 +195,9 @@ async def run_task(
 
 async def verify_invoice(server: uvicorn.Server, project_id: str) -> None:
     """Independently verify behavior in AppContainer instead of trusting the model's claims."""
-    glassbox = server.config.app.state.glassbox
+    app = server.config.app
+    assert isinstance(app, FastAPI)
+    glassbox = app.state.glassbox
     config = await glassbox.repository.config()
     registry = await glassbox.workspace_registry(project_id)
     result = json.loads(
@@ -318,10 +321,9 @@ async def main() -> None:
         target.write_text(content, encoding="utf-8", newline="\n")
     default_workspace = root / "default-workspace"
     default_workspace.mkdir()
-    settings = Settings(
+    settings = Settings.without_env_file(
         data_dir=(root / "data").resolve(),
         workspace_root=default_workspace.resolve(),
-        _env_file=None,
         provider="openai",
         openai_model=provider.model,
         openai_base_url=provider.base_url,
